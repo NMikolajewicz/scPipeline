@@ -16,285 +16,12 @@ rm(list = ls())
 # initiate timer
 start.time <- proc.time()
 
+# list of packages to load
+packages2load <- c('viridis', 'scMiko', 'ggpubr', 'dplyr', 'WGCNA', 'cowplot', 'schex', 'Seurat', 'sctransform', 'plyr', 'tidyr', 'reshape2', 'Matrix', 'RColorBrewer', 'ggplot2', 'gridExtra', 'DT', 'flexdashboard', 'future', 'gplots')
+
 # load packages
-# scMiko::scMikoReload()
+invisible(lapply(packages2load, library, character.only = TRUE))
 
-library(viridis)        # version 0.5.1
-library(scMiko)         # version 0.1.0
-library(ggpubr)         # version 0.3.0
-library(dplyr)          # version 0.8.5
-library(WGCNA)          # version 1.69
-library(cowplot)        # version 1.0.0
-library(schex)          # version 1.2.0
-library(Seurat)         # version 3.1.5
-library(sctransform)    # version 0.2.1
-library(plyr)           # version 1.8.6
-library(tidyr)          # version 1.0.3
-library(reshape2)       # version 1.4.4
-library(Matrix)         # version 1.2-18
-library(RColorBrewer)   # version 1.1-2
-library(ggplot2)        # version 3.3.0
-library(gridExtra)      # version 2.3
-library(DT)             # version 0.13
-library(flexdashboard)  # version 0.5.1.1
-library(future)         # version 1.17.0
-library(gplots)
-
-# install.packages(c('viridis', 'ggpubr', 'dplyr', 'WGCNA', 'ggVennDiagram', 'cowplot', 'Seurat', 'sctransform', 
-#                    'tidyr', 'plyr', 'reshape2', 'Matrix', 'ggplot2', 'gridExtra', 'DT', 'flexdashboard', 'future'))
-
-# BiocManager::install(c("impute", "AnnotationDbi", "GO.db", "schex"))
-
-#devtools::install_github(
-#    repo = "NMikolajewicz/scMiko",
-#ref = "master",
-#    auth_token = "a3c1c9b15c496991c952d1fe3ccc52db770f22fa")
-```
-
-
-
-
-```{r c1 - input datasets, message=FALSE, warning=FALSE}
-
-input.data <- NULL
-
-# -----------------------------------------------------
-# Pilot 1
-input.data <- bind_rows(input.data, data.frame(names = "pilot1", species = "Mm, Hs", multiple.species = T, pilot.n = 1, 
-                                               files = "scRNAseq_pilot1.RData", pcr.barcodes = "pilot1_pcr_barcodes.txt", 
-                                               rt.barcodes = "pilot1_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-# Pilot 2
-input.data <- bind_rows(input.data, data.frame(names = "pilot2", species = "Mm, Hs", multiple.species = T, pilot.n = 2, 
-                                               files = "scRNAseq_pilot2.RData", pcr.barcodes = "pilot2_pcr_barcodes.txt", 
-                                               rt.barcodes = "pilot2_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-# Pilot 3
-input.data <- bind_rows(input.data, data.frame(names = "pilot3", species = "Mm", multiple.species = F, pilot.n = 3, 
-                                               files = "scRNAseq_pilot3.RData", pcr.barcodes = "pilot3_pcr_barcodes.txt", 
-                                               rt.barcodes = "pilot3_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-# Pilot 4 (5% downsampled)
-input.data <- bind_rows(input.data, data.frame(names = "pilot4_5pctDS", species = "Mm", multiple.species = F, pilot.n = 4, 
-                                               files = "scRNAseq_pilot4_DS5pct.RData", pcr.barcodes = "pilot4_pcr_barcodes.txt", 
-                                               rt.barcodes = "pilot4_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-# Pilot 4 (12.5% downsampled)
-input.data <- bind_rows(input.data, data.frame(names = "pilot4_12.5pctDS", species = "Mm", multiple.species = F, pilot.n = 4, 
-                                               files = "scRNAseq_pilot4_DS12_5pct.RData", pcr.barcodes = "pilot4_pcr_barcodes.txt", 
-                                               rt.barcodes = "pilot4_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-# Pilot 4 (25% downsampled)
-input.data <- bind_rows(input.data, data.frame(names = "pilot4_25pctDS", species = "Mm", multiple.species = F, pilot.n = 4, 
-                                               files = "scRNAseq_pilot4_DS25pct.RData", pcr.barcodes = "pilot4_pcr_barcodes.txt", 
-                                               rt.barcodes = "pilot4_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-# Pilot 4 (50% downsampled)
-input.data <- bind_rows(input.data, data.frame(names = "pilot4_50pctDS", species = "Mm", multiple.species = F, pilot.n = 4, 
-                                               files = "scRNAseq_pilot4_DS50pct.RData", pcr.barcodes = "pilot4_pcr_barcodes.txt", 
-                                               rt.barcodes = "pilot4_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-# Pilot 4 
-input.data <- bind_rows(input.data, data.frame(names = "pilot4", species = "Mm", multiple.species = F, pilot.n = 4, 
-                                               files = "scRNAseq_pilot4.RData", pcr.barcodes = "pilot4_pcr_barcodes.txt", 
-                                               rt.barcodes = "pilot4_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-# Pilot 5
-input.data <- bind_rows(input.data, data.frame(names = "pilot5", species = "Mm", multiple.species = F, pilot.n = 5, 
-                                               files = "scRNAseq_pilot5.RData", pcr.barcodes = "pilot5_pcr_barcodes.txt", 
-                                               rt.barcodes = "pilot5_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-# CIT.Lung
-input.data <- bind_rows(input.data, data.frame(names = "CIT.Lung", species = "Hs", multiple.species = F, pilot.n = NA, 
-                                               files = "5_EVLP_599_CIT_10x_filtered", pcr.barcodes = "", 
-                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
-# End.EVLP.Lung
-input.data <- bind_rows(input.data, data.frame(names = "End.EVLP.Lung", species = "Hs", multiple.species = F, pilot.n = NA, 
-                                               files = "6_EVLP_599_End_EVLP_10x_filtered", pcr.barcodes = "", 
-                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
-# Neftel.10x.GBM
-input.data <- bind_rows(input.data, data.frame(names = "Neftel.10x.GBM", species = "Hs", multiple.species = F, pilot.n = NA, 
-                                               files = "GSM3828673_10X_GBM_IDHwt_processed_TPM.tsv", pcr.barcodes = "", 
-                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Neftel_2019_GBM/", input.type = 3))
-# Neftel.ss2.GBM
-input.data <- bind_rows(input.data, data.frame(names = "Neftel.ss2.GBM", species = "Hs", multiple.species = F, pilot.n = NA, 
-                                               files = "GSM3828672_Smartseq2_GBM_IDHwt_processed_TPM.tsv", pcr.barcodes = "", 
-                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Neftel_2019_GBM/", input.type = 3))
-# UHN.GBM.0231_ACCVR9ANXX.10x.filtered.aggregate
-input.data <- bind_rows(input.data, data.frame(names = "UHN.GBM.0231_ACCVR9ANXX.filtered.agg", species = "Hs", multiple.species = F, pilot.n = NA, 
-                                               files = "7_UHN_GBM_0231_ACCVR9ANXX_10x_filtered_aggregate", pcr.barcodes = "", 
-                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
-# UHN.GBM.0238_ACD0E5ANXX.filtered.agg
-input.data <- bind_rows(input.data, data.frame(names = "UHN.GBM.0238_ACD0E5ANXX.filtered.agg", species = "Hs", multiple.species = F, pilot.n = NA, 
-                                               files = "8_UHN_GBM_0238_ACD0E5ANXX_10x_filtered_aggregate", pcr.barcodes = "", 
-                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
-
-# "09-CID003556-filtered"
-input.data <- bind_rows(input.data, data.frame(names = "09-CID003556-filtered", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "09-CID003556-filtered", pcr.barcodes = "", 
-                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
-
-# "10-CID003557-filtered"  
-input.data <- bind_rows(input.data, data.frame(names = "10-CID003557-filtered", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "10-CID003557-filtered", pcr.barcodes = "", 
-                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
-
-# "11-CID003558-filtered" 
-input.data <- bind_rows(input.data, data.frame(names = "11-CID003558-filtered", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "11-CID003558-filtered", pcr.barcodes = "", 
-                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
-
-# "12-CID003559-filtered"
-input.data <- bind_rows(input.data, data.frame(names = "12-CID003559-filtered", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "12-CID003559-filtered", pcr.barcodes = "", 
-                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
-
-# "13-CID003560-filtered"
-input.data <- bind_rows(input.data, data.frame(names = "13-CID003560-filtered", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "13-CID003560-filtered", pcr.barcodes = "", 
-                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
-
-# "14-CID003561-raw" 
-input.data <- bind_rows(input.data, data.frame(names = "14-CID003561-raw", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "14-CID003561-raw", pcr.barcodes = "", 
-                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
-
-# Celsius Renca sciRNAseq3
-input.data <- bind_rows(input.data, data.frame(names = "Celsuis_sci_Renca", species = "Mm, Hs", multiple.species = T, pilot.n = NA, 
-                                               files = "sci_summary_Celsius.RData", pcr.barcodes = "", 
-                                               rt.barcodes = "RencaTumor_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-
-# Pilot 6 (in vitro GL261/Ct2A + brain organoids)
-input.data <- bind_rows(input.data, data.frame(names = "pilot6", species = "Mm, Hs", multiple.species = T, pilot.n = 6, 
-                                               files = "sci_summary_Pilot6.RData", pcr.barcodes = "",
-                                               rt.barcodes = "Pilot6_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-
-
-# Hu 2018 mammalian heart: P6, sample1
-input.data <- bind_rows(input.data, data.frame(names = "hu.p6.s1", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "GSM3332251_Ctrl-P6-1_gene_exonic.intronic_tagged.dge.txt", pcr.barcodes = "",
-                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/", input.type = 3))
-
-# Hu 2018 mammalian heart: P6, sample2
-input.data <- bind_rows(input.data, data.frame(names = "hu.p6.s2", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "GSM3332252_Ctrl-P6-2_gene_exonic.intronic_tagged.dge.txt", pcr.barcodes = "",
-                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/", input.type = 3))
-
-# Hu 2018 mammalian heart: P6, sample3
-input.data <- bind_rows(input.data, data.frame(names = "hu.p6.s3", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "GSM3332253_Ctrl-P6-3_gene_exonic.intronic_tagged.dge.txt", pcr.barcodes = "",
-                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/", input.type = 3))
-
-# Hu 2018 mammalian heart: P10, sample1
-input.data <- bind_rows(input.data, data.frame(names = "hu.p10.s1", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "GSM3332254_Ctrl-P10-1_gene_exonic.intronic_tagged.dge.txt", pcr.barcodes = "",
-                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/", input.type = 3))
-
-# Hu 2018 mammalian heart: P10, sample2
-input.data <- bind_rows(input.data, data.frame(names = "hu.p10.s2", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "GSM3332255_Ctrl-P10-2_gene_exonic.intronic_tagged.dge.txt", pcr.barcodes = "",
-                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/", input.type = 3))
-
-# Hu 2018 mammalian heart: P10, sample3
-input.data <- bind_rows(input.data, data.frame(names = "hu.p10.s3", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "GSM3332256_Ctrl-P10-3_gene_exonic.intronic_tagged.dge.txt", pcr.barcodes = "",
-                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/", input.type = 3))
-
-# EMT6 in vivo screen
-input.data <- bind_rows(input.data, data.frame(names = "invivo.EMT6.screen", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "totalReads_v2_020420.txt", pcr.barcodes = "",
-                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/EMT6_invivo_CTLscreen_240320/", input.type = 3))
-
-# Kumar 2019 - in vivo syngeneic scRNAseq
-input.data <- bind_rows(input.data, data.frame(names = "kumar.invivo", species = "Mm", multiple.species = F, pilot.n = NA, 
-                                               files = "GSE121861_syngeneic_expression.csv", pcr.barcodes = "GSE121861_syngeneic_column_data_NM_080420.csv",
-                                               rt.barcodes = "GSE121861_syngeneic_row_data.csv", directory = "Raw_Datasets/Expression_matrix/Kumar_2018_invivoEMT6/", input.type = 3))
-
-# Pilot 7 - human mapping
-input.data <- bind_rows(input.data, data.frame(names = "pilot7.Hs", species = "Hs", multiple.species = F, pilot.n = 7, 
-                                               files = "pilot7_humanMapped_sci_summary.RData", pcr.barcodes = "HH7_pcr_barcodes_20200609.txt", 
-                                               rt.barcodes = "HH7_rt_barcodes_20200609NewFormat.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-
-# Pilot 7 - mouse mapping
-input.data <- bind_rows(input.data, data.frame(names = "pilot7.Mm", species = "Mm", multiple.species = F, pilot.n = 7, 
-                                               files = "pilot7_mouseParallelMapped_sci_summary.RData", pcr.barcodes = "HH7_pcr_barcodes_20200609.txt", 
-                                               rt.barcodes = "HH7_rt_barcodes_20200609NewFormat.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-
-# Pilot 8 - mouse mapping
-input.data <- bind_rows(input.data, data.frame(names = "pilot8.Mm", species = "Mm", multiple.species = F, pilot.n = 8, 
-                                               files = "pilot8_mouseParallelMapped_sci_summary.RData", pcr.barcodes = "HH8_pcr_barcodes_20200616_94used.txt", 
-                                               rt.barcodes = "HH8_rt_barcodes_20200616NewFormat192.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
-
-# Pilot 9 - human mapping
-input.data <- bind_rows(input.data, data.frame(names = "pilot9.Hs", species = "Hs", multiple.species = F, pilot.n = 9, 
-                                               files = "pilot9_humanParallelMapped_sci_summary.RData", 
-                                               pcr.barcodes = "HH9_pcr_barcodes_20200623_96used.txt", 
-                                               rt.barcodes = "HH9_rt_barcodes_20200625NewFormat168updated.txt", 
-                                               directory = "Raw_Datasets/pilots/", input.type = 1))
-
-# Pilot 9 - murine mapping
-input.data <- bind_rows(input.data, data.frame(names = "pilot9.Mm", species = "Mm", multiple.species = F, pilot.n = 9, 
-                                               files = "pilot9_mouseParallelMapped_sci_summary.RData", 
-                                               pcr.barcodes = "HH9_pcr_barcodes_20200623_96used.txt", 
-                                               rt.barcodes = "HH9_rt_barcodes_20200625NewFormat168updated.txt", 
-                                               directory = "Raw_Datasets/pilots/", input.type = 1))
-
-# -----------------------------------------------------
-# BARCODE FILTERS
-input.barcode.strata <- list(pilot1 = list(hap1_renca = c("1-HAP1&Renca"),
-                                           cgr8_293t = c("2-CGR8(WT parental)", "4-293T&CGR8(WT with GBC*)"),
-                                           mm = c("CGR8", "Renca"),
-                                           renca = c("Renca"),
-                                           hs = c("HAP1", "293T"),
-                                           hap1 = c("HAP1"),
-                                           cgr8 = c("CGR8")), 
-                             pilot2 = list(hap1_renca = c("R4-HAP1&Renca"),
-                                           mm = c("3T3", "N2A", "Renca"),
-                                           hap1 = c("HAP1"),
-                                           renca = c("Renca")), 
-                             pilot3 = list(renca.tumor = c("01_T1_in_cd", "02_T1_out_cd", "03_T3_in_TST", 
-                                                           "04_T3_out_TST", "05_T3_in_sci", "06_T3_out_sci"),
-                                           neural.dif1 = c("C1_CST", "C3_CST", "C5_CST", "C7_CST", 
-                                                           "DIVc9_CST", "C10_TST", "C1_TST"),
-                                           neural.dif2 = c("07_C1_CST", "08_C3_CST", "09_C5_CST", "10_C7_CST", 
-                                                           "11_DIVc9_CST", "12_C10_TST", "13_C1_TST"),
-                                           neural.dif3 = c("07_C1_CST", "12_C10_TST", "13_C1_TST")), 
-                             pilot4 = list(cst = c("01_G(GL261)_FR_CST", "02_C(CT2A)_FR_CST", 
-                                                   "03_H(GL261)_FR_CSTsi", "04.2_C1_EB8_CSTsi", 
-                                                   "04_C1_EB8_CSTsi","05.2_C1_DIV1_CSTsi", "06.2_C1_DIV7_CSTsi"),
-                                           neural.dif1 = c("EB8", "DIV1", "DIV7"),
-                                           neural.dif2 = c("C1_EB8_CSTsi", "C1_DIV1_CSTsi", "C1_DIV7_CSTsi"),
-                                           gbm = c("GL261", "CT2A"),
-                                           GL261 = c("GL261"),
-                                           p4.CT2A = c("CT2A")), 
-                             pilot4_5pctDS = list(gbm = c("GL261", "CT2A"),
-                                                  neural.dif1 = c("EB8", "DIV1", "DIV7")), 
-                             pilot4_12.5pctDS = list(gbm = c("GL261", "CT2A"),
-                                                     neural.dif1 = c("EB8", "DIV1", "DIV7")), 
-                             pilot4_25pctDS = list(gbm = c("GL261", "CT2A"),
-                                                   neural.dif1 = c("EB8", "DIV1", "DIV7")), 
-                             pilot4_50pctDS = list(gbm = c("GL261", "CT2A"),
-                                                   neural.dif1 = c("EB8", "DIV1", "DIV7")), 
-                             pilot5 = list(neural.dif1 = c("C1_CST", "C3_CST", "C7_CST", 
-                                                           "DIVc9_CST", "C10_TST", "C1_TST"),
-                                           neural.dif2 = c("07_C1_CST", "08_C3_CST", "10_C7_CST", 
-                                                           "11_DIVc9_CST", "12_C10_TST", "13_C1_TST"),
-                                           renca.tumor1 = c("T1", "T3"),
-                                           renca.tumor2 = c("01_T1_in_cd", "02_T1_out_cd", "03_T3_in_TST", 
-                                                            "04_T3_out_TST", "05_T3_in_sci", "06_T3_out_sci")),
-                             Celsuis_sci_Renca = list(tumor.only = c("Tumor1", "Tumor2", "Tumor3"),
-                                                      T1 = c("Tumor1"),
-                                                      T2 = c("Tumor2"),
-                                                      T3 = c( "Tumor3"),
-                                                      renca.invitro = c("04")),
-                             pilot6 = list(GBM = c("GL261", "CT2A"),
-                                           p6.CT2A = "CT2A"),
-                             pilot7.Hs = list(meso = "Meso"),
-                             pilot7.Mm = list(GBM = c("CT2A", "GL261"),
-                                              Renca = c("01_Renca_WT", "02_Renca_Jak1")),
-                             pilot8.Mm = list(GBM.noTumor = c("06_GBM_PBSctrl"),
-                                              CT2A = c("CT2A_R2", "02_CT2A_R3"),
-                                              GL261.tumor = c("GL261_R2", "GL261_R3"),
-                                              GL261.GFP = c("GL261GFP"),
-                                              GL261 = c("06_GBM_PBSctrl", "GL261_R2", "GL261_R3", "GL261GFP"),
-                                              GBM.ctrlvstumor = c("06_GBM_PBSctrl", "GL261_R2"),
-                                              GBM = c("CT2A_R2", "02_CT2A_R3", "GL261_R2", "GL261_R3"),
-                                              GBM.R2 = c("GL261_R2"),
-                                              GBM.R3 = c("GL261_R3")),
-                             pilot9.Hs = list(GBM.PR = c("01_GBM_63P", "02_GBM_173R", "03_GBM_190P", "04_GBM_225R", "05_GBM_162P", "06_GBM_265R")),
-                             pilot9.Mm = list(CT2A = "PR_CT2A")
-                             )     
 
 ```
 
@@ -323,6 +50,49 @@ n.workers <- list(
   normScale = 2
 )
 max.memory <- 200 # numeric, in terms of Gb (set to 100 for cluster)
+
+```
+
+```{r get input data paths}
+
+# get input data files paths
+inputDataSpecification <- function(inputs = "M01_inputs.csv", subsets = "M01_subsets.csv"){
+  
+  input.data <- read.csv(inputs)
+  colnames(input.data) <- rmvCSVprefix(colnames(input.data))
+  input.data <- apply(input.data, 2, function(x) gsub("Â", "", x))
+  
+  # get subsets
+  input.subset <- read.csv(subsets)
+  
+  # wrangle into list
+  u.samples <- unique(input.subset$sample)
+  input.barcode.strata <- list()
+  for (i in 1:length(u.samples)){
+    
+    subset.strata <- input.subset[input.subset$sample %in% u.samples[i], ]
+    current.strata <- list()
+    
+    for (j in 1:nrow(subset.strata)){
+      
+      current.barcodes <- subset.strata$barcodes[j]
+      current.barcodes <- strsplit(current.barcodes, ", ")[[1]]
+      current.strata[[subset.strata$set[j]]] <- current.barcodes
+    }
+    
+    input.barcode.strata[[u.samples[i]]] <- current.strata
+    
+  }
+  
+  return(list(
+    input.data = input.data,
+    input.barcode.strata = input.barcode.strata
+  ))
+}
+
+input.list <- inputDataSpecification()
+input.data <- input.list$input.data
+input.barcode.strata <- input.list$input.barcode.strata
 
 ```
 
@@ -514,8 +284,7 @@ loadMatdev <- function(import_set, input_organisms, dir) {
   
   # create seurat object
   so = CreateSeuratObject(counts = expression_matrix2,project=import_set[1],min.cells=0,min.features=0)
-  # so = CreateSeuratObject(counts = expression_matrix2,project=import_set[1],min.cells=3,min.features=200)
-  
+
   # add gene symbols as meta data in seurat object
   mat_ens <- rownames(so@assays[["RNA"]])
   match.id <- match(mat_ens, gNames)
