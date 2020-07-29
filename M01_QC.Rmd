@@ -1372,7 +1372,10 @@ knitr::kable(df.log_Module_1)
 ```{r}
 
 # update central log
-updateCentralLog(Module = "M01", pdf.flag = save.pdf)
+try({
+  updateCentralLog(Module = "M01", pdf.flag = save.pdf)
+}, silent = T)
+
 
 ```
 
