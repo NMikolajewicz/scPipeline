@@ -35,6 +35,9 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 ```
 
 
+
+
+
 ```{r c2 - parameter_specification}
 
 # specify parameters
@@ -54,7 +57,7 @@ analysis.parameters <- analysisParameters(
   do.additional.reduction = F
 )
 
-
+save.pdf <- F
 n.workers <- list(
   normScale = 2
 )
@@ -1366,5 +1369,11 @@ knitr::kable(df.log_Module_1)
 
 ```
 
+```{r}
+
+# update central log
+updateCentralLog(Module = "M01", pdf.flag = save.pdf)
+
+```
 
 
