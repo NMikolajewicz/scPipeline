@@ -18,27 +18,17 @@ rm(list = ls())
 start.time <- proc.time()
 
 # List of packages to load
-library(scMiko)
-packages2load <- c("Seurat", "sctransform",
+packages2load <- c("scMiko", "Seurat", "sctransform",
                    "plyr", "dplyr", "tidyr", "reshape2", "RColorBrewer", "ggplot2", "gridExtra", 
                    "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", 
                    "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "readxl", "MAST", "future", "cluster", "doParallel", "parallel", "foreach")
 
 # load packages
-lapply(packages2load, library, character.only = TRUE)
+invisible(lapply(packages2load, library, character.only = TRUE))
 
 
 ```
 
-
-```{r check available input files}
-
-show.available.files <- FALSE
-if (show.available.files){
-  list.files("Preprocessed_Datasets/")
-}
-
-```
 
 ```{r parameter specification}
 
