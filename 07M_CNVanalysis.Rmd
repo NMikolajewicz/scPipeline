@@ -1,0 +1,1065 @@
+---
+title: "Module7: CNV-based Malignancy Classification"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+# load packages
+library(scMiko)
+modulePackages(module.number = 1)
+library(biomaRt)
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+library(org.Hs.eg.db)
+library(zoo)
+library(caTools)
+library(cluster)
+
+```
+
+
+
+```{r parameter specifications}
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed_Datasets/"
+
+# Query input
+input.file <- "Module1_M16_M27_UHN_070620.Rdata"
+
+# cluster resolution
+cluster.resolution <- 1
+
+# print inline
+print.inline <- F
+
+# Data subsampling
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+
+# species
+which.species <- "Hs"
+
+```
+
+
+```{r load data, message=FALSE, warning=FALSE}
+
+# load query dataset
+warning("Importing dataset...")
+load(paste(dir.preprocessed, input.file, sep = ""))
+so <- prepSeurat(so)
+so.query <- so; so.input <- so.query; rm(so)
+
+current.assay <- DefaultAssay(so.query)
+
+# subsample (for dev purposes)
+n.subset <- round(subsample_factor *ncol(so.input))
+cell.ind <- sample(x = seq(1, ncol(so.input)), size = n.subset, replace = FALSE, prob = NULL)
+so.query <- SubsetData(so.query , cells = cell.ind)
+
+rm(so.input)
+
+```
+
+
+```{r analysis log}
+
+# Module
+df.log <- initiateLog("7, CNV analysis")
+df.log <- addLogEntry("Query File (.Rdata)", (input.file), df.log, "input.file")
+df.log <- addLogEntry("Default Assay", (current.assay), df.log, "current.assay")
+df.log <- addLogEntry("Cluster Resolution", (cluster.resolution), df.log, "cluster.resolution")
+df.log <- addLogEntry("Subsample Factor", (subsample_factor), df.log, "subsample_factor")
+
+```
+
+
+```{r}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+
+```{r prep gene list}
+
+# prep gene list
+gNames.list <- prepGeneList( so.query, objects())
+
+# ensure gene list is available
+stopifnot(exists("gNames.list"))
+```
+
+
+```{r convert to symbol}
+
+gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+
+if (gene.rep == "ensembl"){
+  warning("converting ENSEMBL to SYMBOL...")
+  so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list, convert.RNA = TRUE)
+  gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+}
+
+
+```
+
+
+
+```{r get clusters, fig.width=10, fig.height=4}
+
+# compute clusters
+warning("Computing clusters...")
+so.query <- FindClusters(object = so.query, 
+                         resolution = cluster.resolution, 
+                         verbose = 0, algorithm = 1, modularity.fxn = 1)
+
+
+# prep query parameters with assertions
+cur.cluster.field <- paste(DefaultAssay(so.query), "_snn_res.", cluster.resolution, sep = "")
+stopifnot(cur.cluster.field %in% names(so.query@meta.data))
+
+# get umap
+plt.umap_by_cluster <- cluster.UMAP(
+  so.query,
+  group.by = "seurat_clusters",
+  x.label = "UMAP 1",
+  y.label = "UMAP 2",
+  plot.name = "UMAP",
+  include.labels = T,
+  reduction = "umap"
+) + labs(subtitle = paste0("Clusters (resolution = ", cluster.resolution ,")"))
+
+
+plt.umap_by_barcode <- cluster.UMAP(
+  so.query,
+  group.by = "Barcode",
+  x.label = "UMAP 1",
+  y.label = "UMAP 2",
+  plot.name = "UMAP",
+  include.labels = F,
+  reduction = "umap"
+) + labs(subtitle = "Barcodes") + 
+  ggthemes::scale_color_tableau()
+
+plt.umap.overview <-   cowplot::plot_grid(plt.umap_by_cluster, plt.umap_by_barcode)
+
+if (print.inline){
+  # fig.width=10, fig.height=4
+  plt.umap.overview
+}
+
+```
+
+
+
+
+
+```{r}
+
+# # get symbol to entrez conversion list
+# all_enz_names <- as.list(org.Hs.egALIAS2EG)
+# 
+# # get chromsomal location for each gene
+# chromosome_locations <- org.Hs.egCHRLOC
+# 
+# # Get the entrez gene identifiers that are mapped to chromosome locations
+# mapped_genes <- mappedkeys(chromosome_locations)
+# 
+# # convert to list
+# chromosome_location_entrez.list <- as.list(chromosome_locations[mapped_genes])
+# 
+# 
+# # symbol to entrez mapping
+# 
+# # my.symbol <- as.vector(as.vector(gNames.list))
+# 
+# my.symbol <- names(all_enz_names)
+# # my.entrez <- unlist(all_enz_names)
+# my.entrez <- lapply(all_enz_names, function(x) unlist(x)[1])
+# 
+# 
+# # my.entrez <- sym2entrez(my.symbol, my.species = which.species )
+# my.entrez <- my.entrez[complete.cases(my.entrez), ]
+# 
+# e2g <- my.entrez$SYMBOL
+# names(e2g) <- my.entrez$ENTREZID
+# 
+# chromosome_location_symbols.list <- chromosome_location_entrez.list
+# names(chromosome_location_symbols.list) <- e2g[names(chromosome_location_symbols.list)]
+
+```
+
+
+```{r}
+library(infercnv)
+
+e.mat <- as.data.frame(so.query@assays[["SCT"]]@data)
+# e.mat <- e.mat[1:15]
+
+ic.data <- infercnv::data
+ic.genes <- infercnv::genes
+ic.annot <- infercnv::annots
+
+so.data <- e.mat
+so.genes <- infercnv::genes
+so.annot <- data.frame(V2 = rep("tumor", ncol(e.mat)))
+rownames(so.annot) <- colnames(e.mat)
+
+infercnv_obj <- infercnv::CreateInfercnvObject(raw_counts_matrix=so.data, 
+                                               gene_order_file=so.genes,
+                                               annotations_file=so.annot,
+                                               ref_group_names=NULL)
+
+
+# perform infercnv operations to reveal cnv signal
+infercnv_obj <- infercnv::run(infercnv_obj,
+                             cutoff=0.1,  # use 1 for smart-seq, 0.1 for 10x-genomics
+                             cluster_by_groups=T,   # cluster
+                             denoise=T,
+                             HMM=T,
+                             out_dir="output_dir_v3_SCTdata"
+                             )
+ # out_dir="output_dir",  # dir is auto-created for storing outputs
+
+```
+
+
+```{r gene symbol interconversion}
+
+# convert gene names to entrez gene identifiers
+
+# norm.expression <- so.query@assays[["SCT"]]@scale.data
+norm.expression <- so.query@assays[["SCT"]]@data
+
+
+rn <- rownames(norm.expression)
+cn <- colnames(norm.expression)
+
+ens_names <- rn
+gene_names <- gNames.list[rn]
+enz_names <- unlist(all_enz_names[gene_names], recursive = FALSE)[gene_names]
+
+
+
+```
+
+
+```{r warning=FALSE}
+
+chr_locations_detected_genes <- chromosome_location.list[enz_names]
+
+chr_names <- c()
+chr_loc <- c()
+# map genes to chromosomal location
+for (i in 1:length(chr_locations_detected_genes)){
+  
+  if (!is.null(chr_locations_detected_genes[[i]])){
+  chr_names[i] <- names(chr_locations_detected_genes[[i]])
+  chr_loc[i] <- chr_locations_detected_genes[[i]]
+  } else {
+    chr_names[i] <- NaN
+  chr_loc[i] <- NaN
+  }
+}
+
+chr_names <- as.numeric(chr_names)
+
+df.ma <- data.frame()
+df.ch <- data.frame()
+
+n_cells <- dim(norm.expression)[2]
+cell_ind <- sample(1:n_cells, n_cells, replace = FALSE)
+
+subsample_n_cells <- 1000
+
+if (subsample_n_cells > n_cells){subsample_n_cells <- n_cells}
+rolling_window <- 100
+
+norm.expression_sub <- norm.expression[,cell_ind[1:subsample_n_cells]]
+norm.expression_sub <- log(norm.expression_sub+ 1)
+
+# compute rolling mean
+start.time4 <- proc.time()
+  sc_exp <- norm.expression_sub
+  df <- data.frame(gene_names, chr_names, chr_loc, sc_exp )
+  colnames(df) <- c( "gene", "chr", "loc", paste("cell", seq(1, subsample_n_cells)))
+  df <- arrange(df, chr, loc)
+  rm <- apply(df, 2, runmean, k = rolling_window , alg = "fast")
+  df.ma <- as.data.frame(rm)
+  df.ma <- df.ma[ , 4:(subsample_n_cells+3)]
+end.time4 <- proc.time()-start.time4
+
+
+# substrate mean regional expression to get centered value
+# ASSUMPTION: normal and tumor are well mixed
+region_avg <- rowMeans(df.ma)
+region_std <- apply(df.ma, 1, sd)
+df.ma <- (df.ma - region_avg)/region_std
+
+
+
+
+
+```
+
+```{r cnv heatmap}
+
+# subsample_n <- 100
+# 
+# df.ma_sub <- df.ma[ , 1:subsample_n]
+# 
+# 
+# df.ma_long <- df.ma_sub %>%
+#   rownames_to_column() %>%
+#   gather(cellID, value, -rowname)
+
+# plt.chr_heatmap <- ggplot(df.ma_long, aes(x = rowname, y = cellID, fill = value)) +
+#   geom_tile() +   scale_colour_gradient2()
+# 
+# print(plt.chr_heatmap)
+
+# 
+# 
+# df.ma_asmat_trans <- t(as.matrix(df.ma_sub))
+# 
+# 
+# gplots::heatmap.2(df.ma_asmat_trans, trace = "none")
+
+```
+
+
+
+
+```{r correlation matrix}
+
+# compute correlation matrix
+
+cormat <- round(cor(df.ma), 2)
+
+melted_cormat <- melt(cormat)
+plt.cor_hist <- ggplot(data = melted_cormat, aes(x= value)) + geom_histogram(binwidth = 0.01)
+
+reorder_cormat <- function(cormat){
+# Use correlation between variables as distance
+dd <- as.dist((1-cormat)/2)
+hc <- hclust(dd)
+cormat <-cormat[hc$order, hc$order]
+}
+
+
+# Reorder the correlation matrix
+melted_cormat <- melt(reorder_cormat(cormat), na.rm = TRUE)
+
+
+max_val <- max(melted_cormat$value)
+min_val <- min(melted_cormat$value)
+median_val <- median(melted_cormat$value)
+
+quant <- quantile(melted_cormat$value, probs = c(0.05,0.5, 0.95))
+
+plt.cor_heatmap <- ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() + 
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+   midpoint = quant[2], limit = c(quant[1],quant[3]), space = "Lab", name="Pearson\nCorrelation") +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(), 
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) + xlab("Cell 1") + ylab("Cell 2")
+
+
+# print(plt.cor_heatmap)
+```
+
+
+```{r}
+# print(plt.cor_hist)
+```
+
+```{r cluster populations by CNV correlation}
+
+
+d <- as.dist(1-as.matrix(cormat)[1:subsample_n_cells, 1:subsample_n_cells])
+d.matrix <- as.matrix(d)[1:subsample_n_cells, 1:subsample_n_cells]
+
+
+pamy <- pam(d, 2)
+
+corr.membership <- pamy$clustering
+
+
+
+```
+
+
+
+
+```{r cluster populations by CNV variace}
+
+# calculate cell-wise CNV variance
+var_exp <- apply(df.ma, 2, var)
+mean_exp <- apply(df.ma, 2, mean)
+
+desc_stats <- as.matrix(data.frame(var_exp, mean_exp))
+
+# k-means clustering of high and low variance populations
+k_clusters <- kmeans(desc_stats, 2)
+k_centers <- k_clusters[["centers"]][ , 1]
+k_membership <- as.factor(as.vector(k_clusters[["cluster"]]))
+
+# creata data frame and store cluster info
+low_var_center <- min(k_centers)
+high_var_center <- max(k_centers)
+df.var <- data.frame(var_exp, mean_exp, k_membership)
+
+# assign non-malignant labels
+if (signif(mean(df.var$var_exp[k_membership == 1]), 3) == signif(low_var_center,3)){
+  df.var$classification[k_membership == 1] <- "lowVar"
+} else if (signif(mean(df.var$var_exp[k_membership == 2]), 3) == signif(low_var_center,3)) {
+  df.var$classification[k_membership == 2] <- "lowVar"
+} 
+
+# assign malignant labels
+if (signif(mean(df.var$var_exp[k_membership == 1]), 3) == signif(high_var_center,3)) {
+  df.var$classification[k_membership == 1] <- "highVar"
+} else if (signif(mean(df.var$var_exp[k_membership == 2]), 3) == signif(high_var_center,3)) {
+  df.var$classification[k_membership == 2] <- "highVar"
+}
+
+# create histogram to visualize distributions
+plt.var_density <- ggplot(data = df.var, aes(x=var_exp, fill = classification)) + 
+          geom_histogram() 
+plt.mean_density <- ggplot(data = df.var, aes(x=mean_exp, fill = classification)) + 
+          geom_histogram() 
+
+# scatter plot between mean and variance (CNV)
+plt.desc_stats <- ggplot(data = df.var, aes(x=mean_exp, y = var_exp, color= classification)) + 
+  geom_point() + xlab ("CNV mean") + ylab("CNV variance")
+
+
+# plt.desc_stats
+
+# print(plt.var_density)
+
+```
+
+
+```{r}
+
+
+
+region_avg <- rowMeans(df.ma)
+
+df.ma_center <- df.ma - region_avg
+
+df.ma_lowVar <- df.ma[ , df.var$classification == "lowVar"]
+df.ma_highVar <- df.ma[ , df.var$classification == "highVar"]
+
+
+df.ma_lowVar_melt <- melt(df.ma_lowVar)
+df.ma_highVar_melt <- melt(df.ma_highVar)
+
+plt.lowvar_density <- ggplot(data = df.ma_lowVar_melt, aes(x= value)) + geom_histogram()
+plt.highvar_density <- ggplot(data = df.ma_highVar_melt, aes(x= value)) + geom_histogram()
+
+low_var_avgcnv <- rowMeans(df.ma_lowVar)
+high_var_avgcnv <- rowMeans(df.ma_highVar)
+
+
+low_var_varcnv <- apply(df.ma_lowVar, 1, var)
+high_var_varcnv <- apply(df.ma_highVar, 1, var)
+df.cnv_sum <- data.frame(low_var_avgcnv, high_var_avgcnv, low_var_varcnv, high_var_varcnv)
+
+plt.low_vs_high_meanCNV <- ggplot(data = df.cnv_sum, aes(x=low_var_avgcnv, y=high_var_avgcnv)) + geom_point() + 
+  geom_abline(slope = 1, intercept = 0)
+
+plt.low_vs_high_varCNV <- ggplot(data = df.cnv_sum, aes(x=low_var_varcnv, y=high_var_varcnv)) + geom_point() +
+  geom_abline(slope = 1, intercept = 0)
+
+plt.low_mean_vs_var <- ggplot(data = df.cnv_sum, aes(x=low_var_avgcnv, y=low_var_varcnv)) + geom_point() + 
+  geom_abline(slope = 1, intercept = 0)
+
+plt.high_mean_vs_var <- ggplot(data = df.cnv_sum, aes(x=high_var_avgcnv, y=high_var_varcnv)) + geom_point() +
+  geom_abline(slope = 1, intercept = 0)
+
+
+# 
+# print(plt.low_vs_high_meanCNV)
+# 
+# print(plt.low_vs_high_varCNV)
+# 
+# print(plt.low_mean_vs_var)
+# 
+# print(plt.high_mean_vs_var)
+
+
+# plot(df.ma[, 1])
+
+# plot(df.ma_center[, 5])
+
+# plot(df.ma_highVar[ ,300])
+
+```
+
+
+```{r}
+
+# print(plt.lowvar_density)
+
+
+```
+
+```{r}
+# print(plt.highvar_density)
+```
+
+
+
+
+```{r expression variance and imputation}
+
+# CNV variance as meta feature
+meta_var_exp <- rep(NaN, n_cells)
+meta_var_exp[cell_ind[1:subsample_n_cells]] <- var_exp
+so.query@meta.data[["CNV_variance"]] <- meta_var_exp
+cell2plot <- (!is.nan(meta_var_exp))
+
+
+# predicted malignancy class as meta feature
+meta_malignancy_class <- rep(NaN, n_cells)
+meta_malignancy_class[cell_ind[1:subsample_n_cells]] <- df.var$classification
+so.query@meta.data[["malignancy_class"]] <- meta_malignancy_class
+
+
+# impute malignancy class based on umap clusters
+umap_clusters <- as.vector(so.query@meta.data[["seurat_clusters"]])
+df.impute_class <- data.frame(umap_clusters, meta_malignancy_class)
+
+df.impute_class_noNa <- df.impute_class[!(df.impute_class$meta_malignancy_class == "NaN"), ]
+
+
+# get putative malignancy class for each cluster
+df.top_class <- df.impute_class_noNa %>%
+  group_by(umap_clusters, meta_malignancy_class) %>%
+  tally() %>%
+  mutate(freq = n / sum(n)) %>%
+  top_n(n = 3)
+
+
+# do not count Nan as a class
+df.top_class_noNa <- df.top_class[!(df.top_class$meta_malignancy_class =="NaN"), ]
+
+
+df.top_class_final <- df.top_class_noNa %>%
+  group_by(umap_clusters) %>%
+  top_n(n = 1)
+
+
+# match predicted malignancy class to all clusters
+match_ind <-  match(umap_clusters, df.top_class_final$umap_clusters)
+matched_malig_class <- df.top_class_final$meta_malignancy_class[match_ind]
+matched_cluster <- df.top_class_final$umap_clusters[match_ind]
+class_certainty <- df.top_class_final$freq[match_ind]
+
+# assign malignancy class to seurat object
+df.matched_class <- data.frame(umap_clusters, matched_cluster, matched_malig_class, class_certainty)
+so.query@meta.data[["pred_malignancy_class"]] <- as.vector(df.matched_class$matched_malig_class)
+so.query@meta.data[["malignancy_class_certainty"]] <- as.vector(df.matched_class$class_certainty)
+
+# retain only certain classes (based on certainty threshold)
+certainty_threshold <- 0.85
+df.matched_class$malig_class_threshold <- as.vector(df.matched_class$matched_malig_class)
+df.matched_class$malig_class_threshold[df.matched_class$class_certainty < certainty_threshold] <- "Undetermined"
+so.query@meta.data[["pred_malignancy_class_threshold"]] <- as.vector(df.matched_class$malig_class_threshold)
+
+# plot results
+plt.umap_var_exp <- FeaturePlot(so.query, features = "CNV_variance", cells = which(cell2plot), cols = c("blue", "tomato"))
+
+plt.umap_malig_class <- DimPlot(so.query, group.by = "pred_malignancy_class", cols = c("tomato", "limegreen")) + 
+                                  xlab("UMAP 1") + ylab("UMAP 2") +  ggtitle(paste("Threshold: ", 0.5))
+                                
+plt.umap_malig_class_certainty <- FeaturePlot(so.query, features = "malignancy_class_certainty", cols = c("blue", "tomato")) + 
+  ggtitle("Classification Certainty") + xlab("UMAP 1") + ylab("UMAP 2") + xlab("UMAP 1") + ylab("UMAP 2")
+
+plt.umap_malig_class_threshold <- DimPlot(so.query, group.by = "pred_malignancy_class_threshold", cols = c("tomato", "limegreen", "grey")) +
+  ggtitle(paste("Threshold: ", certainty_threshold))
+
+
+so.query@meta.data[["pred_malignancy_class"]]  <- so.query@meta.data[["pred_malignancy_class_threshold"]]
+# print(plt.var_density)
+# print(plt.umap_malig_class)
+# print(plt.umap_var_exp)
+# print(plt.query_umap_clusters)
+
+```
+
+
+
+```{r CNV correlation-based classificaiton imputation}
+
+
+# predicted cnv correlation class as meta feature
+meta_corr_class <- rep(NaN, n_cells)
+meta_corr_class[cell_ind[1:subsample_n_cells]] <- corr.membership
+so.query@meta.data[["cnv_cor_class"]] <- meta_corr_class
+
+
+# impute malignancy class based on umap clusters
+umap_clusters <- as.vector(so.query@meta.data[["seurat_clusters"]])
+df.impute_corr_class <- data.frame(umap_clusters, meta_corr_class)
+
+df.impute_corr_class_noNa <- df.impute_corr_class[!(df.impute_corr_class$meta_corr_class == "NaN"), ]
+
+# get putative malignancy class for each cluster
+df.top_corr_class <- df.impute_corr_class_noNa %>%
+  group_by(umap_clusters, meta_corr_class) %>%
+  tally() %>%
+  mutate(freq = n / sum(n)) %>%
+  top_n(n = 3)
+
+# do not count Nan as a class
+df.top_corr_class_noNa <- df.top_corr_class[!(df.top_corr_class$meta_corr_class =="NaN"), ]
+
+df.top_corr_class_final <- df.top_corr_class_noNa %>%
+  group_by(umap_clusters) %>%
+  top_n(n = 1)
+
+
+# match predicted malignancy class to all clusters
+match_corr_ind <-  match(umap_clusters, df.top_corr_class_final$umap_clusters)
+matched_malig_corr_class <- df.top_corr_class_final$meta_corr_class[match_corr_ind]
+matched_cor_cluster <- df.top_corr_class_final$umap_clusters[match_corr_ind]
+cor_class_certainty <- df.top_corr_class_final$freq[match_corr_ind]
+
+# assign malignancy class to seurat object
+df.matched_cor_class <- data.frame(umap_clusters, matched_cor_cluster, matched_malig_corr_class, cor_class_certainty)
+so.query@meta.data[["pred_cor_class"]] <- as.vector(df.matched_cor_class$matched_malig_corr_class)
+so.query@meta.data[["cor_class_certainty"]] <- as.vector(df.matched_cor_class$cor_class_certainty)
+
+# retain only certain classes (based on certainty threshold)
+certainty_threshold <- 0.75
+df.matched_cor_class$malig_cor_class_threshold <- as.vector(df.matched_cor_class$matched_malig_corr_class)
+df.matched_cor_class$malig_cor_class_threshold[df.matched_cor_class$cor_class_certainty < certainty_threshold] <- "Undetermined"
+so.query@meta.data[["pred_cor_class_threshold"]] <- as.vector(df.matched_cor_class$malig_cor_class_threshold)
+
+# plot results
+plt.umap_var_exp <- FeaturePlot(so.query, features = "CNV_variance", cells = which(cell2plot), cols = c("blue", "tomato"))
+
+plt.umap_corr_class <- DimPlot(so.query, group.by = "pred_cor_class", cols = c("tomato", "limegreen")) + 
+                                  xlab("UMAP 1") + ylab("UMAP 2") +  ggtitle(paste("Threshold: ", 0.5))
+                                
+plt.umap_cor_class_certainty <- FeaturePlot(so.query, features = "cor_class_certainty", cols = c("blue", "tomato")) + 
+  ggtitle("CNV Class Certainty") + xlab("UMAP 1") + ylab("UMAP 2") + xlab("UMAP 1") + ylab("UMAP 2")
+
+plt.umap_cor_class_threshold <- DimPlot(so.query, group.by = "pred_cor_class_threshold", cols = c("tomato", "limegreen", "grey")) +
+  ggtitle(paste("Threshold: ", certainty_threshold))
+
+
+so.query@meta.data[["pred_cor_class"]]  <- so.query@meta.data[["pred_malignancy_class_threshold"]]
+
+```
+
+
+```{r}
+# norm.expression_sub
+# 
+# 
+# # plt.chr_heatmap <- ggplot(df.ma_long, aes(x = rowname, y = cellID, fill = value)) +
+# #   geom_tile() +   scale_colour_gradient2()
+# 
+# 
+# 
+# CNV_quantiles <- quantile(df.ma_long$value, c(0.05, 0.5, 0.95))
+# 
+# plt.cor_heatmap <- ggplot(data = df.ma_long, aes(x=rowname, y=cellID, fill=value)) + 
+#   geom_tile() + 
+#   scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+#    midpoint = CNV_quantiles[2], limit = c(CNV_quantiles[1],CNV_quantiles[3]), space = "Lab", name="CNV") +
+#   theme(axis.text.x=element_blank(),
+#         axis.ticks.x=element_blank(), 
+#         axis.text.y=element_blank(),
+#         axis.ticks.y=element_blank()) + xlab("Cell 1") + ylab("Cell 2")
+# 
+
+
+# print(plt.cor_heatmap)
+
+```
+
+
+```{r function to convert ENSEMBLE to SYMBOL}
+
+# for input dataframe, converts ENSEMBLE to SYMBOL (gene symbols)
+ens2sym <- function(so, gNames.list){
+  
+  # var features
+  so_ens <- so@assays[["SCT"]]@var.features
+  so@assays[["SCT"]]@var.features <- as.vector((gNames.list[so_ens]))
+  
+  # scale data
+  so_sd <- so@assays[["SCT"]]@scale.data
+  rownames(so_sd) <-  as.vector((gNames.list[rownames(so_sd)]))
+  so@assays[["SCT"]]@scale.data <- so_sd
+  
+  # data
+  so_d <- so@assays[["SCT"]]@data
+  rownames(so_d) <-  as.vector((gNames.list[rownames(so_d)]))
+  so@assays[["SCT"]]@data <- so_d
+  
+  # pca feature loading
+  so_pc <-  so@reductions[["pca"]]@feature.loadings
+  rownames(so_pc) <-  as.vector((gNames.list[rownames(so_pc)]))
+  so@reductions[["pca"]]@feature.loadings <- so_pc
+  
+  return(so)
+}
+
+so.query <- ens2sym(so.query, gNames.list)
+
+
+```
+
+
+```{r find differentially expressed genes in malignant vs non-malignant tissue}
+
+quick_markers <- TRUE
+
+# set active identity to malignancy class (store cluster identiies)
+orig.ident <- Idents(object = so.query)
+Idents(object = so.query) <- so.query@meta.data[["pred_malignancy_class"]] 
+
+# find diferentially expressed markers
+if (quick_markers == TRUE){
+  malignancy.markers <- FindAllMarkers(so.query, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.5, max.cells.per.ident = 200)
+} else if (quick_markers == FALSE){
+  malignancy.markers <- FindAllMarkers(so.query, only.pos = TRUE, min.pct = 0.01, logfc.threshold = 0.01)
+}
+
+# reassign original cluster identities
+Idents(object = so.query) <- orig.ident
+
+```
+
+
+
+
+```{r plot_top_dif_genes_compare_marker, fig.width=13, fig.height=4}
+
+plt.clustermarkers_by_umap <- list()
+# Identify top DE genes per cluster -------------------------------------------------------
+
+top_n_genes = 5 # specify how many top genes to examine 
+
+u_clusters <- unique(so.query@meta.data[["pred_malignancy_class"]] )
+n_clust <- length(u_clusters) # malig vs non-malig cluster
+
+# Get top differentially expressed genes by cluster 
+top_genes_by_cluster<-(malignancy.markers %>% group_by(cluster) %>% top_n(top_n_genes, avg_logFC)) # highest fold-change 
+top_genes_by_cluster <- top_genes_by_cluster[c("cluster", "gene")]
+
+# reshape table from long to wide format
+rep_n <- 1
+for (i in 1:nrow(top_genes_by_cluster)){
+  if (rep_n == top_n_genes+1){rep_n = 1} 
+  top_genes_by_cluster[i,"repn"] <- rep_n 
+  # top_genes_by_cluster[i,"gene_name"] <- as.vector(gNames[pull(top_genes_by_cluster[i,"gene"])]) 
+  rep_n = rep_n + 1
+}
+top_genes_by_cluster <- spread(top_genes_by_cluster, repn, gene)
+
+# Plot cluster-specific DE genes --------------------------------------------------------
+
+# define function to plot figures
+# =======================================================================================
+myplt <- function(so, gene_symbol, gene_name) {
+  plt.handle <- FeaturePlot(object = so, features = gene_symbol, cols = c("lightgrey", "blue"), 
+                            reduction = "umap", label.size = 4, dims = c(1, 2), pt.size = TRUE) + xlab("UMAP 1") +  ylab("") 
+  plt.handle[["labels"]][["title"]] = gene_name
+  return(plt.handle)
+}
+# =======================================================================================
+
+gNames <- gNames.list
+
+# plot top differentially expressed genes per cluster and compare to cluster membership
+for (i in c(1:n_clust)) {# iterate through each cluster
+  
+  # empty list where plts will be stored
+  all_plts <- list()
+  
+  # plot1: cluster membership (UMAP)
+  all_plts[[1]] <- DimPlot(so.query, reduction = "umap", label = F, 
+    cells.highlight = (which(so.query@meta.data[["pred_malignancy_class"]] == u_clusters[i])), label.size = 4) + 
+    xlab("UMAP 1") +  ylab("UMAP 2") 
+  all_plts[[1]][["labels"]][["title"]] = u_clusters[i]
+  
+  
+  # plots 2:n top genes
+  for (j in c(1:top_n_genes)) {
+    gene_symbol <- pull(top_genes_by_cluster[i,j+1])
+    gene_name <-gene_symbol 
+    if(!is.na(gene_name)){
+      all_plts[[j + 1]] <- myplt(so.query, gene_symbol, gene_name)
+      }
+  }
+  
+  plt.clustermarkers_by_umap[[i]] <- (CombinePlots(all_plts, ncol = 1 + top_n_genes, legend = 'none'))
+  # print( plt.clustermarkers_by_umap[[i]])
+}
+
+
+# print(plt.clustermarkers_by_umap[[1]])
+names(plt.clustermarkers_by_umap) <- u_clusters
+# print(plt.clustermarkers_by_umap[[1]])
+# print(plt.clustermarkers_by_umap[[2]])
+
+# malignancy-dep markers validated (eye-ball test) using protein-atlas
+# https://www.proteinatlas.org/ENSG00000079841-RIMS1/pathology
+
+```
+
+
+```{r malignancy DE heatmap}
+
+n.downsample <- 1000
+if (length(colnames(x = so.query)) > n.downsample){
+  so.query_small <- SubsetData(object = so.query, cells = sample(Cells(so.query), n.downsample))
+} else {
+  so.query_small <- so.query
+}
+
+n_top_markers <- 50
+top_markers <- malignancy.markers %>% group_by(cluster) %>% top_n(n = n_top_markers, wt = avg_logFC)
+top_markers_heatmap <- malignancy.markers %>% group_by(cluster) %>% top_n(n = 20, wt = avg_logFC)
+
+top_markers <- top_markers[ , c("cluster", "gene")]
+
+top_markers_wide <- data.frame()
+for (i in 1:length(u_clusters)){
+  cluster_markers <-top_markers$gene[top_markers$cluster == u_clusters[i]]
+  
+  top_markers_current <- top_markers$gene[top_markers$cluster == u_clusters[i]]
+  n_markers_cur <- length(top_markers_current)
+  
+  if (!(n_markers_cur == n_top_markers)){
+    top_markers_current <- c(top_markers_current, rep(NaN, n_top_markers-n_markers_cur))
+  }
+  top_markers_wide[seq(1, n_top_markers), c(paste("cluster", i-1, sep = ""))] <- as.data.frame(top_markers_current)
+}
+colnames(top_markers_wide) <- u_clusters
+
+
+plt.heatmap <- DoHeatmap(so.query_small, group.by = "pred_malignancy_class", features = unique(top_markers_heatmap$gene), size = 5, draw.lines = TRUE) + NoLegend() + theme(text = element_text(size = 7))
+# print(plt.heatmap)
+```
+
+
+
+```{r save results}
+# Rapid marker find
+df.log[nrow(df.log)+1, 1] <- as.character("Rapid Marker Find")
+df.log[nrow(df.log), 2] <- as.character(quick_markers)
+  
+# N cells subsampled for CNV analysis
+df.log[nrow(df.log)+1, 1] <- as.character("N cells included in CNV analysis")
+df.log[nrow(df.log), 2] <- as.character(subsample_n_cells)
+
+# rolling window 
+df.log[nrow(df.log)+1, 1] <- as.character("CNV rolling window (N genes)")
+df.log[nrow(df.log), 2] <- as.character(rolling_window)
+
+# N cells subsampled for differential marker heatmap
+df.log[nrow(df.log)+1, 1] <- as.character("N cells included in heatmap")
+df.log[nrow(df.log), 2] <- as.character(n.downsample)
+
+# Top N markers saved
+df.log[nrow(df.log)+1, 1] <- as.character("Top N markers saved")
+df.log[nrow(df.log), 2] <- as.character(n_top_markers)
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
+df.log[nrow(df.log), 2] <- as.character(elapsed.time)
+
+#  Results Saved
+df.log[nrow(df.log)+1, 1] <- as.character("Results Saved")
+df.log[nrow(df.log), 2] <- as.character(save_flag)
+
+df.log_Module_7 <- df.log
+
+if (save_flag == TRUE){
+  # Exported variables
+df.log[nrow(df.log)+1, 1] <- as.character("Exported Variables")
+df.log[nrow(df.log), 2] <- as.character("so, malignancy.markers, top_malignancy_markers, gNames.list, df.log_Module_1, df.log_Module_7")
+
+so <- so.query
+top_malignancy_markers <- top_markers_wide
+
+  save(so, malignancy.markers, top_malignancy_markers, gNames.list, df.log_Module_1, df.log_Module_7, file = save_filename)
+}
+
+```
+
+
+
+
+1) UMAP by Clusters
+===================================== 
+
+### UMAP by Clusters
+
+```{r plot plt.query_umap_clusters 2}
+print(plt.query_umap_clusters)
+
+```
+
+
+2) CNV
+=====================================
+
+### CNV Mean
+
+```{r plt.chr_heatmap}
+
+print(plt.mean_density)
+
+```
+
+
+### CNV variance
+
+```{r plt.var_density}
+print(plt.var_density)
+
+```
+
+### Mean vs. Variance (CNV)
+
+```{r}
+print(plt.desc_stats)
+```
+
+
+
+3) Malignancy Classification
+===================================== 
+
+### UMAP by Class Certainty
+
+```{r plt.umap_malig_class_certainty}
+print(plt.umap_malig_class_certainty)
+```
+
+### UMAP by Malignancy Class: Majory Vote (Threshold = 0.5)
+
+```{r plt.umap_malig_class}
+print(plt.umap_malig_class)
+```
+
+### UMAP by Malignancy Class: User-Specified Threshold
+
+```{r plt.umap_malig_class_threshold}
+
+print(plt.umap_malig_class_threshold)
+
+```
+
+
+4) Malignancy Markers
+===================================== 
+
+Row 
+-----------------------------------------------------------------------
+
+### Group 1 Markers
+
+```{r plt.clustermarkers_by_umap1, fig.width=13, fig.height=4}
+
+print(plt.clustermarkers_by_umap[["highVar"]])
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Group 2 Markers
+
+```{r plt.clustermarkers_by_umap2, fig.width=13, fig.height=4}
+print(plt.clustermarkers_by_umap[["lowVar"]])
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Undetermined
+
+```{r plt.clustermarkers_by_umap3, fig.width=13, fig.height=4}
+
+print(plt.clustermarkers_by_umap[["Undetermined"]])
+```
+
+
+5) Marker Heatmap
+===================================== 
+
+### Marker Heatmap
+
+```{r plt.heatmap}
+print(plt.heatmap)
+```
+
+
+6) Cluster Markers
+===================================== 
+
+### UMAP by Cluster
+
+```{r plt.umap_malig_class_2}
+
+print(plt.umap_malig_class_threshold)
+
+```
+
+
+### Top Markers 
+```{r table.topmarkers}
+
+knitr::kable(top_markers_wide)
+
+```
+
+
+
+Log (Prior Activity)
+===================================== 
+
+```{r table.log_prior}
+
+knitr::kable(df.log_Module_1)
+
+```
+
+Log (Module 7)
+===================================== 
+
+```{r table.log_current}
+
+knitr::kable(df.log_Module_7)
+
+```
+
