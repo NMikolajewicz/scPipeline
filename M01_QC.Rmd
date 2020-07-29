@@ -1,17 +1,27 @@
 ---
-title: "scRNAseq: QC and Data Preparation"
+title: "QC and Preprocessing"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: fill
 editor_options: 
   chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = paste0(
+        xfun::sans_ext(inputFile), '_', format(Sys.Date(), "%d%m%y"),user, '.html'
+      ),
+      output_dir = paste0(data.path, "/HTML_Reports")
+    )
+  })
 ---
 
 ```{r setup, include=FALSE}
 
 # clear global enviroment
-rm(list = ls())
+rm(list = setdiff(ls(), c("data.path", "user")))
 
 # initiate timer
 start.time <- proc.time()
@@ -22,7 +32,6 @@ packages2load <- c('viridis', 'scMiko', 'ggpubr', 'dplyr', 'WGCNA', 'cowplot', '
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE))
 
-
 ```
 
 
@@ -30,8 +39,8 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # specify parameters
 analysis.parameters <- analysisParameters(
-  which.data = c("pilot9.Mm"),
-  which.strata = c("CT2A"),
+  which.data = c("pilot6"),
+  which.strata = c("GBM"),
   organism.filter.flag = F,                             
   organism.include = c("Mm"),
   save.flag = F,                                                              # OPTIONAL; logical (default = T)  # save results
@@ -53,6 +62,7 @@ max.memory <- 200 # numeric, in terms of Gb (set to 100 for cluster)
 
 ```
 
+
 ```{r get input data paths}
 
 # get input data files paths
@@ -61,6 +71,7 @@ inputDataSpecification <- function(inputs = "M01_inputs.csv", subsets = "M01_sub
   input.data <- read.csv(inputs)
   colnames(input.data) <- rmvCSVprefix(colnames(input.data))
   input.data <- apply(input.data, 2, function(x) gsub("Â", "", x))
+  input.data <- as.data.frame(input.data)
   
   # get subsets
   input.subset <- read.csv(subsets)
@@ -103,8 +114,8 @@ which.data <- analysis.parameters$which.data  # REQUIRED
 which.strata <- analysis.parameters$which.strata # NA if no stratification
 
 # specify input 
-stopifnot(all(which.data %in% as.vector(input.data$names)))
-specified.input <- input.data[as.vector(input.data$names) %in% which.data, ]
+stopifnot(all(which.data %in% as.vector(input.data$sample)))
+specified.input <- input.data[as.vector(input.data$sample) %in% which.data, ]
 
 
 # get input data specifications
@@ -115,6 +126,16 @@ input_set <- c(input_data, input_pcr_barcodes, input_rt_barcodes)
 input.type <- as.vector(specified.input$input.type)
 all_input_organisms <- as.vector(specified.input$species)
 dir <- as.vector(specified.input$directory) 
+
+# ensure correct path is used for data input
+if (exists("data.path")){
+  dir <- paste0(data.path, dir)
+}
+
+# ensure regression variables are correctly specified
+if (length(which.data) == 1){
+  analysis.parameters$vars2regress <- analysis.parameters$vars2regress[!(analysis.parameters$vars2regress %in% "dataset")]
+}
 
 
 # get stratification details
@@ -321,6 +342,8 @@ loadMatdev <- function(import_set, input_organisms, dir) {
 
 ```
 
+
+
 ```{r c6 - load_data}
 
 # Run import function
@@ -341,18 +364,18 @@ for (i in 1:length(input_data)){
 
   if (input.type[i] == 1) {
     output.list <- loadMoffat(import_set = cur.total_sets, 
-                                     analysis.parameters$subsample_factor, 
-                                     input_organisms = trimws(unlist(strsplit(all_input_organisms[i], ","))) , 
-                                     analysis.parameters$organism.include[i], 
+                                     subsample_factor = analysis.parameters$subsample_factor, 
+                                     input_organisms = stringr::str_trim(unlist(strsplit(all_input_organisms[i], ",")))  , 
+                                     organism_include = analysis.parameters$organism.include[i], 
                                      dir[i])
   } else if (input.type[i] == 2){
     output.list <- loadCellRanger(import_set = cur.total_sets, 
-                                  trimws(unlist(strsplit(all_input_organisms[i], ","))), 
+                                  stringr::str_trim(unlist(strsplit(all_input_organisms[i], ","))), 
                                   dir[i])
   } else if (input.type[i] == 3){
-    # output.list <- loadMat(import_set = cur.total_sets, subsample_factor, all_input_organisms, dir[i])
+
     output.list <- loadMat.dev(import_set = cur.total_sets, 
-                               trimws(unlist(strsplit(all_input_organisms[i], ","))), 
+                               stringr::str_trim(unlist(strsplit(all_input_organisms[i], ","))), 
                                dir[i])
     
   }
@@ -385,13 +408,7 @@ rm(so.list)
 # Assumed that all gene lists are identical
 gNames.list <- gNames.list.list[[1]]
 
-
 ```
-
-```{r c7, include = FALSE}
-gc()
-```
-
 
 ```{r c8 - filter_data_by_subset}
 
@@ -905,7 +922,7 @@ plt.cc.umap <- tryCatch({
     x.label = "UMAP 1",
     y.label = "UMAP 2",
     plot.name = "Cell Cycle Classifications",
-    include.labels = F)
+    include.labels = F) 
   
 }, error = function(e){
   plt.cc.umap <- NULL
@@ -928,7 +945,9 @@ if ("Phase" %in% names(so@meta.data)){
     labs(title = "Cluster Composition by Cell Cycle") + 
     xlab("Cluster ID") + ylab("Relative Frequency")
   
-  plt.cc <- cowplot::plot_grid(plt.umap_by_cluster, plt.cc.umap, plt.cc.compo, ncol = 3)
+  plt.cc <- cowplot::plot_grid(plt.umap_by_cluster, 
+                               plt.cc.umap + ggthemes::scale_colour_tableau(), 
+                               plt.cc.compo + ggthemes::scale_fill_tableau(), ncol = 3)
 } 
 
 
@@ -1019,7 +1038,7 @@ if (analysis.parameters$print.inline){
 ```
 
 
-```{r c23 - summary statistics }
+```{r c23 - summary statistics, warning = FALSE}
 
 meta.data <- names(so@meta.data)
 
