@@ -1,0 +1,147 @@
+---
+title: "tutorial"
+author: "Nicholas Mikolajewicz"
+date: "7/28/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(Seurat)
+library(sctransform)
+library(scMiko)
+library(ggplot2)
+library(tidyverse)
+
+```
+
+## Data Import
+
+```{r import data}
+
+# specify input files
+file.data <- "pilot9_mouseParallelMapped_sci_summary.RData"
+file.rt <- "HH9_rt_barcodes_20200625NewFormat168updated.txt"
+file.pcr <- "HH9_pcr_barcodes_20200623_96used.txt"
+
+# specify input directory (set input.dir = "" if files are insame folder as analysis script)
+input.dir <- "Raw_Datasets/pilots/"
+
+# import data
+data <- loadMoffat(import_set = c(file.data, file.pcr, file.rt),
+                   subsample_factor = 0.15,
+                   input_organisms = "Mm",
+                   organism.include = "Mm",
+                   dir = input.dir) # Hs
+
+# parse out seurat object and list mapping ENSEMBL to SYMBOL
+so <- data[[1]]
+gNames.list <- data[[2]]
+
+# get rid of excess baggage
+rm(data)
+```
+
+
+## QC parameters
+
+```{r QC parameters}
+
+# compute mitochondrial content
+so <- getMitoContent(so, gNames.list)
+
+# mitochondrial content histogram
+hist(so@meta.data[["percent.mt"]])
+
+# QC parameter distributions
+VlnPlot(object = so, features = c("percent.mt", "nCount_RNA", "nFeature_RNA"))
+
+# generate scatter plots
+plt.qc1 <- FeatureScatter(object = so, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plt.qc2 <- FeatureScatter(object = so, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+
+# combine
+cowplot::plot_grid(plt.qc1, plt.qc2)
+```
+
+
+## QC Filters
+
+```{r filter data}
+
+# filter out poor quality cells
+so.filt <- subset(so, subset = (percent.mt < 60) & (nFeature_RNA > 200) & (nFeature_RNA < 9000))
+
+```
+
+## Fit negative binomial model
+
+```{r}
+
+# perform normalization, scaling and variable features selection
+so.filt <- SCTransform(
+  object = so.filt,
+  assay = "RNA",
+  new.assay.name = "SCT",
+  do.correct.umi = TRUE,
+  variable.features.n = 3000,
+  variable.features.rv.th = 1.3,
+  vars.to.regress = NULL,
+  do.scale = FALSE,
+  do.center = TRUE,
+  verbose = TRUE
+)
+
+# generate variable feature plot
+VariableFeaturePlot(
+  object = so.filt,
+  cols = c("black", "red"),
+  pt.size = 1,
+  log = NULL,
+  selection.method = NULL,
+  assay = NULL
+)
+
+```
+
+
+
+## Dimensional Reduction
+
+```{r}
+
+# run PCA
+so.filt <- RunPCA(so.filt)
+
+# generate UMAP
+so.filt <- RunUMAP(object = so.filt, dims = 1:30)
+
+# visualize UMAP
+DimPlot(
+  object = so.filt,
+  dims = c(1, 2),
+  cells = NULL,
+  cols = NULL,
+  pt.size = NULL,
+  reduction = NULL,
+  group.by = NULL,
+  split.by = NULL,
+  shape.by = NULL,
+  order = NULL,
+  label = FALSE,
+  label.size = 4,
+  repel = FALSE,
+  cells.highlight = NULL,
+  cols.highlight = "#DE2D26",
+  sizes.highlight = 1,
+  na.value = "grey50",
+  ncol = NULL,
+  combine = TRUE
+)
+
+
+```
+
+
+
