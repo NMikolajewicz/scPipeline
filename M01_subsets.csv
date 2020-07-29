@@ -1,0 +1,55 @@
+sample,set,barcodes
+pilot1,hap1_renca,1-HAP1&Renca
+pilot1,cgr8_293t,"2-CGR8(WT parental), 4-293T&CGR8(WT with GBC*)"
+pilot1,mm,"CGR8, Renca"
+pilot1,renca,Renca
+pilot1,hs,"HAP1, 293T"
+pilot1,hap1,HAP1
+pilot1,cgr8,CGR8
+pilot2,hap1_renca,R4-HAP1&Renca
+pilot2,mm,"3T3, N2A, Renca"
+pilot2,hap1,HAP1
+pilot2,renca,Renca
+pilot3,renca.tumor,"01_T1_in_cd, 02_T1_out_cd, 03_T3_in_TST, 04_T3_out_TST, 05_T3_in_sci, 06_T3_out_sci"
+pilot3,neural.dif1,"C1_CST, C3_CST, C5_CST, C7_CST, DIVc9_CST, C10_TST, C1_TST"
+pilot3,neural.dif2,"07_C1_CST, 08_C3_CST, 09_C5_CST, 10_C7_CST, 11_DIVc9_CST, 12_C10_TST, 13_C1_TST"
+pilot3,neural.dif3,"07_C1_CST, 12_C10_TST, 13_C1_TST"
+pilot4,cst,"01_G(GL261)_FR_CST, 02_C(CT2A)_FR_CST, 03_H(GL261)_FR_CSTsi, 04.2_C1_EB8_CSTsi, 04_C1_EB8_CSTsi, 05.2_C1_DIV1_CSTsi, 06.2_C1_DIV7_CSTsi"
+pilot4,neural.dif1,"EB8, DIV1, DIV7"
+pilot4,neural.dif2,"C1_EB8_CSTsi, C1_DIV1_CSTsi, C1_DIV7_CSTsi"
+pilot4,gbm,"GL261, CT2A"
+pilot4,GL261,GL261
+pilot4,p4.CT2A,CT2A
+pilot4_5pctDS,gbm,"GL261, CT2A"
+pilot4_5pctDS,neural.dif1,"EB8, DIV1, DIV7"
+pilot4_12.5pctDS,gbm,"GL261, CT2A"
+pilot4_12.5pctDS,neural.dif1,"EB8, DIV1, DIV7"
+pilot4_25pctDS,gbm,"GL261, CT2A"
+pilot4_25pctDS,neural.dif1,"EB8, DIV1, DIV7"
+pilot4_50pctDS,gbm,"GL261, CT2A"
+pilot4_50pctDS,neural.dif1,"EB8, DIV1, DIV7"
+pilot5,neural.dif1,"C1_CST, C3_CST, C7_CST, DIVc9_CST, C10_TST, C1_TST"
+pilot5,neural.dif2,"07_C1_CST, 08_C3_CST, 10_C7_CST, 11_DIVc9_CST, 12_C10_TST, 13_C1_TST"
+pilot5,renca.tumor1,"T1, T3"
+pilot5,renca.tumor2,"01_T1_in_cd, 02_T1_out_cd, 03_T3_in_TST, 04_T3_out_TST, 05_T3_in_sci, 06_T3_out_sci"
+Celsuis_sci_Renca,tumor.only,"Tumor1, Tumor2, Tumor3"
+Celsuis_sci_Renca,T1,Tumor1
+Celsuis_sci_Renca,T2,Tumor2
+Celsuis_sci_Renca,T3,Tumor3
+Celsuis_sci_Renca,renca.invitro,4
+pilot6,GBM,"GL261, CT2A"
+pilot6,p6.CT2A,CT2A
+pilot7.Hs,meso,Meso
+pilot7.Mm,GBM,"CT2A, GL261"
+pilot7.Mm,Renca,"01_Renca_WT, 02_Renca_Jak1"
+pilot8.Mm,GBM.noTumor,06_GBM_PBSctrl
+pilot8.Mm,CT2A,"CT2A_R2, 02_CT2A_R3"
+pilot8.Mm,GL261.tumor,"GL261_R2, GL261_R3"
+pilot8.Mm,GL261.GFP,GL261GFP
+pilot8.Mm,GL261,"06_GBM_PBSctrl, GL261_R2, GL261_R3, GL261GFP"
+pilot8.Mm,GBM.ctrlvstumor,"06_GBM_PBSctrl, GL261_R2"
+pilot8.Mm,GBM,"CT2A_R2, 02_CT2A_R3, GL261_R2, GL261_R3"
+pilot8.Mm,GBM.R2,GL261_R2
+pilot8.Mm,GBM.R3,GL261_R3
+pilot9.Hs,GBM.PR,"01_GBM_63P, 02_GBM_173R, 03_GBM_190P, 04_GBM_225R, 05_GBM_162P, 06_GBM_265R"
+pilot9.Mm,CT2A,PR_CT2A
