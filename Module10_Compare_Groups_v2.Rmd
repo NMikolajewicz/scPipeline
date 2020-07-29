@@ -1,0 +1,4789 @@
+---
+title: "Module 10_Group Comparison"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+library(scMiko)
+library(WGCNA)
+# library(fgsea)
+modulePackages(module.number = 10)
+
+
+```
+
+
+
+```{r parameter specification}
+
+# Description
+# compare two groups (preferably in integrated dataset)
+# TODO 
+# expand to support more than 2 group comparison
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed Datasets/"
+
+# query input
+# input.file <- "Module1_invivo_EMT6_screen_metaDAta_270320.Rdata"
+input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+# input.file <- "Module1_pilot6_invitroGBM_updatedBarcodes_290220.Rdata"
+# input.file <- "Module2_Renca_cell_nuc_sci_T12_4000ds_Celsius_integrated_240220.Rdata"
+
+integrated.flag <- F
+
+
+cluster.resolution <- c(1)
+
+# subsample factor (for downsampling)
+subsample_factor <- 1
+
+# grouping (list specifying group compositions); supports indirect matching 
+# group.field <- "batch" # batch used when using intergration dataset
+group.field <- "Barcode"
+
+# group.list <- list(in.vitro = "invitro",
+#                    in.vivo = ".T")
+# group.list <- list(ct.0231 = "0231",
+                   # ct.0238 = "0238")
+
+group.list <- list(ctrl.0238 = "ctrl.0238",
+                   TR.0238 = "TR.0238")
+# 
+# group.list <- list(ctrl.0231 = "ctrl.0231",
+# ctrl.0238 = "ctrl.0238")
+
+# group.list <- list(GL261 = "GL261",
+#                    CT2A = "CT2A")
+
+# group.list <- list(TR.0231 = "TR.0231",
+#                    TR.0238 = "TR.0238")
+
+# specify which group is reference/control group (NA if unspecified)
+# which.reference <- NA 
+which.reference <- "ctrl.0238"
+# which.reference <- "ctrl.0231" # specify whcih group to use as reference (e.g., DEG compared to what?)
+# which.reference <- "ct.0231"
+# which.reference <- "GL261" # specify whcih group to use as reference (e.g., DEG compared to what?)
+
+# compare groups flag
+# if F, direct comparison of groups. If T, pairwise comparison of groups within clusters. 
+# note that if F, cluster resolution is ignored and forced to 0
+compare.within.clusters.flag <- F
+
+species <- "Hs"
+
+# DEG thresholds
+lfc.threshold <- 0.25
+p.threshold <- 0.01
+only.pos <- F # 
+
+# print inline flag
+print.inline <- F
+
+# https://satijalab.org/seurat/v3.0/immune_alignment.html
+
+
+```
+
+
+
+
+
+```{r analysis log}
+
+
+if (!exists("which.reference")) which.reference <- NA
+if (compare.within.clusters.flag == F) cluster.resolution <- 0
+
+df.log <- inititateLog("10, Group Comparison")
+
+# Query File
+df.log <- addLogEntry("Input File", input.file, df.log, "input.file")
+
+# Cluster Resolution
+df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
+
+# Integrated flag
+df.log <- addLogEntry("Integration Flag", integrated.flag, df.log, "integrated.flag")
+
+# Integrated flag
+df.log <- addLogEntry("Subsampling factor", subsample_factor, df.log, "subsample_factor")
+
+# Grouping Field
+df.log <- addLogEntry("Grouping Field", group.field, df.log, "group.field")
+
+# new names
+df.log <- addLogEntry("new field names", names(group.list), df.log, "names(group.list)")
+
+# new names
+df.log <- addLogEntry("old field names", unlist(group.list), df.log, "unlist(group.list)")
+
+# LFC threshold
+df.log <- addLogEntry("LFC threshold", lfc.threshold, df.log, "lfc.threshold")
+
+# p-value threshold
+df.log <- addLogEntry("p-value threshold", p.threshold, df.log, "p.threshold")
+
+# Positive marker flag
+df.log <- addLogEntry("Positive marker flag", only.pos, df.log, "only.pos")
+
+# comopare within clusters
+df.log <- addLogEntry("Compare groups within clusters", compare.within.clusters.flag, df.log, "compare.within.clusters.flag")
+
+# comopare within clusters
+df.log <- addLogEntry("Reference group", which.reference, df.log, "which.reference")
+
+# print flag
+df.log <- addLogEntry("Print flag", print.inline, df.log, "print.inline")
+
+
+
+```
+
+
+```{r load data}
+
+# import and preprocess data
+load(getLoadPath(input.file, dir.preprocessed))
+so.query <- prepSeurat(so)
+rm(so)
+gc()
+
+# down sample data if necessary
+so.query <-  downsampleSeurat(so.query, subsample_factor)
+
+```
+
+```{r set appropriate cluster resolution}
+
+# get cluster
+so.query <- setResolution(so.query, cluster.resolution)
+
+```
+
+
+```{r}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+
+```{r prep gene list}
+
+# prep gene list
+gNames.list <- prepGeneList(so.query, objects())
+
+```
+
+```{r ensure correct gene representation}
+
+# check gene rep
+gene.rep <- checkGeneRep(reference.genes = gNames.list, query.genes = rownames(so.query))
+
+if (gene.rep != "symbol"){
+  # convert ensemble to symbol
+  so.query <- ens2sym.so(so.query, gNames.list)
+}
+
+gene.rep <- checkGeneRep(reference.genes = gNames.list, query.genes = rownames(so.query))
+stopifnot(gene.rep == "symbol")
+
+```
+
+```{r remove duplicate genes}
+
+# function to remove duplicate genes
+# rmDuplicateGenes <- function(so){
+#   
+#   # get gene names
+# all.genes <- rownames(so)
+# 
+# # if duplictes exist, subset seurat object
+# if (sum(duplicated(all.genes)) > 0){
+#   which.dup <- all.genes[duplicated(all.genes)]
+#   which.unique <- all.genes[!duplicated(all.genes)]
+#   so <- subset(so, features = which.unique)
+# }
+# 
+# return(so)
+#   
+# }
+
+so.query <- rmDuplicateGenes(so.query)
+
+# ensure no genes are duplicated
+# all.genes <- rownames(so.query)
+# 
+# if (sum(duplicated(all.genes)) > 0){
+#   which.dup <- all.genes[duplicated(all.genes)]
+#   which.unique <- all.genes[!duplicated(all.genes)]
+#   so.query <- subset(so.query, features = which.unique)
+# }
+
+```
+
+
+```{r}
+# group membership
+
+membership.n <- c()
+membership.list <- list()
+
+keep.this <- NULL
+for (i in 1:length(group.list)){
+  
+  cur.group <- names(group.list)[order(names(group.list))][i]
+  cur.pattern <- (group.list)[order(names(group.list))][[i]]
+  
+  u.members <- as.vector(unique(so.query@meta.data[[group.field]][grepl(cur.pattern, so.query@meta.data[[group.field]])]))
+  membership.list[[cur.group]] <- u.members
+  membership.n[i] <- length(u.members)
+  
+  if (is.null(keep.this)){
+    keep.this <- grepl(cur.pattern, so.query@meta.data[[group.field]])
+  } else {
+    keep.this <- (keep.this | grepl(cur.pattern, so.query@meta.data[[group.field]]))
+  }
+  
+  so.query@meta.data[["group.query"]][grepl(cur.pattern, so.query@meta.data[[group.field]])] <- cur.group
+  
+  
+}
+
+# ensure groups are ordered and that order is maintained throughout analysis. 
+u.groups <- as.character(unique(so.query@meta.data[["group.query"]]))
+u.groups <- u.groups[order(u.groups)]
+so.query@meta.data[["group.query"]] <- factor(so.query@meta.data[["group.query"]], levels = u.groups)
+so.query <-so.query[, keep.this]
+
+
+names(membership.n) <-  names(group.list)[order(names(group.list))]
+
+if (length(group.list) == 2){
+  col.end <- 0.6
+} else {
+  col.end <- 1
+}
+
+group.cols <- scales::viridis_pal(option = "D", end = col.end)(length(group.list))
+names(group.cols) <- names(group.list)[order(names(group.list))]
+
+membership.cols <- viridis_pal(option = "D", end = col.end)(length(as.vector(unlist(membership.list))))
+names(membership.cols) <- as.vector(unlist(membership.list))
+
+plt.umap_group <- cluster.UMAP(so.query, group.by = "group.query", cols = group.cols)
+plt.umap_membership <- cluster.UMAP(so.query, group.by = group.field, cols = membership.cols,  split.by = "group.query")
+
+if (print.inline){
+  print(plt.umap_group) 
+  print(plt.umap_membership)
+}
+
+
+
+```
+
+```{r ensure reference group is correctly specified}
+
+# ensure groups are ordered correctly
+if (is.na(which.reference)){
+  
+  available.levels <- levels(so.query@meta.data[["group.query"]])
+  so.query@meta.data[["group.query"]] <- factor(so.query@meta.data[["group.query"]], levels = available.levels[available.levels %in% unique(so.query@meta.data[["group.query"]])])
+  
+  which.reference <- levels(so.query@meta.data[["group.query"]])[1]
+}
+
+stopifnot(length(levels(so.query@meta.data[["group.query"]])) == 2)
+grp.levels <- levels(so.query@meta.data[["group.query"]])
+group.order <- which.reference
+group.order <- c(group.order, grp.levels[grp.levels != which.reference])
+
+so.query@meta.data[["group.query"]] <- factor(so.query@meta.data[["group.query"]], levels = group.order)
+
+# specify reference and comparison groups
+reference.group <- group.order[1]
+comparison.group <- group.order[2]
+
+```
+
+
+```{r, warning = FALSE, message=FALSE}
+
+so.query.2 <- so.query
+if (integrated.flag) DefaultAssay(so.query.2) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+so.query.2 <- ScaleData(so.query.2, verbose = FALSE)
+so.query.2 <- RunPCA(so.query.2, npcs = 30, verbose = FALSE)
+# UMAP and Clustering
+so.query.2 <- RunUMAP(so.query.2, reduction = "pca", dims = 1:20, verbose = F)
+so.query.2 <- FindNeighbors(so.query.2, reduction = "pca", dims = 1:20, verbose = F)
+so.query.2 <- FindClusters(so.query.2, resolution = cluster.resolution, verbose = F)
+```
+
+```{r, warning = FALSE, message = FALSE}
+
+# Visualization
+p1.dim <- DimPlot(so.query.2, reduction = "umap", group.by = "group.query") + xlab("UMAP 1") + ylab("UMAP 2")
+p2.dim <- DimPlot(so.query.2, reduction = "umap", label = TRUE) + xlab("UMAP 1") + ylab("UMAP 2")
+
+if (print.inline){
+  cowplot::plot_grid(p1.dim, p2.dim)
+}
+
+
+```
+
+
+
+```{r get conserved markers}
+
+# set assay
+DefaultAssay(so.query.2) <- "SCT"
+
+# get unique clusters
+u.clusters <- as.numeric(as.character(unique((so.query.2@meta.data[["seurat_clusters"]]))))
+u.clusters <- u.clusters[order(u.clusters)]
+
+# initiate results list
+conserved.markers.list <- list()
+
+which.assay.cons <- "RNA"
+if (!(which.assay.cons %in% names(so.query.2@assays))) which.assay.cons <- DefaultAssay(so.query.2)
+
+# oncly get conserved markers if multiple clusters available
+if (length(u.clusters) > 1){
+
+  # iterate through each cluster
+  for (i in 1:length(u.clusters)){
+    
+    # check if any subgroups have fewer than 3 cells - if yes, skip to next cluster
+    n.cell.cur <-  as.vector(table(so.query.2@meta.data[["group.query"]][so.query.2@meta.data[["seurat_clusters"]] %in% u.clusters[i]])) 
+    if (any(n.cell.cur < 3)) next
+    
+    # find DEG that are conserved across groups
+    conserved.markers.list[[paste("c", as.character(u.clusters[i]), sep = "")]] <- FindConservedMarkers(so.query.2, 
+                                                                                                        ident.1 = u.clusters[i], 
+                                                                                                        grouping.var = "group.query", 
+                                                                                                        verbose = FALSE,
+                                                                                                        min.pct = 0.25,
+                                                                                                        assay = which.assay.cons, 
+                                                                                                        logfc.threshold = lfc.threshold,
+                                                                                                        max.cells.per.ident = 200,
+                                                                                                        return.thresh = p.threshold)
+    
+    # store results
+    conserved.markers.list[[paste("c", as.character(u.clusters[i]), sep = "")]] <- as.data.frame(apply(conserved.markers.list[[paste("c", as.character(u.clusters[i]), sep = "")]], 2, signif, 3) )
+    
+  }
+  
+}
+
+```
+
+
+
+```{r plot conserved, fig.height=6, fig.width=10}
+
+plt.cg.umap <- list()
+plt.cg.vln <- list()
+
+for (i in 1:length(u.clusters)){
+  
+  df.cons <-  conserved.markers.list[[paste("c", as.character(u.clusters[i]), sep = "")]] 
+  df.cons$genes <- rownames(df.cons)
+  
+  df.cons.adj <- df.cons[df.cons$minimump_p_val<0.05, ]
+  
+  if (!is.null(df.cons.adj)){
+    df.cons.filtered <- df.cons.adj %>% 
+      dplyr::arrange(desc(minimump_p_val)) %>%
+      dplyr::top_n(n = 6, wt = -minimump_p_val) %>%
+      dplyr::arrange((minimump_p_val))
+    
+    # get feature plot
+    plt.cg <- FeaturePlot(so.query.2, features = df.cons.filtered$genes, 
+                          split.by = "group.query", cols = c("grey", "red"), order = T, combine = F) 
+    
+    # clear axes
+    plt.cg <- lapply(plt.cg, function(x){x + NoLegend() +  NoAxes() + theme(axis.title.y = element_text(angle = 90))})  
+    
+    # get group names (ordered)
+    split.names <- names(group.list)[order(names(group.list))]
+    
+    plots <- plt.cg
+    nsplits <- 2
+    features <-  df.cons.filtered$genes
+    
+    # assign labels
+    idx <- 1
+    for (j in which(x = 1:length(x = plots)%%length(x = features) ==   1)) {
+      plots[[j]] <- plots[[j]] + ylab(split.names[idx])
+      idx <- idx + 1
+    }
+    
+    # combine and store sorted plots
+    plt.cg.umap[[paste("c", as.character(u.clusters[i]), sep = "")]]  <- CombinePlots(plots, nrow = length(group.list)) 
+
+    
+    plt.cg.vln[[paste("c", as.character(u.clusters[i]), sep = "")]] <- VlnPlot(so.query.2, features = df.cons.filtered$genes, split.by = "group.query", group.by = "seurat_clusters", pt.size = 0, combine = FALSE)
+    
+    if (nrow(df.cons.filtered) > 0){
+      if (print.inline){
+        
+        print( plt.cg.umap[[paste("c", as.character(u.clusters[i]), sep = "")]])
+        
+        print(CombinePlots(plots =   plt.cg.vln[[paste("c", as.character(u.clusters[i]), sep = "")]] , nrow = 2))
+      }
+      
+    }
+  }
+  
+}
+```
+
+
+
+```{r plot conserved markers}
+
+plt.cmarkers.scatter <- list()
+
+if (length(conserved.markers.list)>0){
+  
+  for (i in 1:length(conserved.markers.list)){
+    
+    which.cluster <- names(conserved.markers.list)[i]
+    cur.cons.markers <- conserved.markers.list[[which.cluster]]
+    
+    
+    x.var.name <- paste(names(group.list)[order(names(group.list))][1], "_avg_logFC", sep = "")
+    y.var.name <- paste(names(group.list)[order(names(group.list))][2], "_avg_logFC", sep = "")
+    plt.cmarkers.scatter[[which.cluster]] <- cur.cons.markers %>%
+      ggplot(aes(x = get(x.var.name), y = get(y.var.name), color = -log10( minimump_p_val))) + 
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed", alpha = 0.5) + 
+      geom_hline(yintercept = 0) + 
+      geom_vline(xintercept = 0) + 
+      xlab(names(group.list)[order(names(group.list))][1]) + 
+      ylab(names(group.list)[order(names(group.list))][2])+ 
+      geom_point() + 
+      ggtitle(paste("Conserved Markers: ", which.cluster, sep = "")) + 
+      theme_classic()
+    
+    if (print.inline) print(plt.cmarkers.scatter[[which.cluster]] ) 
+    
+  }
+  
+  
+}
+
+```
+
+
+
+```{r, fig.height=8, fig.width=10, warning = FALSE, message = FALSE}
+
+# create seurat copy - label identities
+so.query.3 <- so.query.2
+so.query.3$cluster.group <- paste(Idents(so.query.3), so.query.3@meta.data[["group.query"]], sep = "_")
+so.query.3$cluster.orig <- Idents(so.query.3)
+Idents(so.query.3) <- "cluster.group"
+
+# get unique clusters
+u.clusters <- as.numeric(as.character(unique((so.query.3@meta.data[["seurat_clusters"]]))))
+u.clusters <- u.clusters[order(u.clusters)]
+
+# get unique groups
+levels.groups <- as.character(levels(so.query.3@meta.data[["group.query"]]))
+u.groups <- unique(so.query.3@meta.data[["group.query"]])
+u.groups <- levels.groups[levels.groups %in% u.groups]
+so.query.3@meta.data[["group.query"]] <- factor(so.query.3@meta.data[["group.query"]], levels = u.groups)
+# u.groups <- u.groups[order(u.groups)]
+stopifnot(length(u.groups) == 2)
+
+
+which.assay.deg <- "SCT"
+if (!(which.assay.deg %in% names(so.query.3@assays))) which.assay.deg <- DefaultAssay(so.query.3)
+
+df.deg.list <- list()
+df.deg.master <- NULL
+for (i in 1:length(u.clusters)){
+  
+  # check if any subgroups have fewer than 3 cells - if yes, skip to next cluster
+  n.cell.cur <-  as.vector(table(so.query.3@meta.data[["group.query"]][so.query.3@meta.data[["seurat_clusters"]] %in% u.clusters[i]])) 
+  if (any(n.cell.cur < 3)) next
+  
+  # specify group names
+  which.cluster <- u.clusters[i]
+  group1 <- paste(which.cluster, "_", u.groups[2], sep = "")
+  group2 <- paste(which.cluster, "_", u.groups[1], sep = "")
+  
+  # find group-wise differences (stratified by cluster)
+  # Note logFC = Group 1 - Group 2
+  df.deg <- FindMarkers(so.query.3,
+                        assay = which.assay.deg,
+                        ident.1 = group1,
+                        ident.2 = group2,
+                        only.pos = only.pos,
+                        min.pct = 0.25,
+                        logfc.threshold = lfc.threshold,
+                        verbose = F)
+  
+  df.deg[ ,c("p_val","avg_logFC","pct.1", "pct.2","p_val_adj")] <- signif(df.deg[ ,c("p_val","avg_logFC","pct.1", "pct.2","p_val_adj")], 3)
+  
+  df.deg$group.1 <- group1
+  df.deg$group.2 <- group2
+  
+  # store results
+  df.deg$genes <- rownames(df.deg)
+  df.deg.list[[paste("c", as.character(u.clusters[i]), sep = "")]] <- df.deg
+  df.deg.master <- bind_rows(df.deg.master, df.deg)
+  
+}
+
+
+```
+
+
+```{r plot top DEG (between conditions), fig.height=6, fig.width=13}
+
+plt.deg.umap <- list()
+plt.deg.vln <- list()
+for (i in 1:length(u.clusters)){
+  
+  
+  # store results
+  df.deg <- df.deg.list[[paste("c", as.character(u.clusters[i]), sep = "")]] 
+  
+  # get top differentially expressed genes
+  df.deg.adj <- df.deg[df.deg$p_val_adj<0.05, ]
+  df.deg.adj <- df.deg.adj[df.deg.adj$avg_logFC>0, ]
+   if (is.null(df.deg.adj)) next
+  df.deg.adj <- df.deg.adj[complete.cases(df.deg.adj),]
+  df.deg.adj$logp <- -log10(df.deg.adj$p_val_adj)
+  
+
+    
+    df.deg.filtered <- df.deg.adj %>% 
+      dplyr::arrange(logp) %>%
+      dplyr::top_n(n = 6, wt = logp) %>%
+      dplyr::arrange(desc(logp))
+    
+    # if data remains after filetering, plot results
+    if (nrow(df.deg.filtered) > 0){
+      
+      
+      # get feature plot
+      plt.deg <-  FeaturePlot(so.query.3, features = df.deg.filtered$genes, split.by = "group.query", cols = c("grey", "red"), order = T, combine = F)
+      
+      # clear axes
+      plt.deg <- lapply(plt.deg, function(x){x + NoLegend() +  NoAxes() + theme(axis.title.y = element_text(angle = 90))})  
+      
+      # get group names (ordered)
+      split.names <- names(group.list)[order(names(group.list))]
+      
+      plots <- plt.deg
+      nsplits <- 2
+      features <- df.deg.filtered$genes
+      
+      # assign labels
+      idx <- 1
+      for (j in which(x = 1:length(x = plots)%%length(x = features) ==   1)) {
+        plots[[j]] <- plots[[j]] + ylab(split.names[idx])
+        idx <- idx + 1
+      }
+    
+          # combine and store sorted plots
+    plt.deg.umap[[paste("c", as.character(u.clusters[i]), "-top", sep = "")]]  <- CombinePlots(plots, nrow = length(group.list)) 
+      
+      # plt.deg.umap[[paste("c", as.character(u.clusters[i]), sep = "")]] <- FeaturePlot(so.query.3, features = df.deg.filtered$genes, split.by = "group.query", cols = c("grey", "red"), order = T)
+      
+      plt.deg.vln[[paste("c", as.character(u.clusters[i]), "-top", sep = "")]] <- VlnPlot(so.query.3, features = df.deg.filtered$genes, split.by = "group.query", group.by = "cluster.orig", 
+                         pt.size = 0, combine = FALSE)
+      
+      
+      
+      if (print.inline){
+        print( plt.deg.umap[[paste("c", as.character(u.clusters[i]), "-top", sep = "")]] )
+        print(CombinePlots(plots =  plt.deg.vln[[paste("c", as.character(u.clusters[i]), "-top", sep = "")]] , nrow = 2))
+      }
+      
+    }
+  
+  
+}
+
+```
+
+
+
+```{r plot bottom DEG (between conditions), fig.height=6, fig.width=13}
+
+# plt.deg.umap <- list()
+# plt.deg.vln <- list()
+for (i in 1:length(u.clusters)){
+  
+  
+  # store results
+  df.deg <- df.deg.list[[paste("c", as.character(u.clusters[i]), sep = "")]] 
+  
+    # get bottom differentially expressed genes
+  df.deg.adj <- df.deg[df.deg$p_val_adj<0.05, ]
+  df.deg.adj <- df.deg.adj[df.deg.adj$avg_logFC<0, ]
+   if (is.null(df.deg.adj)) next
+  df.deg.adj <- df.deg.adj[complete.cases(df.deg.adj),]
+  df.deg.adj$logp <- -log10(df.deg.adj$p_val_adj)
+  
+    
+    
+    df.deg.filtered <- df.deg.adj %>% 
+      dplyr::arrange(logp) %>%
+      dplyr::top_n(n = 6, wt = logp) %>%
+      dplyr::arrange(desc(logp))
+    
+    
+    # if data remains after filetering, plot results
+    if (nrow(df.deg.filtered) > 0){
+      
+      
+      # get feature plot
+      plt.deg <-  FeaturePlot(so.query.3, features = df.deg.filtered$genes, split.by = "group.query", cols = c("grey", "blue"), order = T, combine = F)
+      
+      # clear axes
+      plt.deg <- lapply(plt.deg, function(x){x + NoLegend() +  NoAxes() + theme(axis.title.y = element_text(angle = 90))})  
+      
+      # get group names (ordered)
+      split.names <- names(group.list)[order(names(group.list))]
+      
+      plots <- plt.deg
+      nsplits <- 2
+      features <- df.deg.filtered$genes
+      
+      # assign labels
+      idx <- 1
+      for (j in which(x = 1:length(x = plots)%%length(x = features) ==   1)) {
+        plots[[j]] <- plots[[j]] + ylab(split.names[idx])
+        idx <- idx + 1
+      }
+    
+          # combine and store sorted plots
+    plt.deg.umap[[paste("c", as.character(u.clusters[i]), "-bottom", sep = "")]]  <- CombinePlots(plots, nrow = length(group.list)) 
+      plt.deg.vln[[paste("c", as.character(u.clusters[i]), "-bottom", sep = "")]] <- VlnPlot(so.query.3, features = df.deg.filtered$genes, split.by = "group.query", group.by = "cluster.orig", 
+                         pt.size = 0, combine = FALSE)
+    
+      
+      if (print.inline){
+        print(plt.deg.umap[[paste("c", as.character(u.clusters[i]), "-bottom", sep = "")]])
+        print(CombinePlots(plots =   plt.deg.vln[[paste("c", as.character(u.clusters[i]), "-bottom", sep = "")]] , nrow = 2))
+      }
+      
+    }
+  
+  
+}
+
+```
+
+
+
+```{r, warning=FALSE, message=FALSE}
+
+  which.x <- names(group.list)[order(names(group.list))][1]
+which.y <- names(group.list)[order(names(group.list))][2]
+
+
+u.clusters <- as.numeric(as.character(unique((so.query.2@meta.data[["seurat_clusters"]]))))
+u.clusters <- u.clusters[order(u.clusters)]
+
+
+plt.pairwise.list <- list()
+
+for (i in 1:length(u.clusters)){
+  
+  # get current cluster
+  which.cluster <- u.clusters[i]
+  
+  # get DEGs
+  df.deg <- df.deg.list[[paste("c", as.character(u.clusters[i]), sep = "")]] 
+  
+  # get top differentially expressed genes
+  df.deg.adj <- df.deg[df.deg$p_val_adj<0.05, ]
+  
+  try({if (is.null(df.deg.adj)){next} }, silent = T)
+  try({if (nrow(df.deg.adj) == 0){next} }, silent = T)
+  
+  # ranked by signed lop p 
+  df.deg.adj <- df.deg.adj[complete.cases(df.deg.adj),]
+  df.deg.adj$logp <- -log10(df.deg.adj$p_val_adj)
+  df.deg.adj$logp <- df.deg.adj$logp * sign(df.deg.adj$avg_logFC)
+  
+  # get top genes
+  df.deg.filtered.top <- df.deg.adj %>% 
+    dplyr::arrange(logp) %>%
+    dplyr::top_n(n = 40, wt = logp) %>%
+    dplyr::arrange(desc(logp))
+  df.deg.filtered.top <- df.deg.filtered.top[df.deg.filtered.top$logp > 0, ]
+  
+  # get bottom genes
+  df.deg.filtered.bottom <- df.deg.adj %>% 
+    dplyr::arrange(desc(logp)) %>%
+    dplyr::top_n(n = 40, wt = -logp) %>%
+    dplyr::arrange(((logp)))
+  df.deg.filtered.bottom <- df.deg.filtered.bottom[df.deg.filtered.bottom$logp < 0, ]
+  
+  # combine top and bottom genes
+  genes.to.label <- c(df.deg.filtered.top$genes, df.deg.filtered.bottom$genes)
+  colors.to.label <- c(rep("tomato", nrow(df.deg.filtered.top)), rep("skyblue", nrow(df.deg.filtered.bottom)))
+  
+  # get average expression profile
+  sub.pop <- subset(so.query.2, idents = which.cluster)
+  Idents(sub.pop) <- "group.query"
+  
+  # library(tidyverse)
+  sub.pop <- rmDuplicateGenes(sub.pop)
+  # sub.pop@assays[["SCT"]]@data <- as.matrix(sub.pop@assays[["SCT"]]@data)
+  avg.sub.pop <- log1p(AverageExpression(sub.pop, verbose = FALSE)[[1]])
+  # avg.sub.pop <- log1p(AverageExpression(sub.pop, verbose = FALSE)[[1]])
+  # a <- AverageExpression(sub.pop, verbose = FALSE)
+  avg.sub.pop$gene <- rownames(avg.sub.pop)
+  
+  # specify gene coloring
+  avg.sub.pop$color <- "grey90"
+  avg.sub.pop$color[avg.sub.pop$gene %in% df.deg.adj$gene[df.deg.adj$avg_logFC > 0]] <- "tomato"
+  avg.sub.pop$color[avg.sub.pop$gene %in% df.deg.adj$gene[df.deg.adj$avg_logFC < 0]] <- "skyblue"
+  
+  # generate plot
+  p1 <- ggplot(avg.sub.pop, aes(get(which.x), get(which.y))) + 
+    geom_point(alpha = 0.25, color = avg.sub.pop$color) + 
+    ggtitle(paste("Cluster ", which.cluster, sep = "")) + 
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") + 
+    scale_x_continuous(trans='log10') +
+    scale_y_continuous(trans='log10') + 
+    xlab(which.x) + 
+    ylab(which.y) + 
+    theme_classic()
+  
+  # add labels to plot
+  p1 <- LabelPoints(p1, points = genes.to.label, repel = T, color = colors.to.label)
+  
+  plt.pairwise.list[[paste("c", as.character(u.clusters[i]), sep = "")]] <- p1
+  
+  if (print.inline){
+    print(p1)
+  }
+  
+}
+
+
+```
+
+
+```{r symbol2entrez}
+
+# my.symbol <- as.vector(rownames(so.query.3@assays[["RNA"]]))
+my.symbol <- rownames(so.query.3)
+my.entrez <- sym2entrez(my.symbol, my.species = species )
+my.entrez <- my.entrez[complete.cases(my.entrez), ]
+
+```
+
+
+
+
+```{r get annotation pathways}
+
+# 
+# # get gene lists for pathway annotation
+pathways.bader <- getAnnotationPathways(query.genes = my.entrez$ENTREZID, db = c("Bader"), ontology = "BP", species = species)
+pathways.go <- getAnnotationPathways(query.genes = my.entrez$ENTREZID, db = c("GO"), ontology = "BP", species = species)
+
+pathways <- pathways.go
+
+```
+
+
+```{r enrich DEG}
+
+# enrich DEGs (differential)
+
+gse.pathway.list <- list()
+gse.pathway.deg <- NULL
+
+for (i in 1:length(u.clusters)){
+  
+  which.cluster <- u.clusters[i]
+  
+  # get DEGs
+  df.deg <- df.deg.list[[paste("c", as.character(u.clusters[i]), sep = "")]] 
+  
+  # ranked by signed lop p 
+   if (is.null(df.deg)) next
+  df.deg <- df.deg[complete.cases(df.deg),]
+  df.deg$logp <- -log10(df.deg$p_val_adj)
+  df.deg$logp <- df.deg$logp * sign(df.deg$avg_logFC)
+  
+  # prep gene list (match to EntrezID, sort)
+ 
+  gene.list <- df.deg$logp
+  names(gene.list) <- df.deg$genes
+  match.ind <- match(names(gene.list), my.entrez$SYMBOL)
+  names(gene.list) <- as.character(my.entrez$ENTREZID[match.ind])
+  gene.list = sort(gene.list, decreasing = TRUE)
+  
+  # clean list
+  df.ent <- data.frame(names = names(gene.list), values = as.vector(gene.list))
+  df.ent <- df.ent[complete.cases(df.ent), ]
+  df.ent <- df.ent[!is.infinite(df.ent$values), ]
+  gene.list.clean <- df.ent$values
+  names(gene.list.clean) <- df.ent$names
+  
+  # pathway gsea enrichment
+  gse.pathway <- fgsea::fgsea(pathways, gene.list.clean, nperm=1000, maxSize=500)
+
+  if (nrow(gse.pathway) == 0) next
+  
+  gse.pathway$cluster <- paste("c", as.character(u.clusters[i]), sep = "")
+  gse.pathway.deg <- bind_rows(gse.pathway.deg, gse.pathway)
+  
+  # gse.pathway.list[[paste("c", as.character(u.clusters[i]), sep = "")]]  <- gse.pathway
+  
+  
+}
+
+
+gse.pathway.deg[ ,c("ES","NES", "pval", "padj")] <- signif(gse.pathway.deg[ ,c("ES","NES", "pval", "padj")], 3)
+
+gse.pathway.deg.all <- gse.pathway.deg[ ,c("cluster", "pathway", "ES","NES", "pval", "padj", "nMoreExtreme", "size")]
+
+gse.pathway.deg.sig <- gse.pathway.deg.all[(gse.pathway.deg.all$pval < 0.05) & (abs(gse.pathway.deg.all$NES) >= 1), ]
+
+gse.pathway.deg.sub <- gse.pathway.deg[ ,c("cluster", "pathway", "ES","NES", "pval", "padj", "nMoreExtreme", "size")]
+
+
+# print data table
+if (print.inline){
+  datatable(gse.pathway.deg.sig, 
+            filter = 'top',
+            extensions = 'Buttons',
+            options = list(pageLength = 50,
+                           dom = 'Bfrtip', 
+                           buttons = c('copy', 'csv', 'pdf')))
+}
+
+```
+
+
+
+
+
+```{r enrich CG}
+
+# enrich CG (conserved)
+
+
+# get current cluster
+
+gse.pathway.cg.list <- list()
+
+gse.pathway.cg <- NULL
+
+for (i in 1:length(u.clusters)){
+  
+  which.cluster <- u.clusters[i]
+  
+  # get DEGs
+  df.cons <- conserved.markers.list[[paste("c", as.character(u.clusters[i]), sep = "")]] 
+  
+  # prep gene list (match to EntrezID, sort)
+  if (is.null(df.cons)) next
+  
+  # specify group names
+  group1 <- paste(u.groups[1], "_avg_logFC", sep = "")
+  group2 <- paste(u.groups[2], "_avg_logFC", sep = "")
+  df.cons$avg_logFC <- ((df.cons[, group1]) + (df.cons[, group2]))/2
+  
+  df.cons$genes <- rownames(df.cons)
+  
+  # only keep genes which have consistent sign of logFC
+  df.cons <- df.cons[ sign(df.cons[, group1]) ==  sign(df.cons[, group2]), ]
+  
+  gene.list.cg <- df.cons$avg_logFC
+  names(gene.list.cg) <- df.cons$genes
+  match.ind <- match(names(gene.list.cg), my.entrez$SYMBOL)
+  names(gene.list.cg) <- as.character(my.entrez$ENTREZID[match.ind])
+  gene.list.cg = sort(gene.list.cg, decreasing = TRUE)
+  
+  # clean list
+  df.ent.cg <- data.frame(names = names(gene.list.cg), values = as.vector(gene.list.cg))
+  df.ent.cg <- df.ent.cg[complete.cases(df.ent.cg), ]
+  df.ent.cg <- df.ent.cg[!is.infinite(df.ent.cg$values), ]
+  gene.list.cg.clean <- df.ent.cg$values
+  names(gene.list.cg.clean) <- df.ent.cg$names
+
+    # pathway gsea enrichment
+  gse.pathway <- fgsea::fgsea(pathways, gene.list.cg.clean, nperm=1000, maxSize=500)
+  
+  if (nrow(gse.pathway) == 0) next
+  
+  gse.pathway$cluster <- paste("c", as.character(u.clusters[i]), sep = "")
+  gse.pathway.cg <- bind_rows(gse.pathway.cg, gse.pathway)
+
+}
+
+if (is.null(gse.pathway.cg)){
+  
+  gse.pathway.cg <- NULL
+  gse.pathway.cg.all <- NULL
+  gse.pathway.cg.sub <- NULL
+} else {
+  
+  
+  gse.pathway.cg[ ,c("ES","NES", "pval", "padj")] <- signif(gse.pathway.cg[ ,c("ES","NES", "pval", "padj")], 3)
+  
+  gse.pathway.cg.all <- gse.pathway.cg[ ,c("cluster", "pathway", "ES","NES", "pval", "padj", "nMoreExtreme", "size")]
+  
+  gse.pathway.cg.sub <- gse.pathway.cg[ ,c("cluster", "pathway", "ES","NES", "pval", "padj", "nMoreExtreme", "size")]
+  
+  
+  # print data table
+  if (print.inline){
+    datatable(gse.pathway.cg.all, 
+              filter = 'top',
+              extensions = 'Buttons',
+              options = list(pageLength = 50,
+                             dom = 'Bfrtip', 
+                             buttons = c('copy', 'csv', 'pdf')))
+  }
+  
+}
+
+```
+
+
+
+
+
+```{r}
+
+# runWGCNA.dev <- function(e.mat, s.mat = NULL, cor.metric = "rho_p", soft.power = 2, use.TOM = T, network.type = "signed", TOM.type = "unsigned", rescale.adjacency = F, ...){
+# 
+#   # similarity matrix - using proportionality metric for scRNAseq data.
+#   if (is.null(s.mat)){
+#     s.mat <-  dismay::dismay(e.mat, metric = cor.metric)
+#   }
+#   
+#   # adjacency matrix
+#   a.mat <-  sim2adj(s.mat, soft.power, network.type)
+# 
+#   # rescale value if needed
+#   if (rescale.adjacency) a.mat <- recaleValues(a.mat, new.min = 0, new.max = 1)
+# 
+#   # compute topological overlap matix (TOM)
+#   if (use.TOM){
+# 
+#     if ((TOM.type) == "signed" & (network.type == "unsigned")) {
+#       a.mat.tom <- a.mat * sign(s.mat)
+#     } else {
+#       a.mat.tom <- a.mat
+#     }
+# 
+#     print2hide <-  capture.output(w.mat <- TOMsimilarity(a.mat.tom, TOMType = TOM.type, ...))
+#   } else {
+#     w.mat <- a.mat
+#   }
+#   
+#   # assign row and col names
+#   rownames(w.mat) <- rownames(a.mat) 
+#   colnames(w.mat) <- colnames(a.mat)
+# 
+#   # dissimilarity measure
+#   d.mat <- 1- w.mat
+# 
+#   output <- list(
+#     s.mat = s.mat,
+#     a.mat = a.mat,
+#     w.mat = w.mat,
+#     d.mat = d.mat
+#   )
+# 
+#   return(output)
+# }
+
+```
+
+
+```{r}
+
+
+# balanceMatrixSize <- function(mat.1, mat.2, method = "match.max"){
+#   
+#   # ensure sample sizes are balanced across groups
+#   match.sample.size <- method #option: "match.max", match to max sample size; "match.min", match to min sample size; "none", no matcing
+#   
+#   size.1 <- nrow(mat.1)
+#   size.2 <- nrow(mat.2)
+#   
+#   if (match.sample.size == "match.max"){
+#     
+#     target.size <- max(c(size.1, size.2))
+#     
+#     fill.1 <- target.size - size.1
+#     fill.2 <- target.size - size.2
+#     
+#     sample.ind.1 <- sample(seq(1,size.1), fill.1, replace = T)
+#     sample.ind.2 <- sample(seq(1,size.2), fill.2, replace = T)
+#     
+#     if (fill.1 > 0){
+#       de.1 <- rbind(mat.1, mat.1[sample.ind.1 , ])
+#     } else {
+#       de.1 <- mat.1
+#     }
+#     
+#     if (fill.2 > 0){
+#       de.2 <- rbind(mat.2, mat.2[sample.ind.2 , ])
+#     } else {
+#       de.2 <- mat.2
+#     }
+#     
+#     de.all <- rbind(de.1, de.2)
+#     
+#     
+#   } else if (match.sample.size == "match.min"){
+#     
+#     target.size <- min(c(size.1, size.2))
+#     
+#     fill.1 <- size.1 - target.size
+#     fill.2 <- size.2 - target.size
+#     
+#     sample.ind.1 <- sample(seq(1,size.1), target.size, replace = F)
+#     sample.ind.2 <- sample(seq(1,size.2), target.size, replace = F)
+#     
+#     de.1 <- mat.1[sample.ind.1, ]
+#     de.2 <- mat.2[sample.ind.2, ]
+#     
+#     de.all <- rbind(de.1, de.2)
+#     
+#     
+#   } else if (match.sample.size == "none"){
+#     
+#     de.1 <- mat.1
+#     de.2 <- mat.2
+#     
+#     de.all <- rbind(de.1, de.2)
+#   }
+#   
+#   
+#   output <- list(
+#     de.1 = de.1,
+#     de.2 = de.2,
+#     de.all = de.all
+#   )
+#   
+#   return(output)
+#   
+# }
+
+
+
+
+```
+
+```{r filter expression matrix and calculate similary matrix (for network analysis), warning = FALSE, message=FALSE}
+
+
+# entire matrix
+which.data <- "scale"
+# exp.mat.complete <- getExpressionMatrix.dev(so.query, which.data = which.data)
+exp.mat.complete <- getExpressionMatrix(so.query, which.data = which.data)
+
+# variable gene only matrix
+use.var <- T
+if (use.var){
+  exp.mat <- getExpressionMatrix(so.query, only.variable = use.var, which.data = which.data, use.additional.genes = NA)
+} else {
+  exp.mat <- exp.mat.complete
+}
+# exp.mat.abs <- exp.mat.abs[rownames(exp.mat.abs) %in% rownames(exp.mat), ]
+
+# max var n
+if (DefaultAssay(so.query) == "SCT"){
+  max.var.n <- 8000
+  df.var <- so.query@assays[["SCT"]]@meta.features
+  df.var$genes <- rownames(df.var)
+  top.var.df <- df.var %>% top_n(max.var.n, (sct.residual_variance))
+  top.var <- top.var.df$genes
+  
+  # if (!is.na(use.additional.genes)){
+  #   exp.mat <- exp.mat[rownames(exp.mat) %in% unique(top.var,use.additional.genes), ]
+  # } else {
+    exp.mat <- exp.mat[rownames(exp.mat) %in% unique(top.var), ]
+  # }
+
+}
+
+filter.criteria <- "var" # "all": all criteria, "var": var criteria
+# flag good genes/samples
+exp.mat.abs <- getExpressionMatrix(so.query, which.data = "data")
+exp.mat.abs[exp.mat.abs == 0] <- NA
+print2hide <-  capture.output(gsg <- goodSamplesGenes(t(exp.mat.abs), verbose = 3))
+exp.mat.abs[is.na(exp.mat.abs)] <- 0
+
+# filter expression matrix
+# crtieria: 1) pass goodSampleGenes (WGCNA criteria) or 2) belong to set of HVG
+which.col <- colnames(exp.mat.abs)[gsg[["goodSamples"]]]
+if (filter.criteria == "all"){
+  which.row <- unique(c(rownames(exp.mat.abs)[gsg[["goodGenes"]]], rownames(exp.mat)))
+} else if (filter.criteria == "var"){
+  which.row <- unique(rownames(exp.mat))
+}
+ 
+ exp.mat <- exp.mat.complete[rownames(exp.mat.complete) %in% which.row, colnames(exp.mat.complete) %in% which.col]
+ 
+
+# transpose expressio matrix (genes are columns)
+t.exp.mat <- t(exp.mat)
+datExpr <- as.matrix(t.exp.mat)
+SubGeneNames=colnames(datExpr)
+
+# capture output used to hide undesired print statement
+print2hide <- capture.output(allowWGCNAThreads())
+
+# transform matrix if necessary
+if (min(datExpr) < 0) {
+  datExpr.orig.noz <- datExpr + abs(min(datExpr))
+} else {
+  datExpr.orig.noz <- datExpr
+}
+
+# split into two groups
+de.orig.1 <- datExpr.orig.noz[rownames(datExpr.orig.noz) %in% colnames(so.query.3)[grepl(reference.group, so.query.3@active.ident)], ]
+de.orig.2 <- datExpr.orig.noz[rownames(datExpr.orig.noz) %in% colnames(so.query.3)[grepl(comparison.group, so.query.3@active.ident)], ]
+
+
+# ensure sample sizes are balanced across groups
+output.mat <- balanceMatrixSize(de.orig.1, de.orig.2, method = "match.max")
+de.1 <- output.mat[["de.1"]]
+de.2 <- output.mat[["de.2"]]
+datExpr.noz <- output.mat[["de.all"]]
+
+# assert unique names
+rownames(de.1) <- make.names(rownames(de.1), unique = T)
+rownames(de.2) <- make.names(rownames(de.2), unique = T)
+rownames(datExpr.noz) <- make.names(rownames(datExpr.noz), unique = T)
+
+# specify network parameters
+TOM.type <- "unsigned"
+which.network <- "signed hybrid"
+which.cor <- "rho_p"
+# which.cor <- "spearman"
+
+# get similary matrices
+output.all.preliminary <- runWGCNA(datExpr.noz, cor.metric = which.cor, soft.power = 2, 
+                                       use.TOM = F, network.type = which.network, TOM.type = TOM.type)
+s.mat <- output.all.preliminary$s.mat
+a.mat <- output.all.preliminary$a.mat
+s.1 <- runWGCNA(de.1, cor.metric = which.cor, soft.power = 2, 
+                    use.TOM = F, network.type = which.network, TOM.type = TOM.type)$s.mat
+s.2 <- runWGCNA(de.2, cor.metric = which.cor, soft.power = 2, 
+                    use.TOM = F, network.type = which.network, TOM.type = TOM.type)$s.mat
+
+
+```
+
+
+
+
+
+
+```{r house keeping genes}
+
+
+do.hkg <- F
+
+
+if (do.hkg){
+
+
+df.cv <- avgGroupExpression(so = so.query, which.data = "scale", which.center = "cv", which.group = "group.query")
+# df.sd <- avgGroupExpression.dev(so = so.query, which.data = "scale", which.center = "sd", which.group = "group.query")
+
+# Eisenberge, Levanon et al Trends in Genetics 2013 (house keeping genes, HKG)
+house.keeping.genes <- c("C1or43", "CHMP2A", "EMC7", "GPI", "PSMB2", "PSMB4", "RAB7A", "REEP5", "SNRPD3", "VCP", "VPS29")
+
+if (species == "Mm"){
+  house.keeping.genes <- firstup(house.keeping.genes)
+}
+
+
+df.cv <- df.cv %>%
+  mutate(rank.val = rank(GL261) / length(GL261))
+
+df.cv$label <- F
+df.cv$label[df.cv$genes %in% house.keeping.genes] <- T
+
+df.cv %>%
+  ggplot(aes(x = GL261)) +
+  geom_histogram()
+
+df.cv %>%
+  ggplot(aes(x = rank.val, y = GL261)) +
+  geom_point() + 
+  ggrepel::geom_text_repel(aes(rank.val, GL261, label =ifelse(label ,as.character(genes),'')))
+
+  
+}
+```
+
+
+
+
+
+```{r fig.width=10, fig.height=7}
+
+sft <- getSoftThreshold.v2(s.mat, power =c(seq(0.5,5, by = 0.5), seq(6,10)), 
+                           network.type = which.network, rescale.adjacency = F)
+
+if (print.inline){
+cowplot::plot_grid(plotlist = sft$distribution.plot, ncol = 5)
+}
+
+```
+
+```{r}
+
+if (print.inline){
+print(sft$optimization.plot)
+}
+
+```
+
+```{r calculate network connectivity}
+
+# get soft power
+
+library(doParallel)
+
+rescale.amat <- F
+
+sft <- getSoftThreshold.v2(s.mat, power =c(seq(0.5,5, by = 0.5), seq(6,10)), 
+                           network.type = which.network, rescale.adjacency = rescale.amat)
+
+sft.1 <- getSoftThreshold.v2(s.1, power =c(seq(0.5,5, by = 0.5), seq(6,10)), 
+                           network.type = which.network, rescale.adjacency = rescale.amat)
+
+sft.2 <- getSoftThreshold.v2(s.2, power =c(seq(0.5,5, by = 0.5), seq(6,10)), 
+                           network.type = which.network, rescale.adjacency = rescale.amat)
+best.power <- sft[["powerEstimate"]]
+
+if (is.na(best.power)) best.power <- 1
+best.power.1 <- sft.1[["powerEstimate"]]
+best.power.2 <- sft.2[["powerEstimate"]]
+
+# run WCGNA
+output.all <- runWGCNA(e.mat = datExpr.noz, s.mat = s.mat, cor.metric = which.cor, 
+                       soft.power = best.power, use.TOM = T, 
+                       network.type = which.network, TOMDenom  = "min", TOM.type = TOM.type, rescale.adjacency = rescale.amat)
+
+output.1 <- NULL
+try({
+  output.1 <- runWGCNA(e.mat = de.1, s.mat = s.1, cor.metric = which.cor, 
+                       soft.power = best.power.1, use.TOM = T, 
+                       network.type = which.network, TOMDenom  = "min", TOM.type = TOM.type, rescale.adjacency = rescale.amat) 
+}, silent = T)
+
+if (is.null(output.1)){
+  output.1 <- runWGCNA(e.mat = de.1, s.mat = s.1, cor.metric = which.cor, 
+                       soft.power = best.power, use.TOM = T, 
+                       network.type = which.network, TOMDenom  = "min", TOM.type = TOM.type, rescale.adjacency = rescale.amat)  
+}
+
+output.2 <- NULL
+try({
+  output.2 <- runWGCNA(e.mat = de.2, s.mat = s.2, cor.metric = which.cor, 
+                       soft.power = best.power.2, use.TOM = T, 
+                       network.type = which.network, TOMDenom  = "min", TOM.type = TOM.type, rescale.adjacency = rescale.amat) 
+}, silent = T)
+
+if (is.null(output.2)){
+  output.2 <- runWGCNA(e.mat = de.2, s.mat = s.2, cor.metric = which.cor, 
+                       soft.power = best.power, use.TOM = T, 
+                       network.type = which.network, TOMDenom  = "min", TOM.type = TOM.type, rescale.adjacency = rescale.amat)  
+}
+
+# unpack output
+s.mat <- output.all[["s.mat"]] # similar matrix
+a.mat <- output.all[["a.mat"]] # adjacency matrix
+w.mat <- output.all[["w.mat"]] # topological overlap matix
+d.mat <- output.all[["d.mat"]] # disimilarity matix
+
+s.1 <- output.1[["s.mat"]]
+a.1 <- output.1[["a.mat"]]
+w.1 <- output.1[["w.mat"]]
+d.1 <- output.1[["d.mat"]] 
+
+s.2 <- output.2[["s.mat"]]
+a.2 <- output.2[["a.mat"]]
+w.2 <- output.2[["w.mat"]]
+d.2 <- output.2[["d.mat"]] 
+
+
+```
+
+
+
+
+```{r TOM scaling}
+
+# TOM matrices of different datasets may have different statistical properties. Since consensus is defined as teh component-wise minimum of two-TOMs, a bias may results. Simple scaling can mitigate the effects of different statistical properties to some degree. TOM are scales such that 95th percentile equals the 95th percentile of the female TOM. 
+
+# scale TOM matrices
+# w.1 <- scaleTOM(query.TOM = w.1, reference.TOM = w.2, reference.percentile = 0.95)
+w.1 <- scaleTOM(query.TOM = w.1, reference.TOM = w.2, reference.percentile = 0.95)
+# w.2 <- scaleTOM(query.TOM = w.2, reference.TOM = w.mat, reference.percentile = 0.95)
+
+# recompute the distance matrix
+d.mat <- 1-w.mat
+d.1 <- 1-w.1
+d.2 <- 1-w.2
+
+# compute consensus topological overlap
+w.co <- pmin(w.1, w.2) # component-wise parallel minimum of TOMs
+w.dis <- pmax(w.1, w.2)
+d.co <- 1-w.co
+d.dis <- 1-w.dis
+
+# go.here
+```
+
+
+```{r connectivity comparison, fig.height = 10, fig.width=10}
+
+# quantile normalization of 2 vectors (Hicks 2014)
+# qNorm <- function(x, y, genes = NULL, flag.top.n = 15){
+#   
+#   # check input
+#   stopifnot(length(x) == length(y))
+#   
+#   # get original vector orders
+#   x.orig.order <- seq(1,length(x))
+#   y.orig.order <- seq(1,length(y))
+#   
+#   # get new vector orders
+#   x.new.order <-order(x)
+#   y.new.order <-order(y)
+#   
+#   # sort vector
+#   x.sort <- x[x.new.order]
+#   y.sort <- y[y.new.order]
+#   
+#   # get average
+#   xy.mean <- (x.sort + y.sort)/2
+#   
+#   # restore original order
+#   x.new <- xy.mean[x.orig.order[x.new.order]]
+#   y.new <- xy.mean[y.orig.order[y.new.order]]
+#   
+#   
+#   if (!is.null(genes)){
+#     stopifnot(length(genes) == length(x))
+#     df.xy <- data.frame(genes = genes, x.old = x, y.old = y, x.new = x.new, y.new = y.new)
+#   } else {
+#     df.xy <- data.frame(x.old = x, y.old = y, x.new = x.new, y.new = y.new)
+#   }
+#   
+#   # flag.top.n <- 10
+# df.xy$top.old <- F
+# df.xy$top.old[rank(df.xy$x.old) >  nrow(df.xy)-flag.top.n] <- T
+# df.xy$top.old[rank(df.xy$y.old) >  nrow(df.xy)-flag.top.n] <- T
+# df.xy$top.old[rank((df.xy$x.old + df.xy$y.old)/2) >  nrow(df.xy)-flag.top.n] <- T
+# 
+# df.xy$top.new <- F
+# df.xy$top.new[rank(df.xy$x.new) >  nrow(df.xy)-flag.top.n] <- T
+# df.xy$top.new[rank(df.xy$y.new) >  nrow(df.xy)-flag.top.n] <- T
+# df.xy$top.new[rank((df.xy$x.new + df.xy$y.new)/2) >  nrow(df.xy)-flag.top.n] <- T
+# 
+# return(df.xy)
+#   
+# }
+
+
+# quantile normalization
+x.s1 <- getConnectivity(s.1, gene.names = colnames(a.1))$wi
+y.s2 <- getConnectivity(s.2, gene.names = colnames(a.2))$wi
+df.xy.s <- qNorm(x.s1, y.s2, genes = colnames(a.1))
+
+x.a1 <- getConnectivity(a.1, gene.names = colnames(a.1))$wi
+y.a2 <- getConnectivity(a.2, gene.names = colnames(a.2))$wi
+df.xy.a <- qNorm(x.a1, y.a2, genes = colnames(a.1))
+
+x.w1 <- getConnectivity(w.1, gene.names = colnames(a.1))$wi
+y.w2 <- getConnectivity(w.2, gene.names = colnames(a.2))$wi
+df.xy.w <- qNorm(x.w1, y.w2, genes = colnames(a.1))
+
+# generate plots
+
+# similarity-based connectivity plots
+plt.input.xy.s <- df.xy.s %>%
+  ggplot(aes(x.old, y.old)) + geom_point() +  geom_smooth(color = "skyblue") + geom_abline(slope = 1) + 
+  xlab(paste0("Original Similarity (", reference.group , ")")) + ylab(paste0("Original Similarity (", comparison.group , ")")) + 
+  theme_classic() +   ggtitle("Original Similarity") + 
+  ggrepel::geom_text_repel(aes(x.old, y.old, label =ifelse(top.old ,as.character(genes),'')), size = 2.5, color = "black") 
+
+plt.output.xy.s <- df.xy.s %>%
+  ggplot(aes(x.new, y.new)) + geom_point() +  geom_smooth(color = "tomato") + geom_abline(slope = 1) + 
+  xlab(paste0("Normalized Similarity (", reference.group , ")")) + ylab(paste0("Normalized Similarity (", comparison.group , ")")) +
+  theme_classic() +   ggtitle("Normalized Similarity") + 
+  ggrepel::geom_text_repel(aes(x.new, y.new, label =ifelse(top.new ,as.character(genes),'')), size = 2.5, color = "black") 
+
+# adjacency-based connectivity plots
+plt.input.xy.a <- df.xy.a %>%
+  ggplot(aes(x.old, y.old)) + geom_point() +  geom_smooth(color = "skyblue") + geom_abline(slope = 1) + 
+  xlab(paste0("Original Adjacency (", reference.group , ")")) + ylab(paste0("Original Adjacency (", comparison.group , ")")) + 
+  theme_classic() +   ggtitle("Original Adjacency") + 
+  ggrepel::geom_text_repel(aes(x.old, y.old, label =ifelse(top.old ,as.character(genes),'')), size = 2.5, color = "black") 
+
+plt.output.xy.a <- df.xy.a %>%
+  ggplot(aes(x.new, y.new)) + geom_point() +  geom_smooth(color = "tomato") + geom_abline(slope = 1) + 
+  xlab(paste0("Normalized Adjacency (", reference.group , ")")) + ylab(paste0("Normalized Adjacency (", comparison.group , ")")) + 
+  theme_classic() +   ggtitle("Normalized Adjacency") + 
+  ggrepel::geom_text_repel(aes(x.new, y.new, label =ifelse(top.new ,as.character(genes),'')), size = 2.5, color = "black") 
+
+# TOM-based connectivity plots
+plt.input.xy.w <- df.xy.w %>%
+  ggplot(aes(x.old, y.old)) + geom_point() +  geom_smooth(color = "skyblue") + geom_abline(slope = 1) + 
+  xlab(paste0("Original TOM (", reference.group , ")")) + ylab(paste0("Original TOM (", comparison.group , ")")) + 
+  theme_classic() +   ggtitle("Original TOM") + 
+  ggrepel::geom_text_repel(aes(x.old, y.old, label =ifelse(top.old ,as.character(genes),'')), size = 2.5, color = "black") 
+
+plt.output.xy.w <- df.xy.w %>%
+  ggplot(aes(x.new, y.new)) + geom_point() +  geom_smooth(color = "tomato") + geom_abline(slope = 1) + 
+  xlab(paste0("Normalized TOM (", reference.group , ")")) + ylab(paste0("Normalized TOM (", comparison.group , ")")) + 
+  theme_classic() +   ggtitle("Normalized TOM") + 
+  ggrepel::geom_text_repel(aes(x.new, y.new, label =ifelse(top.new ,as.character(genes),'')), size = 2.5, color = "black") 
+
+# cowplot::plot_grid(plt.input.xy.w, plt.output.xy.w)
+
+
+if (print.inline){
+  # fig.height = 10, fig.width=10
+ cowplot::plot_grid(plt.input.xy.s, plt.output.xy.s,
+                   plt.input.xy.a, plt.output.xy.a,
+                   plt.input.xy.w, plt.output.xy.w,
+                   ncol = 2)
+}
+
+```
+
+
+
+```{r }
+
+
+
+do.subnetwork <- F
+
+if (do.subnetwork){
+
+
+w.co.1 <- NULL
+w.co.2 <- NULL
+
+subnetwork.size <- 100
+n.cells <- nrow(datExpr.noz)
+n.subnetworks <- round(n.cells / subnetwork.size)
+for (i in 1:n.subnetworks){
+  
+  svMisc::progress(i, n.subnetworks)
+  
+  sample.id.1 <- sample(seq(1,nrow(de.1)), subnetwork.size)
+  sample.id.2 <- sample(seq(1,nrow(de.2)), subnetwork.size)
+  
+  mat.sub.1 <- de.1[ sample.id.1, ]
+  mat.sub.2 <- de.2[ sample.id.2, ]
+  
+  output.sub.1 <- runWGCNA(e.mat = mat.sub.1,  cor.metric = which.cor, soft.power = best.power, use.TOM = T, 
+                               network.type = which.network, TOMDenom  = "min", TOM.type = TOM.type, 
+                               rescale.adjacency = rescale.amat)
+  
+  output.sub.2 <- runWGCNA(e.mat = mat.sub.2,  cor.metric = which.cor, soft.power = best.power, use.TOM = T, 
+                               network.type = which.network, TOMDenom  = "min", TOM.type = TOM.type, 
+                               rescale.adjacency = rescale.amat)
+  
+  if (is.null(w.co.1)){
+    w.co.1 <- output.sub.1$w.mat
+  } else {
+    w.co.1 <- pmin(w.co.1, output.sub.1$w.mat)
+  }
+  
+    if (is.null(w.co.2)){
+    w.co.2 <- output.sub.2$w.mat
+  } else {
+    w.co.2 <- pmin(w.co.2, output.sub.2$w.mat)
+  }
+  
+  if (i == n.subnetworks) cat("Done!\n")
+  
+}
+
+
+d.co.1 <- 1-w.co.1
+d.co.2 <- 1-w.co.2
+geneTree.all <- dist2hclust(d.mat)
+geneTree.co.1 <- dist2hclust(d.co.1)
+geneTree.co.2 <- dist2hclust(d.co.2)
+
+w.co.all <- pmax(w.co.1, w.co.2)
+d.co.all <- 1 - w.co.all
+geneTree.co.all <- dist2hclust(d.co.all)
+
+par(mfrow = c(1,4))
+plot(geneTree.all, xlab = "", sub = "", main = "All", labels = F, hang = 0.04)
+plot(geneTree.co.1, xlab = "", sub = "", main = "1", labels = F, hang = 0.04)
+plot(geneTree.co.2, xlab = "", sub = "", main = "2", labels = F, hang = 0.04)
+plot(geneTree.co.all, xlab = "", sub = "", main = "Consensus", labels = F, hang = 0.04)
+
+
+d.1 <- d.co.1
+d.2 <- d.co.2
+d.co <- d.co.all
+
+geneTree.all <- geneTree.all
+geneTree.co <- geneTree.co.all
+geneTree.1 <- geneTree.co.1
+geneTree.2 <- geneTree.co.2
+
+  
+}
+```
+
+
+
+
+```{r, fig.width=10, fig.height=3}
+
+library(flashClust)
+# get dendrograms
+geneTree.all <- dist2hclust(d.mat)
+geneTree.co <- dist2hclust(d.co)
+geneTree.1 <- dist2hclust(d.1)
+geneTree.2 <- dist2hclust(d.2)
+# geneTree.dif <- dist2hclust(w.2-w.1)
+geneTree.dif <- dist2hclust(d.dis)
+
+if (print.inline){
+par(mfrow = c(1,5))
+plot(geneTree.all, xlab = "", sub = "", main = "All", labels = F, hang = 0.04)
+plot(geneTree.co, xlab = "", sub = "", main = "Consensus", labels = F, hang = 0.04)
+plot(geneTree.1, xlab = "", sub = "", main = paste0("Group 1: ", reference.group), labels = F, hang = 0.04)
+plot(geneTree.2, xlab = "", sub = "", main = paste0("Group 2: ", comparison.group), labels = F, hang = 0.04)
+plot(geneTree.dif, xlab = "", sub = "", main = paste0("Differential"), labels = F, hang = 0.04)
+}
+```
+
+```{r specfiy which meta network to evaluate}
+
+which.metanet <- "differential" # "consensus" or "differential"
+
+if (which.metanet == "consensus"){
+  w.co <- w.co
+  d.co <- d.co
+  geneTree.co <- geneTree.co
+} else if (which.metanet== "differential"){
+  w.co <- w.dis
+  d.co <- d.dis  
+  geneTree.co <- geneTree.dif
+}
+```
+
+
+```{r}
+
+# optimalDS.dev <- function(tree, d.mat, genes = NULL, ...){
+# 
+#   mColorh = NULL
+#   for (ds in 0:4){
+#     cut.tree <- cutreeDynamic(dendro = tree,distM= d.mat, cutHeight = 0.998, deepSplit=ds, pamRespectsDendro = FALSE)
+#      mColorh <- cbind(mColorh, labels2colors(cut.tree))
+#   }
+# 
+#   colnames(mColorh) <- paste0("ds.", seq(0,4))
+# 
+#   if (!is.null(genes) & length(genes) == nrow(mColorh)){
+#     mColorh <- cbind(mColorh, genes)
+#     colnames(mColorh)[length(colnames(mColorh))] <- "genes"
+#   }
+# 
+#   return(mColorh)
+# }
+
+
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+
+# mColorh.1 <- optimalDS(tree = geneTree.1, d.mat = d.1, genes  = rownames(a.1),pamStage = F)
+
+# determine number of modules based on refrence dataset
+print2hide <- capture.output(mColorh.1 <- optimalDS(tree = geneTree.1, d.mat = d.1, genes  = rownames(a.1)))
+print2hide <- capture.output(mColorh.2 <- optimalDS(tree = geneTree.2, d.mat = d.2, genes  = rownames(a.2)))
+print2hide <- capture.output(mColorh.all <- optimalDS(tree = geneTree.all, d.mat= d.mat, genes  = rownames(a.mat)))
+print2hide <- capture.output(mColorh.co <- optimalDS(tree = geneTree.co, d.mat= d.co, genes  = rownames(a.mat)))
+
+# select modules based off best clustering above
+which.deepcut <- "ds.4"
+modules.1a = mColorh.1[ ,which.deepcut]
+modules.2a = mColorh.2[ ,which.deepcut]
+modules.all <- mColorh.all[ ,which.deepcut]
+modules.coa <- mColorh.co[ ,which.deepcut]
+
+if (print.inline){
+# plot dendrograms (with module labels)
+plotDendroAndColors(geneTree.all, mColorh.all[,1:5], paste("dpSplt =", 0:4), main = "All", dendroLabels = F)
+  plotDendroAndColors(geneTree.co, mColorh.co[,1:5], paste("dpSplt =", 0:4), main = "Consensus", dendroLabels = F)
+plotDendroAndColors(geneTree.1, mColorh.1[,1:5], paste("dpSplt =", 0:4), 
+                    main = paste0("Group 1: ", reference.group), dendroLabels = F)
+plotDendroAndColors(geneTree.2, mColorh.2[,1:5], paste("dpSplt =", 0:4), 
+                    main = paste0("Group 2: ", comparison.group), dendroLabels = F)
+}
+
+```
+
+
+
+
+```{r merge redundant modules}
+
+do.redundant.merge <- F
+
+if (do.redundant.merge){
+  
+
+# Calculate module eigengenes
+multiExpr <- list(A1=list(data=de.1),A2=list(data=de.2))
+
+print2hide <- capture.output(unmergedMEs.co <- multiSetMEs(multiExpr, colors = NULL, universalColors = modules.coa))
+print2hide <- capture.output(unmergedMEs.all <- multiSetMEs(multiExpr, colors = NULL, universalColors = modules.all))
+
+# Calculate consensus dissimilarity of consensus module eigengenes
+consMEDiss.co <- consensusMEDissimilarity(unmergedMEs.co);
+consMEDiss.all <- consensusMEDissimilarity(unmergedMEs.all);
+
+# Cluster consensus modules
+consMETree.co <- hclust(as.dist(consMEDiss.co), method = "average");
+consMETree.all <- hclust(as.dist(consMEDiss.all), method = "average");
+
+# Plot the result
+if (print.inline){
+  sizeGrWindow(7,6)
+  par(mfrow = c(1,1))
+  plot(consMETree.co, main = "Consensus clustering of consensus module eigengenes",
+       xlab = "", sub = "")
+  abline(h=0.25, col = "red")  
+  
+  #   sizeGrWindow(7,6)
+  # par(mfrow = c(1,1))
+  # plot(consMETree.all, main = "Consensus clustering of all module eigengenes",
+  #      xlab = "", sub = "")
+  # abline(h=0.25, col = "red")  
+}
+
+
+
+print2hide <- capture.output(module.merge.co <- mergeCloseModules(multiExpr, modules.coa, cutHeight = 0.25, verbose = 3))
+moduleLabels <- module.merge.co$colors;
+modules.COA <- labels2colors(moduleLabels)
+
+print2hide <- capture.output(module.merge.all <- mergeCloseModules(multiExpr, modules.all, cutHeight = 0.25, verbose = 3))
+moduleLabels <- module.merge.all$colors;
+modules.ALL <- labels2colors(moduleLabels)
+
+} else {
+  modules.COA <- modules.coa
+  modules.ALL <- modules.all
+}
+
+```
+
+
+
+```{r Comparing networks with different module definitions}
+
+# harmonize module labels across datasets
+# modules.all <- modules.ALL
+modules.coa <- modules.COA
+modules.1b = as.vector(matchLabels(modules.1a,  modules.coa))
+modules.2b = as.vector(matchLabels(modules.2a,  modules.coa))
+modules.cob = as.vector(matchLabels(modules.coa,  modules.coa))
+modules.all = as.vector(matchLabels(modules.ALL,  modules.coa))
+
+if (print.inline){
+plotDendroAndColors(geneTree.all, modules.all, "All", dendroLabels=FALSE, hang=0.03,
+                    addGuide=TRUE, guideHang=0.05, main="All dendrogram")
+  plotDendroAndColors(geneTree.co, modules.cob, paste0("Consensus\n", reference.group, "+", comparison.group), dendroLabels=FALSE, hang=0.03,
+                    addGuide=TRUE, guideHang=0.05, main="Consensus dendrogram")
+plotDendroAndColors(geneTree.1, modules.1b, paste0("Group 1: ", reference.group), dendroLabels=FALSE, hang=0.03,
+                    addGuide=TRUE, guideHang=0.05, main=paste0("Group 1: ", reference.group))
+plotDendroAndColors(geneTree.2, modules.2b, paste0("Group 2: ", comparison.group), dendroLabels=FALSE, hang=0.03,
+                    addGuide=TRUE, guideHang=0.05, main=paste0("Group 2: ", comparison.group))
+}
+
+common.modules <- intersect(modules.1b, modules.2b)
+m1.u <- unique(modules.1b)
+m2.u <- unique(modules.2b)
+g1.specific.modules <- m1.u[!(m1.u %in% common.modules)]
+g2.specific.modules <- m2.u[!(m2.u %in% common.modules)]
+
+module.sets <- list(all = unique(modules.all),
+                    group.1 = unique(modules.1b), 
+                    group.2 = unique(modules.2b),
+                    consensus = unique(modules.cob))
+
+module.sets.v2 <- list(all = unique(modules.all),
+                    consensus = unique(modules.cob))
+
+
+
+if (print.inline){
+  # fig.width=15, fig.height=4
+ggVennDiagram::ggVennDiagram(module.sets) + ggtitle("Network Preservations")
+  # ggVennDiagram::ggVennDiagram(module.sets.v2) + ggtitle("Network Preservations")
+}
+
+# get robust consensus modules (all else set to grey)
+# consensus.modules <-intersect(modules.all, intersect(modules.cob, intersect(modules.1b, modules.2b)))
+modules.consensus <- modules.cob
+consensus.modules <-modules.consensus
+
+# modules.consensus[!(modules.consensus %in% consensus.modules)] <- "grey"
+modules.1b[!(modules.1b %in% modules.consensus)] <- "grey"
+modules.2b[!(modules.2b %in% modules.consensus)] <- "grey"
+modules.all[!(modules.all %in% modules.consensus)] <- "grey"
+
+# get mapping df for late
+df.map.all <- data.frame(module = modules.consensus, genes = mColorh.all[ ,"genes"])
+
+```
+
+
+
+
+```{r matrix distributions, fig.width=15, fig.height=4}
+
+
+if (print.inline){
+  # fig.width=15, fig.height=4
+  par(mfrow = c(1,4))
+hist(datExpr.noz, main = "Expression", xlab = "Expression")
+hist(s.mat[s.mat != 1], main = "Similarity (correlation)", xlab = "Similarity")
+hist(a.mat[a.mat != 1], main = "Adjacency", xlab = "Adjacency")
+hist(w.mat[w.mat != 1], main = "TOM", xlab = "TOM")
+}
+
+```
+
+
+```{r preservation of group1 network in group2}
+
+
+if (print.inline){
+plotDendroAndColors(geneTree.1, modules.1b, "Modules", dendroLabels=FALSE, hang=0.03, addGuide=TRUE,
+guideHang=0.05, main="Gene dendrogram and module colors (Group 1 -> Group 1)")
+plotDendroAndColors(geneTree.1, modules.cob, "Modules", dendroLabels=FALSE, hang=0.03, addGuide=TRUE,
+guideHang=0.05, main="Gene dendrogram and module colors (Group 1 -> consensus)")
+
+plotDendroAndColors(geneTree.2, modules.2b, "Modules", dendroLabels=FALSE, hang=0.03, addGuide=TRUE,
+guideHang=0.05, main="Gene dendrogram and module colors (Group 2 -> Group 2)")
+plotDendroAndColors(geneTree.2, modules.cob, "Modules", dendroLabels=FALSE, hang=0.03, addGuide=TRUE,
+guideHang=0.05, main="Gene dendrogram and module colors (Group 2 -> consensus)")
+
+
+
+}
+
+
+```
+
+
+
+```{r module preservation}
+
+# modulePreservation function in WGCNA library assesses how well a module in one study is preserved in another 
+# study using a number of stratgies and outputs a single Z-score summary. 
+
+# In general, the higher the value of "Zsummary.pres" the more preserved the module is between data sets:
+# 5<Z<10 indicates moderate preservation, while Z>10 indicates high preservation. (See the WGCNA website
+# for a more complete tutorial on this function.) The "grey" module contains uncharacterized gene while the gold
+# module contains random genes. In general, these modules should have lower Z-scores than most of the other
+# modules. In this case, we find that all modules are very well preserved.
+
+
+do.preservation <- F
+
+if (do.preservation){
+
+modules.rand.match.all <-  as.vector(matchLabels(modules.rand,  modules.all))
+
+
+n.perm <- 3 # default: 30
+stats <- getModulePreservation(ref.mat = datExpr.noz, 
+                                   query.mat = de.rand, 
+                                   ref.module = modules.all, 
+                                   query.modules = modules.rand.match.all,
+                                   networkType=which.network,
+                                   nPermutations=n.perm,
+                                   maxGoldModuleSize=100,
+                                   maxModuleSize=400, 
+                                   verbose=3,
+                                   savePermutedStatistics = F)
+
+
+df.mod.pres <-  stats[order(-stats[,2]),c(1:2)]
+df.mod.pres$module <- rownames(df.mod.pres)
+df.mod.pres$dataset <- "Modules"
+df.mod.pres$dataset[df.mod.pres$module %in% c("grey", "gold")] <- "Controls"
+
+df.mod.pres %>%
+  ggplot(aes(x = reorder(module, Zsummary.pres), y = Zsummary.pres, fill = dataset)) + 
+  geom_bar(stat = "identity") + 
+  geom_hline(yintercept = 5, linetype = "dashed")+ 
+  geom_hline(yintercept = 10, linetype = "dashed")+ 
+  coord_flip() + 
+  theme_classic() + 
+  ggtitle("Module Preservation\nvs. Randomized Dataset") + 
+  ylab("Z score, preservation \n(5-10: moderate preservation; >10 high preservation)") + 
+  xlab("Modules") + scale_fill_manual(values=c("tomato", "grey"))
+  
+}
+
+
+```
+
+```{r eigenGenes}
+
+modules.union <- c()
+for (i in 1:length(modules.1b)){
+  if(modules.1b[i] == modules.2b[i]){
+    modules.union[i] <- modules.1b[i] 
+  } else {
+    modules.union[i] <- "grey"
+  }
+  
+}
+
+# ME activity of group 1
+which.module.membership <- modules.consensus
+# which.module.membership <- modules.all
+# Group 1
+PCs1A = moduleEigengenes((de.1), colors=which.module.membership)
+ME_1A = PCs1A$eigengenes
+colorsA1 = names(table(which.module.membership))
+
+# ME activity of group 1
+PCs2A = moduleEigengenes((de.2), colors=which.module.membership)
+ME_2A = PCs2A$eigengenes
+colorsA2 = names(table(which.module.membership))
+
+# ME activity for entire dataset
+PC.all = moduleEigengenes((datExpr.noz), colors=which.module.membership)
+ME.all = PC.all$eigengenes
+colors.all = names(table(which.module.membership))
+
+
+
+
+```
+
+```{r ME preservation plot, fig.height=10, fig.width=10}
+
+# get ME activity ofr individual datasets
+print2hide <- capture.output(consMEsC <- multiSetMEs( list(A1=list(data=de.1),A2=list(data=de.2)), universalColors = which.module.membership, softPower = best.power))
+
+# get consensus
+print2hide <- capture.output(MET <- consensusOrderMEs(consMEsC))
+
+if (print.inline){
+  # fig.height=10, fig.width=10
+  plotEigengeneNetworks(MET, c(reference.group, comparison.group), marDendro = c(0,2,2,1), marHeatmap = c(3,3,2,1), zlimPreservation = c(0, 1), barplotErrors = T)
+}
+
+
+```
+
+```{r variance explained by ME, fig.width = 10, fig.height = 4}
+
+
+df.v1 <- as.data.frame(t(MET[["A1"]][["varExplained"]]))
+df.v1$module <- rownames(df.v1)
+colnames(df.v1) <- c("var.exp", "module")
+df.v2 <- as.data.frame(t(MET[["A2"]][["varExplained"]]))
+df.v2$module <- rownames(df.v2)
+colnames(df.v2) <- c("var.exp", "module")
+df.me.var.exp <- merge(df.v1, df.v2, by = "module")
+
+
+df.me.var.exp$mean.ve <- (df.me.var.exp$var.exp.x + df.me.var.exp$var.exp.y) /2
+df.me.var.exp$dif.ve <- (df.me.var.exp$var.exp.y - df.me.var.exp$var.exp.x) /2
+
+plt.me.ve.1 <- df.me.var.exp %>%
+  ggplot(aes(x = var.exp.x, y = var.exp.y)) + 
+  geom_smooth(method = "lm") + 
+  geom_point() + 
+  geom_abline(slope = 1) + 
+  ggrepel::geom_text_repel(aes(var.exp.x,  var.exp.y, label =module), size = 3, color = "black") + 
+  theme_bw() + 
+    xlab(paste0("Variance Explained by Modular Eigengenes (", reference.group, ")")) + 
+    ylab(paste0("Variance Explained by Modular Eigengenes (", comparison.group, ")")) + 
+  ggtitle("Variance Explained by Modular Eigengenes\nScatter Plot")
+
+plt.me.ve.2 <- df.me.var.exp %>%
+  ggplot(aes(x = mean.ve, y = dif.ve)) + 
+  geom_point() + 
+  geom_hline(yintercept = 0) + 
+  ggrepel::geom_text_repel(aes(mean.ve,  dif.ve, label =module), size = 3, color = "black") + 
+  theme_bw() + 
+    xlab(paste0("Mean Variance Explained by Modular Eigengenes")) + 
+    ylab(paste0("Delta Variance Explained by Modular Eigengenes\n(", comparison.group, "-", reference.group, ")")) + 
+  ggtitle("Variance Explained by Modular Eigengenes\nBland Altman Plot")
+
+  if (print.inline){
+    cowplot::plot_grid(plt.me.ve.1, plt.me.ve.2, ncol = 2)
+  }
+
+
+```
+
+```{r ME activity analysis, fig.width= 8, fig.height=4}
+
+# prep ME activity data
+df.ME.all <- ME.all
+ME.names <-  colnames(ME.all)
+df.ME.all$id <- rownames(df.ME.all)
+df.ME.all.long <-pivot_longer(df.ME.all, ME.names)
+df.ME.all.long <- df.ME.all.long %>%  filter(!(name %in% "MEgrey")) 
+
+df.meta <- so.query.3@meta.data
+df.meta$id <- rownames(df.meta)
+df.meta.sub <- df.meta[ ,c("cluster.group", "id", "cluster.orig")]
+
+# merge ME activity and module identities
+df.ME.all.long.merge <- merge(df.ME.all.long, df.meta.sub, by = "id")
+
+# monitor this segment...may need to be revisited. 
+if (nrow(df.ME.all.long.merge) == 0){
+  df.ME.all.long$id <- gsub("[.].", "", df.ME.all.long$id)
+  df.meta.sub$id <- gsub("-.", "", df.meta.sub$id)
+  df.ME.all.long.merge <- merge(df.ME.all.long, df.meta.sub, by = "id")
+  stopifnot((nrow(df.ME.all.long.merge) > 0))
+}
+
+
+
+# enforce reference/comparison order
+u.groups <- unique(df.ME.all.long.merge$cluster.group)
+if (length(u.groups) == 2){
+  u.groups.ordered <-c(u.groups[grepl(reference.group, u.groups)], u.groups[grepl(comparison.group, u.groups)])
+} else {
+  warning("More than 2 unique groups detected. Network analysis is void.")
+}
+
+df.ME.all.long.merge$cluster.group <- factor(df.ME.all.long.merge$cluster.group, u.groups.ordered)
+
+# get summary
+df.ME.sum <- df.ME.all.long.merge %>%
+  group_by(cluster.orig, name, cluster.group) %>%
+  summarize(mean.ME = mean(value),
+            median.ME = median(value),
+            sd.ME = sd(value),
+            n.ME = length(value),
+            raw.values = list(value))
+
+# consolidated view
+plt.dif.box <- df.ME.all.long.merge %>%
+  ggplot(aes(x = name, y = value, fill = cluster.group)) +
+  geom_boxplot() + 
+  theme_classic() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  geom_hline(yintercept = 0, linetype = "dashed") + 
+  scale_fill_manual(values=c("skyblue", "tomato")) + 
+  theme_bw() + xlab("groups") + ylab("Module Activity (Eigenvalue)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("Module Activity")
+
+# stratified view
+plt.dif.box.1 <- df.ME.all.long.merge %>%
+  ggplot(aes(x = cluster.group, y = value, fill = cluster.group)) +
+  geom_boxplot() +
+  facet_wrap(~name, scales = "free_y") + 
+  scale_fill_manual(values=c("skyblue", "tomato")) + 
+  theme_bw() + xlab("groups") + ylab("Module Activity (Eigenvalue)")
+
+if (print.inline){
+  # print(plt.dif.box.1)
+  
+   # fig.width= 8, fig.height=4
+print(plt.dif.box)
+}
+
+```
+
+```{r ME differential expression, fig.height = 4, fig.width=12}
+
+# get unique groups
+u.groups <- unique(as.character(levels((so.query.3@meta.data[["group.query"]]))))
+
+# get ME activity for each group and merge
+df.ME.sum.1 <- df.ME.sum[  grepl(reference.group, df.ME.sum$cluster.group), ]
+df.ME.sum.2 <- df.ME.sum[  grepl(comparison.group, df.ME.sum$cluster.group), ]
+df.ME.sum.merge <- merge(df.ME.sum.1, df.ME.sum.2, by = c("cluster.orig", "name"))
+
+# get ME connectivity for each group and merge
+which.mat <- "w" # s: s.mat, a: a.mat, w: w.mat
+
+if (which.mat == "w"){
+  mat.1 <- w.1
+  mat.2 <- w.2
+} else if (which.mat == "a") {
+  mat.1 <- a.1
+  mat.2 <- a.2  
+} else if (which.mat == "s") {
+  mat.1 <- s.1
+  mat.2 <- s.2  
+}
+
+# get connectivity scores
+df.ME.k.1 <- getConnectivity(mat.1, rownames(a.1))
+df.ME.k.2 <- getConnectivity(mat.2, rownames(a.2))
+
+# quantile normalization of connectivity
+df.ME.qNorm <- qNorm(df.ME.k.1$wi, df.ME.k.2$wi, df.ME.k.2$genes)
+df.ME.k.1$wi <- df.ME.qNorm$x.new
+df.ME.k.2$wi <- df.ME.qNorm$y.new
+
+# merge connecitivty
+df.ME.k.merge <- merge(df.ME.k.1, df.ME.k.2, by = "genes")
+
+# get gene and modules
+df.gene2module <-  namedList2longDF(getModuleGenes(modules.cob, SubGeneNames, add.prefix = F),
+                                    name.header = "module", value.header = "genes")
+df.ME.k.merge <- merge(df.ME.k.merge, df.gene2module, by = "genes")
+
+# summary statistics for ME activity
+df.ME.sum.merge <- df.ME.sum.merge %>%
+  group_by(cluster.orig, name) %>%
+  mutate(ME.dif.mean = mean.ME.y - mean.ME.x,
+         ME.dif.median = median.ME.y - median.ME.x,
+         pVal = wilcox.test(unlist(raw.values.x), unlist(raw.values.y))[["p.value"]]) 
+
+
+which.connect <- "w" # r: ranks, w: wi
+
+if (which.connect == "r"){
+df.ME.k.sum.merge <- df.ME.k.merge %>%
+  group_by(module) %>%
+  summarize(ME.dif.mean = mean(rank.y) - mean(rank.x),
+         ME.dif.median = median(rank.y) - median(rank.x),
+         pVal = wilcox.test(rank.y, rank.x)[["p.value"]])  
+} else if (which.connect == "w"){
+df.ME.k.sum.merge <- df.ME.k.merge %>%
+  group_by(module) %>%
+  summarize(ME.dif.mean = mean(wi.y) - mean(wi.x),
+         ME.dif.median = median(wi.y) - median(wi.x),
+         pVal = wilcox.test(wi.y, wi.x)[["p.value"]])    
+}
+
+# FDR correction
+df.ME.sum.merge$pAdj <- p.adjust(df.ME.sum.merge$pVal, method = "BH", n = length(df.ME.sum.merge$pVal))
+df.ME.k.sum.merge$pAdj <- p.adjust(df.ME.k.sum.merge$pVal, method = "BH", n = length(df.ME.k.sum.merge$pVal))
+
+# node volcano plot
+plt.dif.volc <- df.ME.sum.merge %>%
+  ggplot(aes(x = ME.dif.median, y = -log10(pAdj), size = -log10(pAdj), color = ME.dif.median)) +
+  geom_point(stat = "identity") +
+  theme_classic() + 
+  xlab(paste0("Differential ME Activity (", comparison.group, " - ", reference.group, ")")) + 
+  ylab("-log10(pAdj)") + 
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed")  +
+  geom_vline(xintercept = 0, linetype = "dashed")  +
+  ggrepel::geom_text_repel(aes(ME.dif.median,  -log10(pAdj), label =name), size = 3, color = "black") + 
+  ggtitle("Differential ME Activity") + 
+  scale_colour_gradientn("Difference", colours=c("skyblue", "grey90", "tomato"),na.value = "transparent",
+                           values=c(rescaleValues(c(min(df.ME.sum.merge$ME.dif.median), 0, max(df.ME.sum.merge$ME.dif.median))))) + theme(legend.position="bottom") + guides(size=guide_legend("-log10(pAdj)"), color = FALSE)
+
+# rank volcano plot
+
+plt.rank.volc <- df.ME.k.sum.merge %>%
+  ggplot(aes(x = ME.dif.median, y = -log10(pAdj), size = -log10(pAdj), color = ME.dif.median)) +
+  geom_point(stat = "identity") +
+  theme_classic() + 
+  xlab(paste0("Differential ME Connectivity (", comparison.group, " - ", reference.group, ")")) + 
+  ylab("-log10(pAdj)") + 
+  geom_vline(xintercept = 0, linetype = "dashed")  +
+  ggrepel::geom_text_repel(aes(ME.dif.median,  -log10(pAdj), label =module), size = 3, color = "black") + 
+  ggtitle("Differential ME Connectivity") + 
+  scale_colour_gradientn("Difference", colours=c("skyblue", "grey90", "tomato"),na.value = "transparent",
+                           values=c(rescaleValues(c(min(df.ME.k.sum.merge$ME.dif.median), 0, max(df.ME.k.sum.merge$ME.dif.median))))) + theme(legend.position="bottom") + guides(size=guide_legend("-log10(pAdj)"), color = FALSE)
+
+if (min(df.ME.k.sum.merge$pAdj) < 0.05) plt.rank.volc <- plt.rank.volc +  geom_hline(yintercept = -log10(0.05), linetype = "dashed")
+
+
+# pairwise comparison
+df.me.activity <- df.ME.sum.merge[ ,c("name", "ME.dif.median")]
+colnames(df.me.activity) <- c("module", "x")
+df.me.activity$module <- gsub("ME", "", df.me.activity$module)
+df.me.connect <- df.ME.k.sum.merge[ ,c("module", "ME.dif.median")]
+colnames(df.me.connect) <- c("module", "y")
+df.me.merge <- merge(df.me.activity, df.me.connect, by = "module") 
+
+# euclidean distance from origin
+df.me.merge$x.s <- (df.me.merge$x - mean(df.me.merge$x))/sd(df.me.merge$x)
+df.me.merge$y.s <- (df.me.merge$y - mean(df.me.merge$y))/sd(df.me.merge$y)
+df.me.merge$z.s <- sqrt(((df.me.merge$x.s)^2) + ((df.me.merge$y.s)^2))
+
+
+plt.dif.rank.comp <- df.me.merge %>%
+  ggplot(aes(x,y, size = z.s)) + 
+  geom_point(alpha = 0.5) + 
+  geom_hline(yintercept = 0) + 
+  geom_vline(xintercept = 0) + 
+  theme_classic() + 
+  ggrepel::geom_text_repel(aes(x,y, label =module), size = 3, color = "black") + 
+  xlab(paste0("Differential Activity\n", comparison.group, "-", reference.group)) + 
+  ylab(paste0("Differential Connectivity\n", comparison.group, "-", reference.group)) +
+  ggtitle(paste0("Modular Sector Plot\n", comparison.group, "-", reference.group)) + 
+  theme(legend.position = "none")
+
+if (print.inline){
+  cowplot::plot_grid(plt.dif.volc, plt.rank.volc,plt.dif.rank.comp,  ncol = 3)
+}
+
+```
+
+
+
+
+```{r sector plot}
+
+
+# get differential expression
+df.avg <- avgGroupExpression(so = so.query, which.data = "scale", which.center= "mean", which.group = "group.query")
+df.sd <- avgGroupExpression(so = so.query, which.data = "scale", which.center = "sd", which.group = "group.query")
+
+df.avg$dif <- df.avg[ , comparison.group] - df.avg[ , reference.group]
+df.sd$sp <- sqrt((df.sd[ , comparison.group]^2) + (df.sd[ , reference.group]^2))
+df.deg.all <- data.frame(genes = df.avg$genes, dif =  df.avg$dif, sp = df.sd$sp )
+df.deg.all$z <- df.deg.all$dif / df.deg.all$sp
+
+# get differential connectivity
+# get connectivity scores
+df.con.1 <- getConnectivity(w.1, rownames(a.1))
+df.con.2 <- getConnectivity(w.2, rownames(a.2))
+
+# quantile normalization of connectivity
+df.con.qNorm <- qNorm(df.con.1$wi, df.con.2$wi, df.con.2$genes)
+df.con.1$wi <- df.con.qNorm$x.new
+df.con.2$wi <- df.con.qNorm$y.new
+
+# merge scores
+df.con.merge <- merge(df.con.1, df.con.2, by = "genes")
+df.con.merge <- merge(df.con.merge, df.map.all, by = "genes")
+df.con.merge$w.x.norm <- df.con.merge$wi.x
+df.con.merge$w.y.norm <- df.con.merge$wi.y
+
+# get ranked connectivity
+# df.con.merge$w.x.rank <- rank(df.con.merge$wi.x)
+# df.con.merge$w.y.rank <- rank(df.con.merge$wi.y)
+
+# compute w.delta
+  df.con.merge$w.delta <- df.con.merge$w.y.norm - df.con.merge$w.x.norm
+  # df.con.merge$r.delta <- df.con.merge$w.y.rank - df.con.merge$w.x.rank
+
+# merge results
+df.con.deg.merge <- merge(df.con.merge, df.deg.all, by = "genes")
+df.con.deg.merge <- unique(df.con.deg.merge)
+
+
+df.con.deg.merge.noMod <- df.con.deg.merge %>% dplyr::select(-c("module"))
+
+# data driven threshold
+connectivity.threshold <- 1.96*sd(df.con.deg.merge$w.delta)
+expression.threshold <-  1.96*sd(df.con.deg.merge$z)
+
+# Z score threhsolds
+# connectivity.threshold <- 1.96
+# expression.threshold <-  1.96
+
+plt.sector <- df.con.deg.merge %>%
+  ggplot(aes(w.delta, z, text = genes)) + 
+   geom_point(data = df.con.deg.merge.noMod, aes(x = w.delta, y =  z), color = "grey", alpha = 0.4) + 
+  geom_point(color = "tomato", alpha = 1) + 
+  geom_hline(yintercept = 0, color = "black") + 
+  geom_vline(xintercept = 0, color = "black") + 
+  geom_hline(yintercept = -expression.threshold, color = "black", linetype = "dashed") + 
+  geom_hline(yintercept = expression.threshold, color = "black", linetype = "dashed") + 
+  geom_vline(xintercept = -connectivity.threshold, color = "black", linetype = "dashed") + 
+  geom_vline(xintercept = connectivity.threshold, color = "black", linetype = "dashed") + 
+  theme_classic() + 
+  facet_wrap(~module) + 
+  xlab(paste0("Delta Connectivity (", comparison.group, " - ", reference.group, ")")) + 
+  ylab(paste0("Delta Expression (", comparison.group, " - ", reference.group, ")")) + ggtitle("Network Sector Plot")
+
+
+
+if (print.inline){
+  # fig.width = 10, fig.height=10
+print(plt.sector)
+}
+
+
+# plt.delta.comp <- df.con.merge %>%
+#   ggplot(aes(x = w.delta, y = r.delta)) + geom_point()
+# 
+# plt.norm <- df.con.merge %>%
+#   ggplot() +
+#   geom_density(aes(x = w.x.norm, fill = "ref"), alpha = 0.5) +
+#   geom_density(aes(x = w.y.norm, fill = "comp"), alpha = 0.5)
+# 
+# plt.wi <- df.con.merge %>%
+#   ggplot() +
+#   geom_density(aes(x = wi.x, fill = "ref"), alpha = 0.5) +
+#   geom_density(aes(x = wi.y, fill = "comp"), alpha = 0.5)
+# 
+# plt.log <- df.con.merge %>%
+#   ggplot() +
+#   geom_density(aes(x = wi.x.log, fill = "ref"), alpha = 0.5) +
+#   geom_density(aes(x = wi.y.log, fill = "comp"), alpha = 0.5)
+# 
+# 
+# cowplot::plot_grid(plt.delta.comp, plt.norm, plt.wi, plt.log, ncol = 2)
+
+```
+
+
+```{r ME activity heatmap}
+
+me.exp.mat <- (datExpr.noz)
+me.exp.mat <- me.exp.mat[ ,!(modules.cob %in% "grey")]
+modules.all.sub <- modules.cob[!(modules.cob %in% "grey")]
+membership.all.sub <- rep(NA, nrow(ME.all))
+ME.all.rownames <- rownames(ME.all)
+membership.all.sub[ME.all.rownames %in% df.meta$id[df.meta$group.query %in% reference.group] ] <- reference.group
+membership.all.sub[ME.all.rownames %in% df.meta$id[df.meta$group.query %in% comparison.group] ] <- comparison.group
+
+# monitor this segment...may need to be revisited. 
+if (sum(is.na(membership.all.sub)) == length(membership.all.sub)){
+  ME.all.rownames <- gsub("[.].", "",rownames(ME.all))
+  df.meta$id.v2 <- gsub("-.", "",df.meta$id)
+  
+  membership.all.sub[ME.all.rownames %in% df.meta$id.v2[df.meta$group.query %in% reference.group] ] <- reference.group
+membership.all.sub[ME.all.rownames %in% df.meta$id.v2[df.meta$group.query %in% comparison.group] ] <- comparison.group
+
+stopifnot( (sum(is.na(membership.all.sub)) < length(membership.all.sub)))
+}
+
+grouping.mem <- as.data.frame(membership.all.sub)
+names(grouping.mem) <- "Group"
+
+ME.all.sub <- ME.all
+
+windsorize.thres <- 0.15
+ME.all.sub[ME.all.sub > windsorize.thres] <- windsorize.thres
+ME.all.sub[ME.all.sub < -windsorize.thres] <- -windsorize.thres
+
+min.me <- min(ME.all.sub)
+max.me <- max(ME.all.sub)
+scale.limit <- max(c(abs(min.me), abs(max.me)))
+
+
+if (print.inline){
+  
+  min.me <- min(ME.all.sub)
+max.me <- max(ME.all.sub)
+scale.limit <- max(c(abs(min.me), abs(max.me)))
+heatmaply::heatmaply(
+  (ME.all.sub),
+  plot_method = c("plotly"),
+  row_side_colors = grouping.mem,
+  limits = c(-scale.limit, scale.limit),
+   colors = rev(colorRampPalette(RColorBrewer::brewer.pal(9, "RdBu"))(100)) , 
+  xlab("Modules"), key.title="ME Activity", hide_colorbar=F, labRow = rep("", nrow(ME.all.sub))
+)
+  
+}
+
+
+```
+
+
+```{r group prediction, fig.width= 12, fig.height=4, warning = FALSE, message = FALSE}
+
+# some machine learning...
+library(caret) 
+library(ROCR) 
+library(Metrics)
+
+# omit grey module
+# ME.all.sub <- ME.all[ ,!grepl("grey", colnames(ME.all))]
+ME.all.sub <- ME.all[ ,!(colnames(ME.all) %in% "MEgrey")]
+
+# prep data for model fitting
+all.data <- as.data.frame(ME.all.sub)
+all.data$group <- (membership.all.sub)
+all.data$group[all.data$group == reference.group] <- 0
+all.data$group[all.data$group == comparison.group] <- 1
+all.data$group <- as.factor(all.data$group)
+
+# partition data into test and training sets
+split <- createDataPartition(y = all.data$group,p = 0.8,list = FALSE)
+train <- all.data[split, ]
+test <- all.data[-split, ]
+
+# fit logistic regressio model
+model <- glm(group ~ ., family = binomial(link = 'logit'), data = train)
+
+# get model stats
+model.coef <- summary(model)
+model.anova <- anova(model, test = 'Chisq')
+model.anova[ , "Pr(>Chi)"] <- model.anova[ , "Pr(>Chi)"]  + 1e-20
+
+# model stat wrangling
+df.model.1 <- as.data.frame(model.coef[["coefficients"]])
+df.model.1$terms <- rownames(df.model.1)
+colnames(df.model.1) <- c("Estimate", "SE", "z.model", "p.model", "terms")
+df.model.2 <- model.anova
+df.model.2$terms <- rownames(df.model.2)
+colnames(df.model.2) <- c("df", "Deviance", "resid.df", "resid.dev", "p.anova", "terms")
+df.model.merge <- merge(df.model.1, df.model.2, by = "terms")
+df.model.merge$varExplained <- df.model.merge$Deviance / sum(df.model.merge$Deviance)
+
+# compute model perormance using test set
+log_predict <- predict(model,newdata = test,type = "response")
+log_predict <- ifelse(log_predict > 0.5,1,0)
+df.prediction <- as.data.frame(table(test$group,log_predict))
+
+# plot confusion matrix
+plt.confusion <- ggplot(data =  df.prediction, mapping = aes(x = Var1, y = log_predict)) +
+  geom_tile(aes(fill = Freq), colour = "white") +
+  geom_text(aes(label = sprintf("%1.0f",Freq)), vjust = 1) +
+  scale_fill_gradient(low = "white", high = "steelblue") + 
+  xlab("True Label") + ylab("Predicted Label") + 
+  ggtitle(paste0("Confusion Matrix\n AUC=", signif(auc(test$group,log_predict), 2)," (20% validation set)")) + 
+  theme(legend.position = "none")
+
+# plot model volcano plot
+plt.logitModel <- df.model.merge %>%
+  ggplot(aes(x = Estimate, y = -log10(p.model), size = varExplained, color = -log10(p.anova))) +
+  geom_point(stat = "identity") +
+  theme_classic() + 
+  xlab(paste0("Logit Model Coefficient (", comparison.group, " - ", reference.group, ")")) + 
+  ylab("-log10(p.model), Model Coefficient") + 
+  geom_vline(xintercept = 0, linetype = "dashed")  +
+  ggrepel::geom_text_repel(aes(Estimate,  -log10(p.model), label =terms), size = 3, color = "black") + 
+  ggtitle("Logistic Regression\n(80% training set)") + theme(legend.position="bottom")
+
+if (min(df.model.merge$p.model) < 0.05) plt.logitModel <- plt.logitModel + geom_hline(yintercept = -log10(0.05), linetype = "dashed")
+
+# min(df.model.merge$p.model)
+# merge plots
+
+model.anova$var.exp <- model.anova$Deviance / sum(model.anova$Deviance, na.rm = T)
+model.anova$terms <- rownames(model.anova)
+model.anova <- model.anova[!(model.anova$terms %in% "NULL"), ]
+model.anova$terms <- gsub("ME", "", model.anova$terms)
+
+colnames(model.anova)[colnames(model.anova) %in% "Pr(>Chi)"] <- "pVal"
+# model.anova$pVal <- model.anova$pVal + 1e-20
+model.anova$pVal.log <- -log10(model.anova$pVal)
+
+
+
+plt.var.exp <- model.anova %>%
+  ggplot(aes(reorder(terms, var.exp), var.exp, fill = pVal.log)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + 
+  theme_classic() + 
+  xlab("Module") + 
+  ylab(paste0("Variance Explained\n", reference.group, " vs. ", comparison.group)) + labs(fill = "-log10(p)") + 
+  ggtitle("Variance Explained")
+
+
+if (print.inline){
+  # fig.width= 12, fig.height=4
+  cowplot::plot_grid(plt.logitModel, plt.confusion, plt.var.exp, ncol = 3)
+}
+
+```
+
+
+
+
+```{r module membership (kME), warning = FALSE, message = FALSE}
+
+# The first thing we can do is plot the kME values of each gene in A1 against the corresponding kME values of
+# each gene in A2. Modules with points showing a high correlation are highly preserved.
+
+# kME can be used to measure correlations between each gene and each ME, and thus even genes which were not initially assigned to a module can be included in between-network comparisons
+
+# module.membership <- modules.union
+# module.membership <- modules.all
+module.membership <- modules.consensus
+# module.membership <- modules.union
+
+# geneModuleMembership.alt <- signedKME(de.1, ME_1A)
+geneModuleMembership1 <- signedKME(de.1, ME_1A)
+colnames(geneModuleMembership1) <- paste("PC",colorsA1,".cor",sep="");
+MMPvalue1 <- corPvalueStudent(as.matrix(geneModuleMembership1),dim(de.1)[[1]]);
+colnames(MMPvalue1) <- paste("PC",colorsA1,".pval",sep="");
+Gene  <-  colnames(de.1)
+kMEtable1 <-  cbind(Gene,Gene,module.membership)
+for (i in 1:length(colorsA1)){
+  kMEtable1 <- cbind(kMEtable1, geneModuleMembership1[,i], MMPvalue1[,i])
+}
+
+colnames(kMEtable1) <- c("PSID","Gene","Module",sort(c(colnames(geneModuleMembership1), colnames(MMPvalue1))))
+
+
+# First calculate MEs for A2, since we haven't done that yet
+geneModuleMembership2 <- signedKME(de.2, ME_2A)
+# geneModuleMembership2 <- signedKME(de.2, ME_2A, corOptions = "use = 'p', method = 'spearman'")
+colnames(geneModuleMembership2) <- paste("PC",colorsA2,".cor",sep="");
+MMPvalue2 <- corPvalueStudent(as.matrix(geneModuleMembership2),dim(de.2)[[1]]);
+colnames(MMPvalue2) <- paste("PC",colorsA2,".pval",sep="");
+kMEtable2  <-  cbind(Gene,Gene,module.membership)
+for (i in 1:length(colorsA1)){
+  kMEtable2 <- cbind(kMEtable2, geneModuleMembership2[,i], MMPvalue2[,i])
+}
+
+colnames(kMEtable2) <- colnames(kMEtable2)
+
+# SET 2
+df.kME.sub <- NULL
+df.kME.all <- NULL
+for (c in 1:length(colorsA1)){
+inMod = which.module.membership == colorsA1[c]
+
+df.kME.sub <- bind_rows(df.kME.sub, data.frame(kME.x = geneModuleMembership1[inMod,c], kME.y = geneModuleMembership2[inMod,c], module = colorsA1[c], genes = rownames(geneModuleMembership1)[inMod]))
+
+df.cur <- data.frame(kME.x = geneModuleMembership1[,c], kME.y = geneModuleMembership2[,c], module = colorsA1[c], genes = rownames(geneModuleMembership1))
+df.cur$inMod <- "out"
+df.cur$inMod[df.cur$genes %in% rownames(geneModuleMembership1)[inMod]] <-  "in"
+df.kME.all <- bind_rows(df.kME.all, df.cur)
+};
+
+  # dplyr::filter(! module %in% "grey") %>%
+plt.kME <- df.kME.all %>%
+    ggplot(aes(x = kME.x, y = kME.y, text = genes, color = inMod)) + 
+    geom_point(alpha = 0.4) + 
+    theme_classic() + 
+    geom_hline(yintercept = 0, linetype = "dashed") + 
+    geom_vline(xintercept = 0, linetype = "dashed") + 
+    geom_abline(slope = 1, color = "red",  linetype = "dashed") + 
+    ggtitle("kME Plot") + scale_color_manual(breaks = c("in", "out"), values=c( "tomato", "grey")) + 
+  xlab(paste0("kME (", reference.group ,")")) + ylab(paste0("kME (", comparison.group ,")")) + 
+facet_wrap(~module)
+
+# plotly::ggplotly(plt.kME)
+
+if (print.inline){
+  print(plt.kME)
+}
+
+
+
+# These two types of plots convey similar, but not identical, information. Using all genes (SET 1) allows one to
+# include all positively and negatively correlated genes, but often also includes a lot of noise (although not in this
+# case). Using only in-module genes (SET 2) is a visual way of assessing hub gene conservation: if these genes
+# show between-set correlation, then the genes in the upper right of the plot are likely to be common hub genes
+# between data sets. (Hub genes are genes that show significant correlation with MEs and high within-module
+# connectivity.)
+# inMod
+```
+
+```{r kme based module annotation}
+
+u.modules <- unique(df.kME.all$module)
+
+df.kme.model <- NULL
+for (i in 1:length(u.modules)){
+  cur.module <- u.modules[i]
+  df.in.cur <- df.kME.all[(df.kME.all$module %in% cur.module) & df.kME.all$inMod == "in", ]
+  df.out.cur <- df.kME.all[(df.kME.all$module %in% cur.module) & df.kME.all$inMod == "out", ]
+  
+  
+  
+  fit.in <- lm(kME.y ~ kME.x, df.in.cur)
+  fit.out <- lm(kME.y ~ kME.x, df.out.cur)
+  
+  in.sum <- summary(fit.in)
+  out.sum <- summary(fit.out)
+  
+      f.stat <- in.sum$fstatistic
+    # p <- pf(f[1],f[2],f[3],lower.tail=F)
+  
+  df.mod.res.cur <- data.frame(
+    module = cur.module,
+    r2.in = in.sum[["r.squared"]],
+    p.in = pf(f.stat[1],f.stat[2],f.stat[3],lower.tail=F),
+    r2.out = out.sum[["r.squared"]]
+  )
+  
+  df.kme.model <- bind_rows(df.kme.model, df.mod.res.cur)
+  
+}
+
+
+plt.kme.comp <- df.kme.model %>%
+  ggplot(aes(x = r2.in, y = r2.out, size = r2.in)) + 
+  geom_point(alpha = 0.5) + 
+  theme_classic() + 
+  ggtitle(paste0("Intra vs. Intermodular kME Scores\nR2: ", reference.group, " vs ", comparison.group, " kME scores\nHigh R2 suggests preserved network connectivity")) +
+  ggrepel::geom_text_repel(aes(r2.in, r2.out, label =module), size = 3, color = "black") + 
+  geom_abline(slope = 1, linetype = "dashed") + 
+  xlab(paste0("Intramodular R2 (", reference.group, " vs ", comparison.group, " in-kME)")) + 
+  ylab(paste0("Intermodular R2 (", reference.group, " vs ", comparison.group, " out-kME)")) 
+
+
+plt.mod.pres <- df.kme.model %>%
+  ggplot(aes(x = reorder(module, r2.in), y = r2.in, fill = -log10(p.in))) + 
+  geom_bar(stat = "identity") + 
+  theme_classic() + 
+  ggtitle(paste0("Module Preservation\n", reference.group , " vs. ", comparison.group)) +
+  xlab("Module") + ylab("kME R2") + 
+  coord_flip() + 
+  labs(fill = "-log10(p)")
+  
+
+if (print.inline){
+  print(plt.kme.comp)
+  print(plt.mod.pres)
+}
+  
+
+df.kME.all$delta.kme <- df.kME.all$kME.y - df.kME.all$kME.x
+df.kME.all$mean.kme <- (df.kME.all$kME.y + df.kME.all$kME.x)/2
+df.kME.all$abs.max.kme <-  pmax(abs(df.kME.all$kME.y), abs(df.kME.all$kME.x))
+df.kME.all$max.kme <-  pmax((df.kME.all$kME.y), (df.kME.all$kME.x))
+df.kME.all$min.kme <-  pmin((df.kME.all$kME.y), (df.kME.all$kME.x))
+
+
+df.kME.all$signl <- T
+df.kME.all$signl[abs(df.kME.all$max.kme) < abs(df.kME.all$min.kme)] <- F
+  df.kME.all$abs.max.kme[df.kME.all$signl] <- df.kME.all$abs.max.kme[df.kME.all$signl]*-1
+
+  # filter(inMod == "in") %>%
+plt.kme.dif <- df.kME.all %>%
+  ggplot(aes(x = delta.kme, y = max.kme, color = delta.kme, text = genes)) + 
+  geom_point() +
+  facet_wrap(~module) + 
+  ylab("Max kME") + 
+  xlab(paste0("Delta kME (", comparison.group, "-", reference.group, ")")) +
+  theme_bw() + 
+  geom_hline(yintercept = 0) + geom_vline(xintercept = 0) + 
+  scale_colour_gradientn("delta", colours=c("skyblue", "grey90","grey90", "seagreen", "grey90","grey90", "tomato"),na.value = "transparent",
+                         values=c(rescaleValues(c(min(df.kME.all$delta.kme), 
+                                                  min(df.kME.all$delta.kme)/2,
+                                                  min(df.kME.all$delta.kme)/4, 
+                                                  0, 
+                                                  max(df.kME.all$delta.kme)/4,
+                                                  max(df.kME.all$delta.kme)/2, 
+                                                  max(df.kME.all$delta.kme))))) 
+
+if (print.inline){
+   plotly::ggplotly(plt.kme.dif, tooltip="text")
+}
+ 
+
+# "skyblue", "grey90", "tomato"
+```
+
+```{r gsea enrichment of kme conserved}
+
+
+u.modules <- as.character(unique(df.kME.all$module))
+gsea.pathway.kme.all.consensus <- NULL
+gsea.pathway.kme.all.differential <- NULL
+
+
+delta.kme.threshold <- 0.1
+for (i in 1:length(u.modules)){
+  
+  which.module <- u.modules[i]
+  
+  # get DEGs
+  # df.deg <- df.deg.list[[paste("m", as.character(u.modules[i]), sep = "")]] 
+  df.kme.cur <- df.kME.all[df.kME.all$module %in% which.module, ]
+  df.kme <- df.kme.cur[abs(df.kme.cur$delta.kme) < delta.kme.threshold, ]
+  
+  # delta.kme
+  
+  # df.con.deg.cur <- df.con.deg[df.con.deg$genes %in% df.deg$genes, ]
+  
+  # ranked by signed lop p 
+  if (is.null(df.kme)) next
+  # df.con.deg.cur <- df.con.deg.cur[complete.cases(df.con.deg.cur),]
+  
+  # prep gene list for consensus enrichment (match to EntrezID, sort)
+  gene.list.v1 <- df.kme$max.kme
+  names(gene.list.v1) <- df.kme$genes
+  match.ind <- match(names(gene.list.v1), my.entrez$SYMBOL)
+  names(gene.list.v1) <- as.character(my.entrez$ENTREZID[match.ind])
+  gene.list.v1 = sort(gene.list.v1, decreasing = TRUE)
+  
+    # clean list
+  df.ent.v1 <- data.frame(names = names(gene.list.v1), values = as.vector(gene.list.v1))
+  df.ent.v1 <- df.ent.v1[complete.cases(df.ent.v1), ]
+  df.ent.v1 <- df.ent.v1[!is.infinite(df.ent.v1$values), ]
+  gene.list.clean.v1 <- df.ent.v1$values
+  names(gene.list.clean.v1) <- df.ent.v1$names
+  
+    # prep gene list for differential enrichment (match to EntrezID, sort)
+  gene.list.v2 <- df.kme.cur$delta.kme
+  names(gene.list.v2) <- df.kme.cur$genes
+  match.ind <- match(names(gene.list.v2), my.entrez$SYMBOL)
+  names(gene.list.v2) <- as.character(my.entrez$ENTREZID[match.ind])
+  gene.list.v2 = sort(gene.list.v2, decreasing = TRUE)
+  
+      # clean list
+  df.ent.v2 <- data.frame(names = names(gene.list.v2), values = as.vector(gene.list.v2))
+  df.ent.v2 <- df.ent.v2[complete.cases(df.ent.v2), ]
+  df.ent.v2 <- df.ent.v2[!is.infinite(df.ent.v2$values), ]
+  gene.list.clean.v2 <- df.ent.v2$values
+  names(gene.list.clean.v2) <- df.ent.v2$names
+  
+
+  
+  # pathway gsea enrichment
+  gsea.pathway.kme.v1 <- fgsea::fgsea(pathways.go, gene.list.clean.v1, nperm=1000, maxSize=500)
+  gsea.pathway.kme.v2 <- fgsea::fgsea(pathways.go, gene.list.clean.v2, nperm=1000, maxSize=500)
+  
+  if (nrow(gsea.pathway.kme.v1) > 0){
+  gsea.pathway.kme.v1$module <- which.module
+  gsea.pathway.kme.all.consensus <- bind_rows(gsea.pathway.kme.all.consensus, gsea.pathway.kme.v1)    
+  } 
+  
+    if (nrow(gsea.pathway.kme.v2) > 0){
+  gsea.pathway.kme.v2$module <- which.module
+  gsea.pathway.kme.all.differential <- bind_rows(gsea.pathway.kme.all.differential, gsea.pathway.kme.v2)    
+  } 
+
+  
+}
+
+
+```
+
+
+
+```{r converserved vs. differential hubs}
+
+# The second thing we can do is determine which genes are hubs in both networks by determine which genes
+# have extremely high kME values in both networks.
+
+top.n.hub <- 20
+
+topGenesKME = NULL
+for (c in 1:length(colorsA1)){
+  kMErank1 = rank(-geneModuleMembership1[,c])
+  kMErank2 = rank(-geneModuleMembership2[,c])
+  maxKMErank = rank(apply(cbind(kMErank1,kMErank2+.00001),1,max))
+  topGenesKME = cbind(topGenesKME,Gene[maxKMErank<=top.n.hub])
+}; colnames(topGenesKME) = colorsA1
+
+
+df.topGenesKME <- as.data.frame(topGenesKME)
+
+if (print.inline){
+  topGenesKME
+}
+
+
+
+```
+
+
+```{r}
+
+plt.tom <- F
+
+if (print.inline & plt.tom) TOMplot(dissim = d.co, dendro = geneTree.co)
+
+```
+
+```{r go enrich, warning=FALSE, message=FALSE}
+
+# run go enrichment
+all.genes <- colnames(de.1)
+library(topGO)
+
+module.list.all <- getModuleGenes(modules.all, SubGeneNames, add.prefix = F)
+# 
+# # all genes
+# enrichment.list.all <- runEnrichment(module.list.all, gene.universe = all.genes, species = species)
+# results.all.p <- enrichment.list.all$results.table.p
+# results.all.bh <- enrichment.list.all$results.table.bh
+
+
+module.list.co <- getModuleGenes(modules.cob, SubGeneNames, add.prefix = F)
+
+# all genes
+enrichment.list.co <- runEnrichment(module.list.co, gene.universe = all.genes, species = species)
+results.co.p <- enrichment.list.co$results.table.p
+results.co.bh <- enrichment.list.co$results.table.bh
+
+
+```
+
+```{r orthogonal enrichment of module annotations, fig.height = 10, fig.width = 10}
+
+
+enrich.results <- results.co.p
+
+# kme based enrichment (GSEA)
+e.k <- gsea.pathway.kme.all.consensus[ ,c("pathway", "pval", "NES", "module", "padj")]
+e.d <- gsea.pathway.kme.all.differential[ ,c("pathway", "pval", "NES", "module", "padj")]
+
+# module overrepresentation based enrichment (topGO)
+e.m <- enrich.results[ ,c("Term", "module", "weightFisher")]
+colnames(e.m) <- c("pathway", "module", "pval")
+
+# merge annotations and get significant
+e.merge <- merge(e.m, e.k, by = c("pathway", "module"))
+e.merge$p.max <- pmax(e.merge$pval.x, e.merge$pval.y)
+e.merge$p.adj <- p.adjust(e.merge$p.max, method = "BH", length(e.merge$p.max))
+e.merge.sub <- e.merge[(e.merge$p.adj < 0.05) & (e.merge$NES > 1), ]
+
+
+
+top.module.annotations.con <- e.merge.sub %>%
+  group_by(module) %>%
+  top_n(10,  -log10(as.numeric(p.adj))) %>%
+    group_by(module) %>%
+  top_n(5,  -log10(as.numeric(p.max))) 
+
+top.module.annotations.dif <- e.d %>%
+  group_by(module) %>%
+  top_n(10,  -log10(as.numeric(padj))) %>%
+    group_by(module) %>%
+  top_n(5,  -log10(as.numeric(pval))) 
+
+top.module.annotations.con.v2 <- e.k %>%
+  group_by(module) %>%
+  top_n(10,  -log10(as.numeric(padj))) %>%
+    group_by(module) %>%
+  top_n(5,  -log10(as.numeric(pval))) 
+
+
+
+plt.enrich.all <- list()
+u.modules <- as.character(unique(top.module.annotations.con$module))
+for (i in 1:length(u.modules)){
+   col.pal <- top.module.annotations.con$module[top.module.annotations.con$module == u.modules[i]]
+names(col.pal)  <- top.module.annotations.con$module[top.module.annotations.con$module == u.modules[i]]
+  plt.enrich.all[[u.modules[i]]] <- top.module.annotations.con %>%
+  filter(module == u.modules[i]) %>%
+  ggplot(aes(x = reorder(pathway, NES), y = NES, fill = module)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + scale_fill_manual(values = col.pal) + 
+  theme_classic() + 
+   xlab("") + 
+  ggtitle(u.modules[i]) + theme(legend.position = "none")
+}
+  
+if (print.inline){
+   cowplot::plot_grid(plotlist  = plt.enrich.all, ncol = 2, align = "hv")
+}
+
+
+
+
+
+```
+
+
+```{r visualize top enrichments, fig.width=15, fig.height=10}
+
+enrich.results <- results.co.p
+
+enrich.results$prop <- enrich.results$Significant / enrich.results$Annotated
+top.module.annotations <- enrich.results %>%
+  group_by(module) %>%
+  top_n(3,  -log10(as.numeric(weightFisher))) 
+
+top.module.annotations <- enrich.results %>%
+  group_by(module) %>%
+  top_n(2,  -log10(as.numeric(p.adj))) %>%
+    group_by(module) %>%
+  top_n(2,  -log10(as.numeric(weightFisher))) 
+
+
+
+col.pal <- top.module.annotations$module
+names(col.pal)  <- top.module.annotations$module
+
+plt.go.1 <- top.module.annotations %>%
+  ggplot(aes(x = reorder(Term, -log10(weightFisher)), y = -log10(weightFisher), fill = module)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + scale_fill_manual(values = col.pal) + 
+  theme_classic() + 
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") + xlab("") + 
+  ggtitle("GO Enrichment of Network Modules\np values")
+
+plt.go.2 <- top.module.annotations %>%
+  ggplot(aes(x = reorder(Term, -log10(p.adj)), y = -log10(p.adj), fill = module)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + scale_fill_manual(values = col.pal) + 
+  theme_classic() + 
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") + xlab("") + 
+  ggtitle("GO Enrichment of Network Modules\nadjusted p values")
+
+if (print.inline){
+  # fig.width=15, fig.height=10
+  cowplot::plot_grid(plt.go.1, plt.go.2, col = 2)
+}
+
+
+```
+
+
+```{r module enrichment statistics, fig.width = 10, fig.height = 4}
+
+# percentage of genes that contribute to enrichment
+
+df.gene2module <-  namedList2longDF(getModuleGenes(modules.cob, SubGeneNames, add.prefix = F),
+                                    name.header = "module", value.header = "genes")
+df.moduleSize <- data.frame(table(df.gene2module$module))
+colnames(df.moduleSize) <- c("module", "n")
+
+results.all.stats <- results.co.p
+results.all.stats <- merge(results.all.stats, df.moduleSize, by = "module")
+results.all.stats$module.prop <- results.all.stats$Significant / results.all.stats$n
+
+results.bh.sum <- results.all.stats %>%
+  group_by(module) %>%
+  summarize(mean.prop = mean(module.prop), 
+            module.size = mean(n),
+            n.enrichments = length(n))
+
+plt.e.1 <- results.bh.sum %>%
+  ggplot(aes(x = reorder(module, n.enrichments), y = n.enrichments, fill = module.size)) + 
+  geom_bar(stat = "identity")+
+  theme_classic() + 
+  xlab("Module") + ylab("N Enrichments") + 
+  ggtitle("Enrichments per Module\nhigh blue ~ signal\nlow red ~ noise") + 
+  coord_flip() + 
+  labs(fill = "Module Size")+scale_fill_gradient(low="blue", high="red")
+
+
+plt.e.2 <- results.all.stats %>%
+  ggplot(aes(x = reorder(module, -module.prop), y = module.prop, fill = n)) + 
+  geom_boxplot()+
+  theme_classic() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) + 
+  xlab("Module") + ylab("Proportion of Module Contributing to Enrichment") + 
+  ggtitle("Module Fraction per Enrichment\nhigh red ~ signal\nlow blue ~ noise") + 
+  labs(fill = "Module Size") +scale_fill_gradient(low="blue", high="red")
+
+
+if (print.inline){
+  # fig.width = 10, fig.height = 4
+  cowplot::plot_grid(plt.e.1, plt.e.2)
+}
+
+```
+
+
+
+```{r generate network plots}
+
+# df.visNet <- graph_from_data_frame(d, directed = TRUE, vertices = NULL)
+
+library(visNetwork)
+
+which.modules <- "all" # all or color for specific module
+top.n.interactions <- 200
+
+net.modules <- modules.consensus # modules.all
+net.mat <- w.co # w.mat
+
+module.list.all <- getModuleGenes(net.modules, SubGeneNames, add.prefix = F)
+rownames(net.mat) <- rownames(a.mat) 
+colnames(net.mat) <- colnames(a.mat)
+
+# get network connectivity ===============================
+if (which.modules %in% names(module.list.all)){
+  module.name <- names(module.list.all)[names(module.list.all) %in% which.modules]
+  module.gene.cur <- module.list.all[[module.name]]
+  w.cur <- net.mat[rownames(net.mat) %in% module.gene.cur, colnames(net.mat) %in% module.gene.cur]
+  w.df.top <- wgcna2graphDF(w.cur, top.n = top.n.interactions)
+  w.df.top$module.membership <- module.name
+  
+} else if (which.modules == "all"){
+  w.df.top <- NULL
+  for (i in 1:length(names(module.list.all))){
+    module.name <- names(module.list.all)[names(module.list.all) %in% names(module.list.all)[i]]
+    if (module.name == "grey") next
+    module.gene.cur <- module.list.all[[module.name]]
+    w.cur <- net.mat[rownames(net.mat) %in% module.gene.cur, colnames(net.mat) %in% module.gene.cur]
+    w.df.top.cur <- wgcna2graphDF(w.cur, top.n = top.n.interactions)
+    w.df.top.cur$module.membership <- module.name
+    w.df.top <- bind_rows(w.df.top.cur, w.df.top)
+  }
+}
+
+# get nodes and edges ===============================
+
+node.edge.output <- getNodesEdges(w.df.top)
+vis.nodes <- node.edge.output$nodes
+vis.links <- node.edge.output$edges
+
+# node attributes ===============================
+
+# assign module membership to nodes
+df.map.network <- df.map.all
+colnames(df.map.network) <- c("module", "id")
+u.modules <- as.character(unique(df.map.network$module))
+vis.nodes$module <- "grey"
+for (i in 1:length(u.modules)){
+  vis.nodes$module[vis.nodes$id %in% df.map.network$id[df.map.network$module %in% u.modules[i]]] <- u.modules[i]
+}
+
+# get differential expression
+df.deg.network <- df.con.deg.merge.noMod[ ,c("genes", "dif", "w.delta")]
+colnames(df.deg.network) <- c("id", "z", "w.delta")
+df.deg.network <- df.deg.network[df.deg.network$id %in% vis.nodes$id, ]
+vis.nodes <- merge(vis.nodes, df.deg.network)
+
+# get connectivity
+df.con <- getConnectivity(net.mat, gene.names = colnames(a.mat))[,c("genes", "wi")]
+colnames(df.con) <- c("id", "wi")
+df.con <- df.con[!(duplicated(df.con$id)), ]
+df.con <- df.con[df.con$id %in% vis.nodes$id, ]
+vis.nodes <- merge(vis.nodes, df.con)
+
+# map deg to color gradient
+# col.lim.z <- max(c(abs(min(vis.nodes$z)), abs(max(vis.nodes$z))))
+col.lim.z <- 1
+node.colors <- value2col(vis.nodes$z, limit = col.lim.z)
+vis.nodes$deg <- "grey" # no effect
+vis.nodes$deg[vis.nodes$id %in% df.deg$genes[df.deg$p_val_adj < 0.05]] <- "black"
+
+if ("color" %in% colnames(vis.nodes)) vis.nodes <- vis.nodes %>% dplyr::select(-c("color"))
+vis.nodes$color.border <-vis.nodes$deg 
+vis.nodes$color.background <- node.colors
+vis.nodes$size <- 10*(vis.nodes$wi - mean(vis.nodes$wi))/sd(vis.nodes$wi) + 25
+vis.nodes$font.size <- 45
+
+# edge attributes ===============================
+
+# data preprocessing
+w.delta.mat <- log(w.2/sum(w.2)) - log(w.1/sum(w.1))
+# w.delta.mat <- a.2 - a.1
+colnames(w.delta.mat) <- colnames(a.mat)
+rownames(w.delta.mat) <- rownames(a.mat)
+w.delta.mat <- w.delta.mat[rownames(w.delta.mat) %in% vis.nodes$id, colnames(w.delta.mat) %in% vis.nodes$id]
+w.delta.df <- as.data.frame(w.delta.mat)
+w.detla.genenames <-  colnames(w.delta.df)
+w.delta.df$genes <- rownames(w.delta.df)
+w.delta.df <- w.delta.df[!(duplicated(w.delta.df$genes)), !(duplicated(colnames(w.delta.df)))]
+w.delta.df.long <- unique(pivot_longer(w.delta.df, cols = w.detla.genenames))
+colnames(w.delta.df.long) <- c("from", "to", "value")
+vis.links <- merge(vis.links, w.delta.df.long, by = c("from", "to"))
+
+# edge colors
+col.lim <- max(c(abs(min(vis.links$value)), abs(max(vis.links$value))))
+edge.colors <- value2col(vis.links$value, limit = col.lim)
+
+vis.links$edge.color <-edge.colors
+vis.links$color <-edge.colors
+vis.links$smooth <- F
+vis.links$width <- 1+vis.links$weight/20
+
+# generate network plot
+
+# layout_with_kk
+# layout_with_fr
+
+# enfore unique id
+vis.nodes <- vis.nodes[!(duplicated(vis.nodes$id)), ]
+which.unique <- unique(vis.nodes$id)
+vis.links <- vis.links[vis.links$from %in% which.unique, ]
+vis.links <- vis.links[vis.links$to %in% which.unique, ]
+
+# ensure all cases are complete
+vis.nodes <- vis.nodes[complete.cases(vis.nodes), ]
+vis.links <- vis.links[complete.cases(vis.links), ]
+
+# generate master network
+master.nodes <- vis.nodes
+master.links <- vis.links
+
+master.nodes$color.background <- master.nodes$module
+master.nodes$color.border <- "grey"
+master.nodes$font.size <- 45
+
+node.modules <- master.nodes[ ,c("id", "module")]
+colnames(node.modules) <- c("from", "module")
+master.links <- merge(master.links, node.modules, by = "from")
+master.links$edge.color <- master.links$module
+master.links$color <-master.links$module
+master.links$width <- 0.02
+master.links$weight <- 0.02
+
+if (print.inline){
+  visNetwork( master.nodes,master.links,  main = "Reference Network") %>%
+    visIgraphLayout(randomSeed = 123, layout = "layout_with_kk") %>%
+    visOptions(highlightNearest = list(enabled = F, degree = 1, hover = T), 
+               nodesIdSelection = T, selectedBy = c("module")) %>%
+    visInteraction(navigationButtons = TRUE,keyboard = TRUE) %>%
+    visConfigure(enabled = TRUE)  
+  
+  # generate differential network
+  visNetwork( vis.nodes,vis.links,  main = "Differential Network Analysis",
+              submain = paste0(comparison.group, " (red) - ", reference.group, " (blue)")) %>%
+    visIgraphLayout(randomSeed = 123, layout = "layout_with_kk") %>%
+    visOptions(highlightNearest = list(enabled = F, degree = 1, hover = T), 
+               nodesIdSelection = T, selectedBy = c("module")) %>%
+    visInteraction(navigationButtons = TRUE,keyboard = TRUE) %>%
+    visConfigure(enabled = TRUE)  
+}
+
+
+```
+
+
+
+```{r top annotations projected onto network map}
+# todo: include this part in earlier assignment to vis.nodes and vis.links (300420)
+
+
+# get top pathways for each module
+if (!is.null(results.co.bh)){
+  
+
+top.annotations <- results.co.bh %>%
+  group_by(module) %>%
+  top_n(3,  -log10(p.adj)) %>%
+  group_by(module) %>%
+  top_n(3,  -log10(as.numeric(weightFisher))) 
+
+# generate master network
+path.nodes <- vis.nodes
+path.links <- vis.links
+
+annotation.features<- c()
+for (i in 1:nrow(top.annotations)){
+  
+  try({
+    
+  top.annotations$genes[i] <- list(id2geneset(top.annotations$GO.ID[i], my.species = species))
+  
+  # annotation.features[i] <- paste0("M.", top.annotations$module[i])
+  annotation.features[i] <- paste0(top.annotations$module[i],"_", top.annotations$Term[i], "_", top.annotations$GO.ID[i])
+  path.nodes[ ,annotation.features[i]] <- ""
+  path.nodes[path.nodes$id %in% unlist(top.annotations$genes[i]) ,annotation.features[i]] <- annotation.features[i]
+  }, silent = T)
+}
+
+annotation.features <- annotation.features[annotation.features %in% colnames(path.nodes)]
+
+for (i in 1:nrow(path.nodes)){
+  cur.entries <-  c(as.character(path.nodes[ i,annotation.features]))
+  cur.entries <- cur.entries[cur.entries != ""]
+  path.nodes$group[i]  <- paste(cur.entries, collapse = ", ")
+}
+
+
+if (print.inline){
+    visNetwork( path.nodes,path.links,  main = "Differential Network v2",
+              submain = paste0(comparison.group, " (red) - ", reference.group, " (blue)")) %>%
+    visIgraphLayout(randomSeed = 123, layout = "layout_with_kk") %>%
+    visOptions(highlightNearest = list(enabled = F, degree = 1, hover = T), 
+               nodesIdSelection = T, selectedBy = c("group")) %>%
+    visInteraction(navigationButtons = TRUE,keyboard = TRUE) %>%
+    visConfigure(enabled = TRUE) 
+}
+
+}
+
+
+```
+
+
+
+
+
+
+```{r get module genes}
+
+module.list.1 <- getModuleGenes(modules.1b, SubGeneNames, add.prefix = F)
+module.list.2 <- getModuleGenes(modules.2b, SubGeneNames, add.prefix = F)
+module.list.co <- getModuleGenes(modules.cob, SubGeneNames, add.prefix = F)
+module.list.all <- getModuleGenes(modules.all, SubGeneNames, add.prefix = F)
+
+# get genes that are common to both network modules
+module.union.list <- list()
+common.modules <- intersect(modules.1b, modules.2b)
+module.u1.list <- list()
+module.u2.list <- list()
+for (i in 1:length(common.modules)){
+  common.genes <- intersect(module.list.1[[common.modules[i]]], module.list.2[[common.modules[i]]])
+  set.1 <- setdiff(module.list.1[[common.modules[i]]], module.list.2[[common.modules[i]]])
+  set.2 <- setdiff(module.list.2[[common.modules[i]]], module.list.1[[common.modules[i]]])
+  module.union.list[[common.modules[i]]] <- common.genes
+  module.u1.list[[common.modules[i]]] <- set.1
+  module.u2.list[[common.modules[i]]] <- set.2
+}
+
+
+
+if (print.inline) {
+  table(modules.1b)
+  table(modules.2b)
+}
+
+# convert list to wide df (for export)
+module.df.1 <- namedList2wideDF(module.list.1)
+module.df.2 <- namedList2wideDF(module.list.2)
+module.df.co <- namedList2wideDF(module.list.co)
+module.df.all <- namedList2wideDF(module.list.all)
+
+```
+
+
+```{r connectivity, fig.width=10, fig.height=4}
+
+# go.here
+
+# get connectivity
+df.con <- getConnectivity(w.co, gene.names = colnames(a.mat))
+
+# get connectivity scores
+df.con.1 <- getConnectivity(w.1, rownames(a.1))
+df.con.2 <- getConnectivity(w.2, rownames(a.2))
+
+# quantile normalization of connectivity
+df.con.qNorm <- qNorm(df.con.1$wi, df.con.2$wi, df.con.2$genes)
+df.con.1$wi <- df.con.qNorm$x.new
+df.con.2$wi <- df.con.qNorm$y.new
+
+
+# w.1.scale <- scaleTOM(w.1, w.co)
+# w.2.scale <- scaleTOM(w.2, w.co)
+# 
+# df.con.1 <- getConnectivity(w.1, gene.names = colnames(a.1))
+# df.con.2 <- getConnectivity(w.2, gene.names = colnames(a.2))
+
+df.con.merge <- merge(df.con.1, df.con.2, by = "genes")
+df.con.deg <- merge(df.deg.master, df.con, by = "genes")
+df.delta.con.deg <- merge(df.deg.master, df.con.merge, by = "genes")
+
+# df.delta.con.deg$wi.x.norm <- rank((df.delta.con.deg$wi.x)/sum((df.delta.con.deg$wi.x)))
+# df.delta.con.deg$wi.y.norm <- rank((df.delta.con.deg$wi.y)/sum((df.delta.con.deg$wi.y)))
+df.delta.con.deg$wi.x.norm <- df.delta.con.deg$wi.x
+df.delta.con.deg$wi.y.norm <- df.delta.con.deg$wi.y
+df.delta.con.deg$delta.rank <- df.delta.con.deg$wi.y.norm - df.delta.con.deg$wi.x.norm
+
+df.delta.con.deg$composite.score <- (((df.delta.con.deg$avg_logFC - mean(df.delta.con.deg$avg_logFC)) / sd(df.delta.con.deg$avg_logFC))  + ((df.delta.con.deg$delta.rank - mean(df.delta.con.deg$delta.rank)) / sd(df.delta.con.deg$delta.rank))) / 2
+rank.limit <- max(c(abs(min(df.delta.con.deg$composite.score)), abs(max(df.delta.con.deg$composite.score))))
+
+label.top.n <-15
+top.delta <- c(top_n(df.delta.con.deg, label.top.n, avg_logFC)$genes,
+               top_n(df.delta.con.deg, label.top.n, -avg_logFC)$genes,
+               top_n(df.delta.con.deg, label.top.n, delta.rank)$genes,
+               top_n(df.delta.con.deg, label.top.n, -delta.rank)$genes,
+               top_n(df.con.deg, label.top.n, wi)$genes)
+top.delta <- unique(top.delta)
+
+plt.2 <- df.delta.con.deg %>%
+  ggplot(aes(x = avg_logFC, y = delta.rank,color = composite.score,  size = -log10(p_val_adj) * 0.5, text = genes)) +
+  geom_point(alpha = 0.5) +
+  xlab("log FC") +
+  ylab(paste0("Delta Rank Connectivity (", comparison.group, "-", reference.group, ")")) +
+  geom_vline(xintercept = 0 , linetype = "dashed") +
+  geom_hline(yintercept = 0 , linetype = "dashed") +
+  ggtitle("DEG vs. Connectivity\nCS = mean(standardized delta node & link)") +
+  xlab(paste0("logFC (", comparison.group, "-", reference.group, ")") ) +
+  theme_classic() +
+  scale_colour_gradientn("CS", colours=c("skyblue", "grey90", "tomato"),na.value = "transparent",
+                         values=c(rescaleValues(c(min(df.delta.con.deg$composite.score), 0, max(df.delta.con.deg$composite.score))))) +
+  ggrepel::geom_text_repel(aes(avg_logFC, delta.rank,
+                               label =ifelse(genes %in% top.delta ,as.character(genes),'')), size = 2.5, color = "black") +
+  labs(size = "-log10(p)")
+
+
+df.delta.con.deg$mean.rank <- (df.delta.con.deg$wi.x.norm + df.delta.con.deg$wi.y.norm)/2
+
+plt.3 <- df.con.deg %>%
+  ggplot(aes(x = avg_logFC, y = rank(wi) ,color =avg_logFC, size = -log10(p_val_adj) * 0.5, text = genes)) +
+  geom_point(alpha = 0.5) +
+  ylab("Connectivity Rank") +
+  theme_classic() +
+  geom_vline(xintercept = 0 , linetype = "dashed") +
+  ggtitle("DEG Rank Plot\nRanked by Network Connectivity") + xlab(paste0("logFC (", comparison.group, "-", reference.group, ")")) +
+  ggrepel::geom_text_repel(aes(avg_logFC, rank(wi), label =ifelse(genes %in% top.delta ,as.character(genes),'')), size = 2.5, color = "black") +
+  labs(size = "-log10(p)") +
+  scale_colour_gradientn("logFC", colours=c("skyblue", "grey90", "tomato"),na.value = "transparent",
+                         values=c(rescaleValues(c(min(df.con.deg$avg_logFC), 0, max(df.con.deg$avg_logFC)))))
+
+#
+
+
+df.delta.con.deg$top.connect <- F
+df.delta.con.deg$top.connect[df.delta.con.deg$mean.rank >  nrow(df.delta.con.deg)-20] <- T
+
+# plt.w.comp.1 <- df.delta.con.deg %>%
+#   ggplot(aes(wi.x.norm, wi.y.norm)) +
+#   geom_point() +
+#   geom_smooth()  +
+#   geom_abline(slope = 1) +
+#   xlab(paste0("Normalized Connectivity (", reference.group , ")")) +
+#   ylab(paste0("Normalized Connectivity (", comparison.group , ")")) +
+#   theme_classic() +
+#   ggtitle("Connectivity Comparison") + ggrepel::geom_text_repel(aes(wi.x.norm, wi.y.norm, label =ifelse(top.connect ,as.character(genes),'')), size = 2.5, color = "black")
+
+df.delta.con.deg$sig.flag <- F
+df.delta.con.deg$sig.flag[df.delta.con.deg$delta.rank >  1.96*sd(df.delta.con.deg$delta.rank)] <- T
+df.delta.con.deg$sig.flag[df.delta.con.deg$delta.rank < -1.96*sd(df.delta.con.deg$delta.rank)] <- T
+# plt.w.comp.2 <-   df.delta.con.deg %>%
+#     ggplot(aes(mean.rank, delta.rank)) +
+#   geom_smooth()  +
+#   geom_hline(yintercept = 1.96*sd(df.delta.con.deg$delta.rank)) +
+#   geom_hline(yintercept = - 1.96*sd(df.delta.con.deg$delta.rank)) +
+#   geom_hline(yintercept = 0, linetype = "dashed") +
+#     geom_point() +
+#   xlab("Mean Connectivity")+
+#   ylab("Delta Connectivity") +
+#   theme_classic() +
+#    ggrepel::geom_text_repel(aes(mean.rank, delta.rank, label =ifelse(sig.flag ,as.character(genes),'')), size = 2.5, color = "black")
+
+if (print.inline){
+  cowplot::plot_grid(plt.2, plt.3, ncol = 2)
+
+# cowplot::plot_grid(plt.w.comp.1, plt.w.comp.2)
+}
+
+```
+
+
+```{r connectivity and expression overview, fig.width=10, fig.height=4}
+
+# Distribution of connectivities
+plt.overview.1 <- df.delta.con.deg %>%
+  ggplot() + 
+  geom_density(aes(wi.x), alpha = 0.5, fill = "skyblue") + 
+  geom_density(aes(wi.y), alpha = 0.5, fill = "tomato") + 
+  theme_classic() + 
+  xlab("Quantile Normalized Connectivity, wi") + 
+  ggtitle(paste0("Network Connectivity Distribution\n", reference.group, " (blue) vs. ", comparison.group, " (red)\np=", signif(wilcox.test(df.delta.con.deg$wi.x, df.delta.con.deg$wi.y)[["p.value"]], 3)))
+
+
+
+# Distribution of expression differences
+plt.overview.2 <- df.delta.con.deg %>%
+  ggplot() + 
+  geom_density(aes(avg_logFC, fill = "logFC"), alpha = 0.5) + 
+  geom_density(aes(pct.1 - pct.2, fill = "deltaFraction"), alpha = 0.5) + 
+  theme_classic() + 
+  xlab(paste0("logFC (", comparison.group , "-", reference.group , ")")) + 
+  geom_vline(xintercept= 0, linetype = "dashed") +    
+  scale_fill_manual("", 
+                      breaks = c("logFC", "deltaFraction"),
+                      values = c("logFC"="black", "deltaFraction"="grey")) + 
+  ggtitle(paste0("Expression Difference Distribution\n", comparison.group, "-", reference.group))
+
+if (print.inline){
+  cowplot::plot_grid(plt.overview.1, plt.overview.2, ncol = 2)
+}
+```
+
+```{r delta node enrichment}
+
+
+# pathways <- getAnnotationPathways()
+# enrich DEGs (differential)
+
+# gse.pathway.list <- list()
+gse.pathway.degWi <- NULL
+# 
+for (i in 1:length(u.clusters)){
+  
+  which.cluster <- u.clusters[i]
+  
+  # get DEGs
+  df.deg <- df.deg.list[[paste("c", as.character(u.clusters[i]), sep = "")]] 
+  
+  df.con.deg.cur <- df.con.deg[df.con.deg$genes %in% df.deg$genes, ]
+  
+  # ranked by signed lop p 
+  if (is.null(df.con.deg.cur)) next
+  df.con.deg.cur <- df.con.deg.cur[complete.cases(df.con.deg.cur),]
+  
+  # prep gene list (match to EntrezID, sort)
+  gene.list <- df.con.deg.cur$wi * sign(df.con.deg.cur$avg_logFC)
+  names(gene.list) <- df.con.deg.cur$genes
+  match.ind <- match(names(gene.list), my.entrez$SYMBOL)
+  names(gene.list) <- as.character(my.entrez$ENTREZID[match.ind])
+  gene.list = sort(gene.list, decreasing = TRUE)
+  
+  # clean list
+  df.ent <- data.frame(names = names(gene.list), values = as.vector(gene.list))
+  df.ent <- df.ent[complete.cases(df.ent), ]
+  df.ent <- df.ent[!is.infinite(df.ent$values), ]
+  gene.list.clean <- df.ent$values
+  names(gene.list.clean) <- df.ent$names
+  
+  # pathway gsea enrichment
+  gse.deg.wiRank.pathway <- fgsea::fgsea(pathways.go, gene.list.clean, nperm=1000, maxSize=500)
+  
+  if (nrow(gse.deg.wiRank.pathway) == 0) next
+  
+  gse.deg.wiRank.pathway$cluster <- paste("c", as.character(u.clusters[i]), sep = "")
+  gse.pathway.degWi <- bind_rows(gse.pathway.degWi, gse.deg.wiRank.pathway)
+  
+}
+
+
+gse.pathway.degWi[ ,c("ES","NES", "pval", "padj")] <- signif(gse.pathway.degWi[ ,c("ES","NES", "pval", "padj")], 3)
+gse.pathway.degWi.all <- gse.pathway.degWi[ ,c("cluster", "pathway", "ES","NES", "pval", "padj", "nMoreExtreme", "size")]
+gse.pathway.degWi.sig <- gse.pathway.degWi.all[(gse.pathway.degWi.all$pval < 0.05) & (abs(gse.pathway.degWi.all$NES) >= 1), ]
+gse.pathway.degWi.sub <- gse.pathway.deg[ ,c("cluster", "pathway", "ES","NES", "pval", "padj", "nMoreExtreme", "size")]
+
+
+gsea.deg.merge <- merge(gse.pathway.deg.all, gse.pathway.degWi.all, by = "pathway")
+gsea.deg.merge$NES.mean <- (gsea.deg.merge$NES.x + gsea.deg.merge$NES.y)/2
+gsea.deg.merge$NES.dif <- (gsea.deg.merge$NES.x - gsea.deg.merge$NES.y)
+
+
+# plot top enrichments (bar plot)
+top.n.enrich <- 10
+gsea.degWi.sig.top <- bind_rows(top_n(gsea.deg.merge, top.n.enrich, NES.mean),
+                                top_n(gsea.deg.merge, top.n.enrich, -NES.mean)) 
+
+
+top.n.enrich.merge<- 5
+gsea.deg.merge.topMean <- bind_rows(top_n(gsea.deg.merge, top.n.enrich.merge, NES.mean),
+                                top_n(gsea.deg.merge, top.n.enrich.merge, -NES.mean)) 
+gsea.deg.merge.topDif <- bind_rows(top_n(gsea.deg.merge, top.n.enrich.merge, NES.dif),
+                                top_n(gsea.deg.merge, top.n.enrich.merge, -NES.dif)) 
+
+
+# compare enrichment based on differen ranking schemes
+gsea.deg.merge$label <- F
+gsea.deg.merge$label[gsea.deg.merge$pathway %in% gsea.deg.merge.topMean$pathway] <- T
+gsea.deg.merge$label[gsea.deg.merge$pathway %in% gsea.deg.merge.topDif$pathway] <- T
+
+# nes.limit <- max(c(abs(min(gsea.deg.merge$NES.mean)), abs(max(gsea.deg.merge$NES.mean))))
+plt.gsea.comp <- gsea.deg.merge %>%
+  ggplot(aes(x = NES.x, y = NES.y, color = (NES.mean), size = 1/abs(NES.dif), text = pathway)) + 
+  geom_point() + 
+  xlab(paste0("GSEA score (DEG pVal Ranking)\n", comparison.group, "-", reference.group)) + 
+  ylab(paste0("GSEA score (wi Ranking)\n", comparison.group, "-", reference.group)) + 
+  theme_classic() + 
+  geom_hline(yintercept = 0) + 
+  geom_vline(xintercept = 0) + 
+  ggrepel::geom_text_repel(aes(NES.x, NES.y, label =ifelse(label ,as.character(pathway),'')), size = 2.5, color = "black") + 
+  ggtitle("Delta Node Enrichment\nDEG vs Connectivity-based Ranking") + 
+    scale_colour_gradientn("NES", colours=c("skyblue", "grey90", "tomato"),na.value = "transparent",
+                         values=c(rescaleValues(c(min(gsea.deg.merge$NES.mean), 0, max(gsea.deg.merge$NES.mean))))) 
+
+if (print.inline){
+  # print(plt.gsea.comp)
+  plotly::ggplotly(plt.gsea.comp, tooltip="text")
+}
+
+
+
+```
+
+```{r differential linkage analysis, message = FALSE, warning = FALSE}
+
+# Differential linkage ############################################
+# gene to module mapping
+df.gene2module <-  namedList2longDF(getModuleGenes(modules.cob, SubGeneNames, add.prefix = F),
+                                    name.header = "module", value.header = "genes")
+
+# differential connectivity 
+df.dif.con.merge <- df.con.merge
+df.dif.con.merge <- merge(df.dif.con.merge, df.gene2module, by = "genes")
+df.dif.con.merge$wi.x.norm <- df.dif.con.merge$wi.x
+df.dif.con.merge$wi.y.norm <- df.dif.con.merge$wi.y
+df.dif.con.merge$delta.wi <- df.dif.con.merge$wi.y.norm - df.dif.con.merge$wi.x.norm
+
+df.dif.wi.sum <- df.dif.con.merge %>%
+  group_by(module) %>%
+  summarize(mean.dif = mean(wi.y.norm - wi.x.norm),
+            median.dif = median(wi.y.norm - wi.x.norm),
+            sd.dif = sd(wi.y.norm - wi.x.norm),
+            n.dif = length(wi.y.norm - wi.x.norm),
+            val.x = list(wi.x.norm),
+            val.y = list(wi.y.norm),
+            pVal = wilcox.test(wi.x.norm, wi.y.norm)[["p.value"]])
+
+# multiple comparison correction
+df.dif.wi.sum$pAdj <- p.adjust(df.dif.wi.sum$pVal, method = "BH", n = nrow(df.dif.wi.sum))
+# df.dif.rank.sum$pAdj <- p.adjust(df.dif.rank.sum$pVal, method = "BH", n = nrow(df.dif.rank.sum))
+
+# differential connectivity volcano
+plt.dif.con <- df.dif.wi.sum %>%
+  ggplot(aes(x = median.dif, y = -log10(pVal), color = median.dif, size = -log10(pVal))) +
+  geom_point(stat = "identity") +
+  theme_classic() + 
+  xlab(paste0("Connectivity Difference (", comparison.group, " - ", reference.group, ")")) + 
+  ylab("-log10(p.Adj)") + 
+  geom_vline(xintercept = 0, linetype = "dashed")  +
+  ggrepel::geom_text_repel(aes(median.dif,  -log10(pVal), label =module), size = 3, color = "black") + 
+  ggtitle("Differential Connectivity") + 
+    scale_colour_gradientn("Difference", colours=c("skyblue", "grey90", "tomato"),na.value = "transparent",
+                         values=c(rescaleValues(c(min(df.dif.wi.sum$median.dif), 0, max(df.dif.wi.sum$median.dif))))) 
+
+
+if (sum(df.dif.wi.sum$pAdj < 0.05) > 0) plt.dif.con <- plt.dif.con +  geom_hline(yintercept =-log10(0.05), linetype = "dashed") 
+
+
+if (print.inline){
+  print(plt.dif.con)
+}
+
+
+```
+
+
+```{r delta linkage enrichment}
+
+# GSEA Delta linkage ############################################
+
+# enrich based on delta connectivity
+gene.list.delta <- df.dif.con.merge$delta.wi
+names(gene.list.delta) <- (as.character(df.dif.con.merge$genes))
+match.ind <- match(names(gene.list.delta), my.entrez$SYMBOL)
+names(gene.list.delta) <- as.character(my.entrez$ENTREZID[match.ind])
+gene.list.delta = sort(gene.list.delta, decreasing = TRUE)
+
+# clean list
+df.ent.delta <- data.frame(names = names(gene.list.delta), values = as.vector(gene.list.delta))
+df.ent.delta <- df.ent.delta[complete.cases(df.ent.delta), ]
+df.ent.delta <- df.ent.delta[!is.infinite(df.ent.delta$values), ]
+gene.list.delta.clean <- df.ent.delta$values
+names(gene.list.delta.clean) <- df.ent.delta$names
+
+# pathway gsea enrichment
+gsea.pathway.wi <- fgsea::fgsea(pathways, gene.list.delta.clean, nperm=1000, maxSize=500)
+gsea.pathway.wi.sig <- gsea.pathway.wi[(gsea.pathway.wi$pval < 0.05) & (abs(gsea.pathway.wi$NES) >= 1), ]
+
+gsea.pathway.merge <- merge(gsea.deg.merge, gsea.pathway.wi, by = "pathway")
+
+gsea.pathway.merge$NES.mean.all <- (gsea.pathway.merge$NES.mean + gsea.pathway.merge$NES)/2
+gsea.pathway.merge$NES.dif.all <- (gsea.pathway.merge$NES.mean - gsea.pathway.merge$NES)
+# gsea.pathway.merge$p.pool <- 10^(mean(log10()))
+
+# get geometric mean of pval
+gsea.pathway.merge <- gsea.pathway.merge %>%   mutate(p.pool =  10^((log10(pval.x) + log10(pval.y) + log10(pval))/3))
+
+# flag top pathways
+top.n.enrich.merge <- 3
+gsea.wi.merge.topMean <- bind_rows(top_n(gsea.pathway.merge, top.n.enrich.merge, NES.mean.all),
+                                top_n(gsea.pathway.merge, top.n.enrich.merge, -NES.mean.all)) 
+gsea.wi.merge.topDif <- bind_rows(top_n(gsea.pathway.merge, top.n.enrich.merge, NES.dif.all),
+                                top_n(gsea.pathway.merge, top.n.enrich.merge, -NES.dif.all)) 
+
+gsea.pathway.merge$label <- F
+gsea.pathway.merge$label[gsea.pathway.merge$pathway %in% gsea.wi.merge.topMean$pathway] <- T
+gsea.pathway.merge$label[gsea.pathway.merge$pathway %in% gsea.wi.merge.topDif$pathway] <- T
+
+# generate plot
+plt.dif.net.enrich <- gsea.pathway.merge %>%
+  ggplot(aes(x = NES.mean,y = NES, color = (NES.mean.all), size = 1/abs(NES.dif.all))) + 
+  geom_point() + 
+  xlab("Delta Node Enrichment") + 
+  ylab("Delta Linkage Enrichment") + 
+  theme_classic() + 
+  geom_hline(yintercept = 0) + 
+  geom_vline(xintercept = 0) + 
+  ggrepel::geom_text_repel(aes(NES.mean, NES, label =ifelse(label ,as.character(pathway),'')), size = 2.5, color = "black") + 
+      scale_colour_gradientn("NES", colours=c("skyblue", "grey90", "tomato"),na.value = "transparent",
+                         values=c(rescaleValues(c(min(gsea.pathway.merge$NES.mean.all, na.rm = T), 0, max(gsea.pathway.merge$NES.mean.all, na.rm = T))))) + 
+ ggtitle(paste0("Differential Network Enrichment (GSEA)\n", comparison.group, " (red) - ", reference.group, " (blue)"))
+
+if (print.inline){
+  print(plt.dif.net.enrich)
+}
+
+```
+
+```{r, fig.height=10, fig.width=10}
+
+
+top.n.enrich <- 10
+gsea.node.linkage.enrich.top <- bind_rows(top_n(gsea.pathway.merge, top.n.enrich, NES.mean.all),
+                                  top_n(gsea.pathway.merge, top.n.enrich, -NES.mean.all)) 
+
+gsea.node.enrich.top <- bind_rows(top_n(gsea.pathway.merge, top.n.enrich, NES.mean),
+                                  top_n(gsea.pathway.merge, top.n.enrich, -NES.mean)) 
+
+gsea.linkage.enrich.top <- bind_rows(top_n(gsea.pathway.merge, top.n.enrich, NES),
+                                  top_n(gsea.pathway.merge, top.n.enrich, -NES)) 
+
+plt.e.node.linkage <- gsea.node.linkage.enrich.top %>%
+  ggplot(aes(x = reorder(pathway,NES.mean.all),  y = NES.mean.all, fill = -log10(p.pool))) + 
+  geom_bar(stat = "identity") + coord_flip() + 
+  ggtitle("GSEA Enrichment (Consensus)\nNode + Linkage Scores") + 
+  xlab("") + 
+  ylab(paste0("Consensus GSEA Score\n", comparison.group, "-", reference.group)) + 
+  theme_classic()
+
+plt.e.node <- gsea.node.enrich.top %>%
+  ggplot(aes(x = reorder(pathway,NES.mean),  y = NES.mean, fill = -log10(pval.x))) + 
+  geom_bar(stat = "identity") + coord_flip() + 
+  ggtitle("GSEA Enrichment\nNode Scores") + 
+  xlab("") + 
+   ylab(paste0("Node GSEA Score\n", comparison.group, "-", reference.group)) + 
+  theme_classic()
+
+plt.e.linkage <- gsea.linkage.enrich.top %>%
+  ggplot(aes(x = reorder(pathway,NES),  y = NES, fill = -log10(pval))) + 
+  geom_bar(stat = "identity") + coord_flip() + 
+  ggtitle("GSEA Enrichment\nLinkage Scores") + 
+  xlab("") + 
+   ylab(paste0("Linkage GSEA Score\n", comparison.group, "-", reference.group)) + 
+  theme_classic()
+
+if (print.inline){
+   # fig.height=10, fig.width=10
+  cowplot::plot_grid(plt.e.node.linkage, plt.e.node, plt.e.linkage, ncol = 1, align = "v")
+}
+
+
+
+```
+
+```{r network-level gsea, fig.width=10, fig.height=10}
+
+# prep data for gsea dotplot
+gsea.pathway.dot <- gsea.pathway.merge[ ,c("pathway", "NES.mean", "pval.x", "NES", "pval", "NES.mean.all", "p.pool")]
+colnames(gsea.pathway.dot) <- c("pathway", "NES.node", "p.node", "NES.link", "p.link", "NES.pool", "p.pool")
+gsea.pathway.dot$NES.dif <- gsea.pathway.dot$NES.node - gsea.pathway.dot$NES.link
+gsea.pathway.dot$p.dif <- gsea.pathway.dot$p.pool
+gsea.pathway.dot.p <- gsea.pathway.dot[ ,c("pathway",  "p.node", "p.link", "p.pool", "p.dif")]
+gsea.pathway.dot.n <- gsea.pathway.dot[ ,c("pathway",  "NES.node", "NES.link", "NES.pool", "NES.dif")]
+
+gsea.pathway.dot.n$rank <- rank(gsea.pathway.dot.n$NES.pool, ties.method = "random")
+gsea.pathway.n.long <- pivot_longer(gsea.pathway.dot.n, cols = starts_with("NES."))
+gsea.pathway.p.long <- pivot_longer(gsea.pathway.dot.p, cols = starts_with("p."))
+
+gsea.pathway.n.long$type <- NA
+gsea.pathway.n.long$type[grepl("node", gsea.pathway.n.long$name)] <- "node"
+gsea.pathway.n.long$type[grepl("link", gsea.pathway.n.long$name)] <- "link"
+gsea.pathway.n.long$type[grepl("pool", gsea.pathway.n.long$name)] <- "pool"
+gsea.pathway.n.long$type[grepl("dif", gsea.pathway.n.long$name)] <- "dif"
+gsea.pathway.p.long$type <- NA
+gsea.pathway.p.long$type[grepl("node", gsea.pathway.p.long$name)] <- "node"
+gsea.pathway.p.long$type[grepl("link", gsea.pathway.p.long$name)] <- "link"
+gsea.pathway.p.long$type[grepl("pool", gsea.pathway.p.long$name)] <- "pool"
+gsea.pathway.p.long$type[grepl("dif", gsea.pathway.p.long$name)] <- "dif"
+
+# merge nes and p values
+gsea.pathway.dot.long <- merge(gsea.pathway.n.long, gsea.pathway.p.long, by = c("pathway", "type"))
+gsea.pathway.dot.long <- gsea.pathway.dot.long[complete.cases(gsea.pathway.dot.long), ]
+
+# flag top pathways
+p.threshold.n <- 15
+top.path <- c(top_n(gsea.pathway.dot, p.threshold.n, -NES.node)$pathway,
+  top_n(gsea.pathway.dot, p.threshold.n, NES.node)$pathway,
+  top_n(gsea.pathway.dot, p.threshold.n, -NES.link)$pathway,
+  top_n(gsea.pathway.dot, p.threshold.n, NES.link)$pathway,
+    top_n(gsea.pathway.dot, p.threshold.n, -(NES.dif))$pathway,
+  top_n(gsea.pathway.dot, p.threshold.n, (NES.dif))$pathway)
+
+
+p.threshold.s <- 5
+top.path.s <- c(top_n(gsea.pathway.dot, p.threshold.s, -NES.node)$pathway,
+  top_n(gsea.pathway.dot, p.threshold.s, NES.node)$pathway,
+  top_n(gsea.pathway.dot, p.threshold.s, NES.pool)$pathway,
+  top_n(gsea.pathway.dot, p.threshold.s, NES.pool)$pathway)
+top.path.s <- unique(top.path.s)
+
+# ensure no duplicates are present
+top.path <- unique(top.path)
+  
+# assertion
+df.assert <- as.data.frame(table(gsea.pathway.dot.long$pathway))
+# stopifnot(sum(df.assert$Freq) == nrow(df.assert)*4)
+
+# GSEA dot plot
+# nes.limit <- max(c(abs(min(gsea.pathway.dot.long$value.x)), abs(max(gsea.pathway.dot.long$value.x))))
+plt.gsea.dot <- gsea.pathway.dot.long %>%
+  filter(pathway %in% top.path, type %in% c("node", "link", "pool")) %>%
+  ggplot(aes(x = type, y = reorder(pathway, value.x), color = value.x, size = -log10(value.y))) + 
+  geom_point() + 
+  scale_colour_gradientn("NES", colours=c("skyblue", "grey90", "tomato"),na.value = "transparent",
+                         values=c(rescaleValues(c(min(gsea.pathway.dot.long$value.x), 0, max(gsea.pathway.dot.long$value.x))))) + 
+  ggtitle(paste0("Differential Network Enrichment (GSEA)\n", comparison.group, " (red) - ", reference.group, " (blue)")) + 
+  theme_classic() + 
+  ylab("") + 
+  xlab("Network Feature")
+
+# print plot
+if (print.inline){
+  print(plt.gsea.dot)
+}
+```
+
+```{r gene-level heatmaps}
+
+do.pathway.heat <- F
+
+if (do.pathway.heat){
+  
+
+# get expression matrix
+exp.mat.all <- getExpressionMatrix(so.query, which.data = which.data, only.variable = T)
+
+# downsample expression matrix 
+max.cell.per.group <- 100
+sample.ind.1 <- sample(idMap.list[[reference.group]], max.cell.per.group, replace = F)
+sample.ind.2 <- sample(idMap.list[[comparison.group]], max.cell.per.group, replace = F)
+sample.ind <- c(sample.ind.1, sample.ind.2)
+exp.mat.sub <- exp.mat.all[ ,sample.ind]
+
+
+df.deg.top <- df.deg[abs(df.deg$avg_logFC) > 1, ]
+df.deg.bottom <- df.deg[abs(df.deg$avg_logFC) > 1, ]
+pathway.sym <- df.deg.top$genes
+
+# get pathway genes
+
+cur.pathway <- "antigen processing and presentation of exogenous peptide antigen via MHC class I, TAP-dependent"
+# cur.pathway <- "Notch signaling pathway"
+
+for (i in 1:length(top.path.s)){
+  cur.pathway <- top.path.s[i]
+
+pathway.entrez <- pathways[[cur.pathway]]
+pathway.sym <- entrez2sym(pathway.entrez, my.species = species)$SYMBOL
+exp.mat.cur <- exp.mat.sub[rownames(exp.mat.sub) %in% pathway.sym  , ]
+exp.df.cur <- as.data.frame(exp.mat.cur)
+
+# map cell id to group
+df.id <- data.frame(cell.id = colnames(exp.df.cur))
+df.idMap <- data.frame(group = so.query.3@meta.data[["group.query"]], cell.id = colnames(so.query.3))
+u.group <- as.character(unique(df.idMap$group))
+idMap.list <- list()
+for (i in 1:length(u.group)) idMap.list[[u.group[i]]] <- as.character(df.idMap$cell.id[df.idMap$group == u.group[i]])
+
+df.id$group <- NA
+df.id$group[df.id$cell.id %in% idMap.list[[reference.group]]] <- reference.group
+df.id$group[df.id$cell.id %in% idMap.list[[comparison.group]]] <- comparison.group
+grouping.df <- as.data.frame(df.id$group)
+
+plt.this <- heatmaply::heatmaply(
+  exp.df.cur,
+  col_side_colors = grouping.df,
+  key.title="Expression",
+  labCol = rep("", ncol(exp.df.cur)),
+  main = paste0(cur.pathway)
+)
+
+print(plt.this)
+
+}
+
+}
+
+
+```
+
+
+```{r heatmap top deg}
+
+# get expression matrix
+exp.mat.all <- getExpressionMatrix(so.query, which.data = which.data, only.variable = T)
+
+# map cell id to group
+df.idMap <- data.frame(group = so.query.3@meta.data[["group.query"]], cell.id = colnames(so.query.3))
+u.group <- as.character(unique(df.idMap$group))
+idMap.list <- list()
+for (i in 1:length(u.group)) idMap.list[[u.group[i]]] <- as.character(df.idMap$cell.id[df.idMap$group == u.group[i]])
+
+# downsample expression matrix 
+max.cell.per.group <- 100
+sample.ind.1 <- sample(idMap.list[[reference.group]], max.cell.per.group, replace = F)
+sample.ind.2 <- sample(idMap.list[[comparison.group]], max.cell.per.group, replace = F)
+sample.ind <- c(sample.ind.1, sample.ind.2)
+exp.mat.sub <- exp.mat.all[ ,sample.ind]
+
+# get DEG genes
+top.n.deg <- 30
+df.deg.enr <- df.deg[abs(df.deg$avg_logFC) > 1, ]
+deg.top <- top_n(df.deg.enr, top.n.deg, (avg_logFC))$genes
+deg.bottom <- top_n(df.deg.enr, top.n.deg, -(avg_logFC))$genes
+deg.genes <- c(deg.top, deg.bottom)
+
+# get DCG genes
+top.n.dcg <- 30
+# df.deg.enr <- df.deg[abs(df.deg$avg_logFC) > 1, ]
+dcg.top <- as.character(top_n(df.con.deg.merge, top.n.deg, (w.delta))$genes)
+dcg.bottom <- as.character(top_n(df.con.deg.merge, top.n.deg, -(w.delta))$genes)
+dcg.genes <- c(dcg.top, dcg.bottom)
+
+# get DCG genes
+top.n.hub <- 60
+# df.deg.enr <- df.deg[abs(df.deg$avg_logFC) > 1, ]
+hub.genes <- as.character(top_n(df.con.deg, top.n.hub, (wi))$genes)
+
+# filter matrix
+exp.mat.deg <- exp.mat.sub[rownames(exp.mat.sub) %in% deg.genes  , ]
+exp.df.deg <- as.data.frame(exp.mat.deg)
+
+exp.mat.dcg <- exp.mat.sub[rownames(exp.mat.sub) %in% dcg.genes  , ]
+exp.df.dcg <- as.data.frame(exp.mat.dcg)
+
+exp.mat.hub <- exp.mat.sub[rownames(exp.mat.sub) %in% hub.genes  , ]
+exp.df.hub <- as.data.frame(exp.mat.hub)
+
+# get group ids
+df.id <- data.frame(cell.id = colnames(exp.df.deg))
+df.id$group <- NA
+df.id$group[df.id$cell.id %in% idMap.list[[reference.group]]] <- reference.group
+df.id$group[df.id$cell.id %in% idMap.list[[comparison.group]]] <- comparison.group
+grouping.df <- as.data.frame(df.id$group)
+
+
+if (print.inline){
+  plt.deg.genes <- heatmaply::heatmaply(
+    exp.df.deg,
+    col_side_colors = grouping.df,
+    key.title="Expression",
+    labCol = rep("", ncol(exp.df.deg)),
+    main = "DEG"
+  )
+  
+  plt.dcg.genes <- heatmaply::heatmaply(
+    exp.df.dcg,
+    col_side_colors = grouping.df,
+    key.title="Expression",
+    labCol = rep("", ncol(exp.df.dcg)),
+    main = "DCG"
+  )
+  
+  plt.hub.genes <- heatmaply::heatmaply(
+    exp.df.hub,
+    col_side_colors = grouping.df,
+    key.title="Expression",
+    labCol = rep("", ncol(exp.df.hub)),
+    main = "Hub"
+  )
+  
+  print(plt.deg.genes)
+  print(plt.dcg.genes)
+  print(plt.hub.genes)
+}
+
+
+
+```
+
+
+cluster UMAP (1)
+===================================== 
+
+```{r plt.umap_by_c1, fig.width=15, fig.height=5}
+  cowplot::plot_grid(plt.umap_group + ggtitle("Original UMAP"), plt.umap_membership + ggtitle("Stratified UMAP"))
+```
+
+cluster UMAP (2)
+===================================== 
+
+```{r plt.umap_by_c2, fig.width=15, fig.height=5}
+    cowplot::plot_grid(p1.dim + ggtitle("Re-Clustered UMAP: Group Strata"), p2.dim+ ggtitle("Re-Clustered UMAP: Cluster Strata"))
+```
+
+Pairwise Comparison
+===================================== 
+
+Differentially-expressed genes between groups (within-clusters)
+
+Row {.tabset}
+-------------------------------------
+
+```{r paired,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+paired_out <- lapply(seq_along(plt.pairwise.list), function(i) {
+  
+  s1 <- names(plt.pairwise.list)[i]
+  
+    s2 <- paste("plt.pairwise.list[[", i, "]]", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE}", paste("paired", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(paired_out, collapse = '\n')))`
+
+
+Enrichment | Within-Cluster (DEG)
+===================================== 
+
+Difference between two groups. Positive values indicate that the gene is more highly expressed in the first group (group1 of DEG)
+
+Row {.tabset}
+-------------------------------------
+
+### Enrichment
+
+```{r enrich wi cluster}
+
+
+if (!is.null(gse.pathway.deg.all)){
+  
+  gse.pathway.deg.all.sig <- gse.pathway.deg.all[gse.pathway.deg.all$pval <= 0.05, ]
+    datatable(gse.pathway.deg.all.sig, 
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(pageLength = 50,
+    dom = 'Bfrtip', 
+    buttons = c('copy', 'csv', 'pdf')))
+}
+```
+
+```{r deg table all,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+# Deg table
+
+deg_table_out <- lapply(seq_along(df.deg.list), function(i) {
+  
+  s1 <- paste("df.deg.list[[", i, "]]", sep = "")
+  
+  table.name <- paste("DEG | ", names(df.deg.list)[i], sep = "")
+  
+  # s4 <- paste("datatable(", s1, ", filter = 'top')", sep = "")
+  
+      s4 <- paste("datatable(", s1, ", 
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(pageLength = 50,
+    dom = 'Bfrtip', 
+    buttons = c('copy', 'csv', 'pdf')))", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("deg table", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s",s4)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(deg_table_out, collapse = '\n')))`
+
+DEG | UMAP
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r deg umap,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+deg_umap_out <- lapply(seq_along(plt.deg.umap), function(i) {
+  
+  s1 <- names(plt.deg.umap)[i]
+  
+    s2 <- paste("print(plt.deg.umap[[", i, "]])", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=13, fig.height=6, message=FALSE, warning=FALSE}", paste("deg_umap_out", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(deg_umap_out, collapse = '\n')))`
+
+DEG | Vln
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r deg vln,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+deg_vln_out <- lapply(seq_along(plt.deg.vln), function(i) {
+  
+  s1 <- names(plt.deg.vln)[i]
+  
+    # s2 <- paste("plt.deg.vln[[", i, "]]", sep = "")
+    s2 <- paste("print(CombinePlots(plots =  plt.deg.vln[[", i, "]], nrow = 2))", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=13, fig.height=6, message=FALSE, warning=FALSE}", paste("deg vln", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(deg_vln_out, collapse = '\n')))`
+
+
+Enrichment | Between-Cluster (CG)
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Enrichment
+
+```{r enrich bw cluster}
+
+if (!is.null(gse.pathway.cg.all)){
+    datatable(gse.pathway.cg.all, 
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(pageLength = 50,
+    dom = 'Bfrtip', 
+    buttons = c('copy', 'csv', 'pdf')))
+}
+
+```
+
+
+```{r cg table all,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+# Deg table
+
+cg_table_out <- lapply(seq_along(conserved.markers.list), function(i) {
+  
+  s1 <- paste("conserved.markers.list[[", i, "]]", sep = "")
+  
+  table.name <- paste("CG | ", names(conserved.markers.list)[i], sep = "")
+  
+  # s4 <- paste("datatable(", s1, ", filter = 'top')", sep = "")
+  
+      s4 <- paste("datatable(", s1, ", 
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(pageLength = 50,
+    dom = 'Bfrtip', 
+    buttons = c('copy', 'csv', 'pdf')))", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("cg table", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s",s4)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(cg_table_out, collapse = '\n')))`
+
+CG | UMAP
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r cg umap,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+deg_umap_out <- lapply(seq_along(plt.cg.umap), function(i) {
+  
+  s1 <- names(plt.cg.umap)[i]
+  
+    s2 <- paste("print(plt.cg.umap[[", i, "]])", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=13, fig.height=6, message=FALSE, warning=FALSE}", paste("cg umap", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(deg_umap_out, collapse = '\n')))`
+
+CG | Vln
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r cg vln,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+deg_vln_out <- lapply(seq_along(plt.cg.vln), function(i) {
+  
+  s1 <- names(plt.cg.vln)[i]
+  
+  # print(CombinePlots(plots =   plt.cg.vln[[paste("c", as.character(u.clusters[i]), sep = "")]] , nrow = 2))
+    s2 <- paste("print(CombinePlots(plots =  plt.cg.vln[[", i, "]], nrow = 2))", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=13, fig.height=6, message=FALSE, warning=FALSE}", paste("cg vln", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(deg_vln_out, collapse = '\n')))`
+
+
+
+Network Construction
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Power Optimization
+
+```{r power opt}
+try({
+print(sft$optimization.plot)
+}, silent = T)
+```
+
+### Node-Linkage Distributions
+
+```{r node linkage,fig.width=10, fig.height=7}
+try({
+cowplot::plot_grid(plotlist = sft$distribution.plot, ncol = 5)
+}, silent = T)
+```
+
+
+
+
+
+```{r module clusters 1}
+
+### Module Clusters (original)
+# try({
+# plotDendroAndColors(geneTree.all, mColorh.all[,1:5], paste("dpSplt =", 0:4), main = "All", dendroLabels = F)
+# plotDendroAndColors(geneTree.co, mColorh.co[,1:5], paste("dpSplt =", 0:4), main = "Consensus", dendroLabels = F)
+# plotDendroAndColors(geneTree.1, mColorh.1[,1:5], paste("dpSplt =", 0:4),
+#                     main = paste0("Group 1: ", reference.group), dendroLabels = F)
+# plotDendroAndColors(geneTree.2, mColorh.2[,1:5], paste("dpSplt =", 0:4),
+#                     main = paste0("Group 2: ", comparison.group), dendroLabels = F)
+# }, silent = T)
+
+```
+
+### Module Clusters
+
+Clustered TOM matrix is hierarchially-clustered and adaptive pruning method is applied to identify gene modules. Consensus modules are determind by taking parallel-component max/min of two paired matrices. 
+
+```{r module clusters 2}
+try({
+plotDendroAndColors(geneTree.all, modules.all, "All", dendroLabels=FALSE, hang=0.03,
+                    addGuide=TRUE, guideHang=0.05, main="All dendrogram")
+  plotDendroAndColors(geneTree.co, modules.cob, "Consensus", dendroLabels=FALSE, hang=0.03,
+                    addGuide=TRUE, guideHang=0.05, main="Consensus dendrogram")
+plotDendroAndColors(geneTree.1, modules.1b, "Group 1", dendroLabels=FALSE, hang=0.03,
+                    addGuide=TRUE, guideHang=0.05, main=paste0("Group 1: ", reference.group))
+plotDendroAndColors(geneTree.2, modules.2b, "Group 2", dendroLabels=FALSE, hang=0.03,
+                    addGuide=TRUE, guideHang=0.05, main=paste0("Group 2: ", comparison.group))
+}, silent = T)
+
+```
+
+### Dendrograms
+
+Hierarchially-clustered TOM matrices.
+
+```{r, fig.width=15, fig.height=4}
+
+par(mfrow = c(1,4))
+plot(geneTree.all, xlab = "", sub = "", main = "All", labels = F, hang = 0.04)
+plot(geneTree.co, xlab = "", sub = "", main = "Consensus", labels = F, hang = 0.04)
+plot(geneTree.1, xlab = "", sub = "", main = paste0("Group 1: ", reference.group), labels = F, hang = 0.04)
+plot(geneTree.2, xlab = "", sub = "", main = paste0("Group 2: ", comparison.group), labels = F, hang = 0.04)
+```
+
+### Module Preservation
+
+Module gene set overlap between datasets. 
+
+```{r mod preservations, fig.width=15, fig.height=4}
+try({
+ggVennDiagram::ggVennDiagram(module.sets) + ggtitle("Network Preservations")
+}, silent = T)
+```
+
+### Matrix Distributions
+
+Distributions of expression matrix, similarity matrix, adjacency matrix and TOM. 
+
+```{r mat distributions, fig.width=15, fig.height=4}
+
+  # fig.width=15, fig.height=4
+try({
+  par(mfrow = c(1,4))
+hist(datExpr.noz, main = "Expression")
+hist(s.mat, main = "Similarity (correlation)")
+hist(a.mat, main = "Adjacency")
+hist(w.mat, main = "TOM")
+}, silent = T)
+```
+
+### Nodes and Links
+
+Distribution of quantile-normalized connectivity and differential expression/fraction of genes. 
+
+```{r net overview, fig.width=10, fig.height=4}
+
+try({
+  cowplot::plot_grid(plt.overview.1, plt.overview.2, ncol = 2)
+}, silent = T)
+
+
+```
+
+
+
+
+Differential Network Analysis
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### DEG Volcano
+
+Volcano plot illustrating differentially-expressed gene Modules. 
+
+```{r deg volc, fig.width=12, fig.height=4}
+
+  # fig.width=15, fig.height=4
+try({
+# print(plt.dif.volc)
+    # cowplot::plot_grid(plt.dif.volc, plt.rank.volc, ncol = 2)
+  # plt.dif.volc <- plt.dif.volc + theme(legend.position = "none")
+  # plt.rank.volc <- plt.rank.volc + theme(legend.position = "none")
+    cowplot::plot_grid(plt.dif.volc, plt.rank.volc,plt.dif.rank.comp,  ncol = 3)
+  # cowplot::plot_grid(plt.dif.volc, plt.rank.volc, ncol = 2)
+}, silent = T)
+
+```
+
+### DEG Box
+
+Box plots illustrated paired module activity levels. 
+
+```{r deg box}
+
+  # fig.width=15, fig.height=4
+try({
+print(plt.dif.box)
+}, silent = T)
+```
+
+
+### DCG Scatter
+
+Comparison of pre- and post- quantile normlized similarity, adjacency and TOM-based connectivities for each sample. 
+
+```{r, fig.height = 10, fig.width=10}
+
+# if (print.inline){
+  # fig.height = 10, fig.width=10
+ cowplot::plot_grid(plt.input.xy.s, plt.output.xy.s,
+                   plt.input.xy.a, plt.output.xy.a,
+                   plt.input.xy.w, plt.output.xy.w,
+                   ncol = 2)
+# }
+
+```
+
+### Logistic Classifier
+
+Logistic regression-based classifier was trained (80% training set) and performance was evaluated on test set (20%). Variance explained by each classifier coeffcient (ie., module) is ranked. 
+```{r logistic regression, fig.width=12, fig.height=4}
+
+  cowplot::plot_grid(plt.logitModel, plt.confusion, plt.var.exp, ncol = 3)
+
+```
+
+### Sector Plots
+
+Sector plots illustrate relationship between differential connectivity (x axis) and differential connectivity (y axis) 
+
+```{r sector plots, fig.width = 10, fig.height=10}
+
+  # fig.width=15, fig.height=4
+try({
+ print(plt.sector)
+}, silent = T)
+
+```
+
+### kME Plots
+
+Modular membership score for each sample compared using scatter plot. 
+
+```{r kme plots}
+  # fig.width=15, fig.height=4
+try({
+print(plt.kME)
+# print(plt.kME.sub)
+}, silent = T)
+```
+
+### intra vs. intermodularity scores
+
+```{r intra vs. intermodularity scores plt}
+
+ print(plt.kme.comp)
+```
+
+### Module Preservation (kME) v1
+
+```{r model preserve }
+
+  print(plt.mod.pres)
+```
+
+
+### Module Preservation (kME) v2
+
+```{r}
+
+ plotly::ggplotly(plt.kme.dif, tooltip="text")
+
+```
+
+### Module Preservation (kME) v3
+
+```{r ME preservation, fig.width=10, fig.height=10}
+
+  plotEigengeneNetworks(MET, c(reference.group, comparison.group), marDendro = c(0,2,2,1), marHeatmap = c(3,3,2,1), zlimPreservation = c(0, 1), barplotErrors = T)
+
+```
+### Module Preservation (kME) v4
+
+```{r ME preservation v4, fig.height = 4, fig.width = 10}
+
+ cowplot::plot_grid(plt.me.ve.1, plt.me.ve.2, ncol = 2)
+
+```
+
+Heatmaps
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Eigenmodule Activity
+
+Eigenmodule activity for each cell, hierarchially-clustered. Sample identity is shown and can be used to determine how well modules can discriminate sample identity. 
+
+```{r eigenmodule heatmap}
+
+try({
+  
+  min.me <- min(ME.all.sub)
+  max.me <- max(ME.all.sub)
+  scale.limit <- max(c(abs(min.me), abs(max.me)))
+  heatmaply::heatmaply(
+    (ME.all.sub),
+    plot_method = c("plotly"),
+    row_side_colors = grouping.mem,
+    limits = c(-scale.limit, scale.limit),
+    colors = rev(colorRampPalette(RColorBrewer::brewer.pal(9, "RdBu"))(100)) , 
+    xlab("Modules"), key.title="ME Activity", hide_colorbar=F, labRow = rep("", nrow(ME.all.sub))
+  )
+}, silent = T)
+
+
+
+```  
+
+### DEG
+
+Heatmap of top differentially-expressed genes. 
+
+```{r deg heatmap}
+
+try({
+  
+heatmaply::heatmaply(
+    exp.df.deg,
+    col_side_colors = grouping.df,
+    key.title="Expression",
+    labCol = rep("", ncol(exp.df.deg)),
+    main = "DEG")
+}, silent = T)
+
+
+
+```  
+
+### DCG
+
+Heatmap of top differentially-connected genes. 
+
+```{r dcg heatmap}
+
+try({
+  
+heatmaply::heatmaply(
+    exp.df.dcg,
+    col_side_colors = grouping.df,
+    key.title="Expression",
+    labCol = rep("", ncol(exp.df.dcg)),
+    main = "DCG"
+  )
+}, silent = T)
+
+
+
+```  
+
+### Hub
+
+Heatmap of top connected (hub) genes. 
+
+```{r hub heatmap}
+
+try({
+  
+heatmaply::heatmaply(
+    exp.df.hub,
+    col_side_colors = grouping.df,
+    key.title="Expression",
+    labCol = rep("", ncol(exp.df.hub)),
+    main = "Hub"
+  )
+}, silent = T)
+
+
+
+```  
+
+
+Network Modules
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Enriched Module Annotations
+
+Union between GSEA- and over-representation-based enrichment was taken and top annotations are shown for each module. If a given module is missing, no consistent set of annotations were identified. 
+
+```{r e mod ano small, fig.width = 8, fig.height = 10}
+
+
+if (length(plt.enrich.all) < 5)  cowplot::plot_grid(plotlist  = plt.enrich.all, ncol = 2, align = "hv")
+
+```
+
+```{r e mod ano mid , fig.width = 8, fig.height = 15}
+
+
+if (length(plt.enrich.all) < 10 & length(plt.enrich.all) >= 5)  cowplot::plot_grid(plotlist  = plt.enrich.all, ncol = 2, align = "hv")
+
+```
+
+```{r e mod ano large, fig.width = 8, fig.height = 20}
+
+
+if (length(plt.enrich.all) >= 10)  cowplot::plot_grid(plotlist  = plt.enrich.all, ncol = 2, align = "hv")
+
+```
+
+
+### topGO Module Annotations
+
+Over-representation-based enrichment of module genesets. Top two annotations are shown for each module. 
+
+```{r, fig.width = 15, fig.height = 10}
+
+# if (print.inline){
+  # fig.width=15, fig.height=10
+  cowplot::plot_grid(plt.go.1, plt.go.2, col = 2)
+# }
+
+```
+
+
+### Enrichment Statistics
+
+Summary of over-representation-based enrichment. Module size, number of annotations and proportion of gene set contributing to annotation are illustrated.   
+
+```{r, fig.width = 10, fig.height = 4}
+try({
+  cowplot::plot_grid(plt.e.1, plt.e.2)
+}, silent = T)
+  
+```
+
+### Module Enrichment (pAdj)
+
+```{r module enrichment bh}
+
+try({
+  if (!is.null(results.all.bh)){
+    datatable(results.all.bh, 
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(pageLength = 50,
+    dom = 'Bfrtip', 
+    buttons = c('copy', 'csv', 'pdf')))
+}
+}, silent = T)
+
+```
+
+### Module Enrichment (pVal)
+
+```{r module enrichment pval}
+
+try({
+if (!is.null(results.all.p)){
+    datatable(results.all.p, 
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(pageLength = 50,
+    dom = 'Bfrtip', 
+    buttons = c('copy', 'csv', 'pdf')))
+}
+}, silent = T)
+
+```
+
+Network Plots
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Master
+
+Summary network plot. Colors correspond to module id.  
+
+```{r network plot 1}
+
+
+try({
+  visNetwork( master.nodes,master.links,  main = "Reference Network") %>%
+    visIgraphLayout(randomSeed = 123, layout = "layout_with_kk") %>%
+    visOptions(highlightNearest = list(enabled = F, degree = 1, hover = T), 
+               nodesIdSelection = T, selectedBy = c("module")) %>%
+    visInteraction(navigationButtons = TRUE,keyboard = TRUE) %>%
+    visConfigure(enabled = TRUE)  
+}, silent = T)
+
+```
+
+### Differential v1
+
+Differential network plot. Nodes represent differential expression and links represent differential connectivity. Nodes with black edges/outline represent genes that were differentially expressed (p<0.05). 
+
+```{r network plot 2}
+
+try({
+  visNetwork( vis.nodes,vis.links,  main = "Differential Network Analysis") %>%
+    visIgraphLayout(randomSeed = 123, layout = "layout_with_kk") %>%
+    visOptions(highlightNearest = list(enabled = F, degree = 1, hover = T), 
+               nodesIdSelection = T, selectedBy = c("module")) %>%
+    visInteraction(navigationButtons = TRUE,keyboard = TRUE) %>%
+    visConfigure(enabled = TRUE) 
+}, silent = T)
+
+
+```
+
+### Differential v2
+
+```{r network plot 3}
+try({
+if (!is.null(results.all.bh)){
+  visNetwork( path.nodes,path.links,  main = "Reference Network") %>%
+  visIgraphLayout(randomSeed = 123, layout = "layout_with_kk") %>%
+  visOptions(highlightNearest = list(enabled = F, degree = 1, hover = T),
+             nodesIdSelection = T, selectedBy =  list(variable = "group", multiple = TRUE))
+}
+
+}, silent = T)
+
+```
+
+Network Enrichment
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+
+
+
+### Differential Link/Node
+
+Differential expression and connectivity illustrated. Top genes are labeled. 
+
+```{r dif con deg,  fig.width=10, fig.height=4}
+
+try({
+  # cowplot::plot_grid(plt.2, plt.3, ncol = 2)
+  plt.2 <- plt.2 + theme(legend.position = "none")
+  plt.3 <- plt.3 + theme(legend.position = "none")
+  cowplot::plot_grid(plt.2, plt.3, ncol = 2)
+}, silent = T)
+
+```
+
+
+### Node Enrichment
+
+Differentially-expressed genes were annotated by GSEA, with genes ranked by p value (x axis) or connectivity (y axis). Enrichments with inconsistent signs (i.e., upper left and lower right quadrants) were omitted from further consideration. Plot is interactive (scroll over points for gene info, click and draft to zoom in). 
+
+```{r deg node}
+
+try({
+   plotly::ggplotly(plt.gsea.comp, tooltip="text")
+}, silent = T)
+
+```
+
+
+### Differential Link/Node Enrichment
+
+Node-based annotations (i.e., based on differential expression) were further compared to link-based annotations, where GSEA was performed on genes ranked by differential connectivity. Blue/red spectrum represents average of normalized enrichment scores (NES) from differential node- and link-based GSEA. 
+
+```{r plt.dif.net enrich 2}
+
+try({
+     print(plt.dif.net.enrich)
+}, silent = T)
+```
+
+### Enrichment Dot
+
+Dot plot of Node- and Link-based GSEA annotations. 
+
+```{r plt.dif.net enrich, fig.width=10, fig.height=10}
+
+try({
+      print(plt.gsea.dot)
+}, silent = T)
+```
+
+
+### Enrichment Bar
+
+```{r, fig.height=10, fig.width=10}
+
+# if (print.inline){
+   # fig.height=10, fig.width=10
+  cowplot::plot_grid(plt.e.node.linkage, plt.e.node, plt.e.linkage, ncol = 1, align = "v")
+# }
+
+```
+
+
+
+```{r differential connectivity}
+
+### Differential Link Table
+# try({
+# if (!is.null(df.con.merge)){
+#   
+#   df.con.merge.out <- df.con.merge
+#   df.con.merge.out$wi.dif <- df.con.merge.out$wi.y - df.con.merge.out$wi.x
+#   df.con.merge.out$rank.dif <- df.con.merge.out$rank.y - df.con.merge.out$rank.x
+#   
+#   df.con.merge.out[ ,c("wi.x", "wi.y", "wi.dif")] <- signif(df.con.merge.out[ ,c("wi.x", "wi.y", "wi.dif")], 3)
+#   
+#     datatable(df.con.merge.out,
+#     filter = 'top',
+#     extensions = 'Buttons',
+#     options = list(pageLength = 50,
+#     dom = 'Bfrtip',
+#     buttons = c('copy', 'csv', 'pdf')))
+# }
+# }, silent = T)
+```
+
+### GSEA network
+
+```{r}
+try({
+if (!is.null(gsea.pathway.dot)){
+  
+  gsea.pathway.dot.out <- gsea.pathway.dot
+  gsea.pathway.dot.out[ ,c("NES.link", "p.link", "NES.pool", "p.pool", "NES.dif", "p.dif")] <- signif(gsea.pathway.dot.out[ ,c("NES.link", "p.link", "NES.pool", "p.pool", "NES.dif", "p.dif")], 3)
+  
+  gsea.pathway.dot.out <- gsea.pathway.dot.out[gsea.pathway.dot.out$p.pool <= 0.05, ]
+    datatable(gsea.pathway.dot.out, 
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(pageLength = 50,
+    dom = 'Bfrtip', 
+    buttons = c('copy', 'csv', 'pdf')))
+}
+}, silent = T)
+
+```
+
+### GSEA consensus kME
+
+```{r}
+
+top.module.annotations.con.v2[ ,c("pval", "NES", "padj")] <- signif(top.module.annotations.con.v2[ ,c("pval", "NES", "padj")], 3)
+    datatable(top.module.annotations.con.v2, 
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(pageLength = 50,
+    dom = 'Bfrtip', 
+    buttons = c('copy', 'csv', 'pdf')))
+
+```
+
+### GSEA differential kME
+
+```{r}
+
+top.module.annotations.dif[ ,c("pval", "NES", "padj")] <- signif(top.module.annotations.dif[ ,c("pval", "NES", "padj")], 3)
+    datatable(top.module.annotations.dif, 
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(pageLength = 50,
+    dom = 'Bfrtip', 
+    buttons = c('copy', 'csv', 'pdf')))
+
+```
+
+
+Gene Sets
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r}
+
+df.module.list <- list(all = module.df.all,
+                       consensus = module.df.co,
+                       group.1 = module.df.1,
+                       group.2 = module.df.2,
+                       hub.genes = df.topGenesKME)
+
+out <- flex.multiTabTables(df.module.list, "df.module.list")
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+```{r save analysis log and Rdata results}
+
+
+
+# additional log entries
+df.log <- addLogEntry("which data used", which.data, df.log, "which.data")
+
+df.log <- addLogEntry("variable genes only?", use.var, df.log, "use.var")
+
+df.log <- addLogEntry("N genes in network", length(SubGeneNames), df.log, "length(SubGeneNames)")
+
+df.log <- addLogEntry("TOM Type", TOM.type, df.log, "TOM.type")
+
+df.log <- addLogEntry("Network Type", which.network, df.log, "which.network")
+
+df.log <- addLogEntry("Correlation Type", which.cor, df.log, "which.cor")
+
+df.log <- addLogEntry("Optimal soft power (complete dataset)", best.power, df.log, "best.power")
+df.log <- addLogEntry("Optimal soft power (reference group)", best.power.1, df.log, "best.power.1")
+df.log <- addLogEntry("Optimal soft power (comparison group)", best.power.2, df.log, "best.power.2")
+
+df.log <- addLogEntry("Deep cut (tree pruning)", which.deepcut, df.log, "which.deepcut")
+
+df.log <- addLogEntry("Delta kME threshold", delta.kme.threshold, df.log, "delta.kme.threshold")
+
+df.log <- addLogEntry("Edges/module shown in network plot", top.n.interactions, df.log, "top.n.interactions")
+df.log <- addLogEntry("meta network method", which.metanet, df.log, "which.metanet")
+
+df.log <- addLogEntry("Reference Group", reference.group, df.log, "reference.group")
+df.log <- addLogEntry("Comparison Group", comparison.group, df.log, "comparison.group")
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
+df.log[nrow(df.log), 2] <- as.character("elapsed.time")
+df.log[nrow(df.log), 3] <- as.character(elapsed.time)
+
+
+df.log_Module_10 <- df.log
+
+
+```
+
+
+```{r ph10,  echo = FALSE, eval = TRUE}
+
+out1 <- lapply(seq_along(module.logs), function(i) {
+  
+  module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
+  
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (Module %s)", paste(module.n)))
+  a2 <- knitr::knit_expand(text = "\n=====================================")
+  a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
+  a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
+  a5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+Log (Module 10)
+===================================== 
+
+```{r table.log_current}
+
+knitr::kable(df.log_Module_10)
+
+```
+
