@@ -1,0 +1,952 @@
+---
+title: "Module4_referenceSet"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r Notes}
+
+# input type 1: Module 1 or 2 output (integrated data from multiple experiments, to be used for establishing reference set)
+# output: reference set markers 
+
+# input type 2: GEO reference (see details below)
+
+# TODO: fix type 1 processing. (241119)
+
+```
+
+
+```{r}
+
+# THIS IS GOOD (140220)
+# prep gene set (long to wide with uneven row lengths)
+
+input_file <- "TRRUSTv2_Hs_140220.csv"
+df <- read.csv(paste("Gene Sets/", input_file, sep = ""), header = TRUE)
+
+colnames(df) <- gsub( "ï..", "", colnames(df))
+
+# 
+# df$regulation <- as.character(df$regulation)
+# df$regulation[df$regulation == "Repression"] <- "Rep"
+# df$regulation[df$regulation == "Activation"] <- "Act"
+# 
+# df <- df %>% filter(!(regulation == "Unknown"))
+# 
+# df$TF <- paste(df$TF, "-", df$regulation, sep = "")
+
+# df$TF <- paste(df$TF, )
+
+
+df <- df %>% filter((regulation == "Repression"))
+
+colname.output <- "TF"
+values.output <- "target"
+
+df <- df[ , c(colname.output,values.output)]
+
+
+df$id2 <- ave(as.character(df[, colname.output]),df[, colname.output], FUN = seq_along)
+
+u.TF <- unique(df[, colname.output])
+u.target <- unique(df[, values.output])
+
+df.wide <- reshape(df, direction = "wide", idvar = "id2", timevar = colname.output)
+
+df.wide <- dplyr::select(df.wide, -c("id2") )
+
+colnames(df.wide) <- gsub( paste(values.output, ".", sep = ""), "", colnames(df.wide))
+
+
+# df.wide[is.na(df.wide)] <- na=""
+
+write.csv(df.wide,'VALID_TRRUSTv2_Hs_Repression_140220.csv', na="", row.names = F)
+
+```
+
+
+```{r setup, include=FALSE}
+rm(list = ls())
+
+start.time <- proc.time()
+
+# LOAD LIBRARIES
+
+# scRNAseq libraries
+library(Seurat)
+library(sctransform)
+library(monocle)
+
+# Data wrangling libraries
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(reshape2)
+
+# Data visualization libraries
+library(RColorBrewer)
+library(ggplot2)
+library(gridExtra)
+library(DT)
+library(flexdashboard)
+library(ggpmisc)
+library(ggExtra)
+library(grid)
+library(ggrepel)
+library(erer)
+
+# Other Libraries
+library(future)
+library(biomaRt)
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+library(org.Hs.eg.db)
+library(affyio)
+try(library(xlsx), silent = TRUE)
+
+# Save output
+save_flag <- TRUE
+save_filename <- "Module4_Zhang2019_cellmarkers"
+# save_filename <- "ReferenceSet_GL261"
+```
+
+```{r  previously processed reference sets (do not edit)}
+
+# reference type 1 ----
+# filename <- "Integrated_Data_071119_pilot12_Mm_rPCA.Rdata"
+# filename <- 'Integrated_Data_071119_pilot12_CCA_Hs.Rdata'
+# filename <- "Integrated_Data_241119_pilot12_CCA_Mm.Rdata"
+# reference type 2 ----
+# GEO.object <- "GSE110890"
+# query.samples <- c("GSM3018340", "GSM3018341", "GSM3018342")
+# https://www.proteinatlas.org/ENSG00000079841-RIMS1/pathology
+# reference type 3 ----
+# filename <- "Mm_VastDB_expression.tab" # referernce type 3
+# reference type 4 ----
+# filename <- "mca_cds_cleaned_sampled_100k.RDS" # reference type 4
+# csv_annotation_type4 <- "mca_cell_annotation.csv" # cell_annotation file for type 4 input (col1 = samplename, col2 = celltype)
+# csv_DEG_type4 <- "MCA_DEgenes.csv" # differentially expressed genes for type 4 input
+
+```
+
+
+
+
+```{r input_data}
+
+# Specify which reference set to prepare (CellTypes must be present in input Seurat Object)
+# cells_of_interest <- c("Renca", "CGR8", "N2A") # for pilot 12_CCA_Mm input
+# cells_of_interest <- c("GL261")
+cells_of_interest <- "" # "" if reference type != 1|2 (coi required only for type 1 or 2)
+
+# INPUT FORMAT/DATA TYPE
+#    1: seurat object (internal reference set)
+#    2: Microarray dataset (external reference set)
+#    3: .tab file (from VastDB)
+#    4: mouse cell atlase (CellDataSet with cell_annotation.csv)
+#    5: Zhang, Xiao 2019: Cell Markers Database (csv input)
+reference_set_type <- 5
+
+# IF reference_set_type = 1
+# SPECIFY filename
+filename <- "Zhang Xiao 2019 Cell Marker_manually curated cell markers.csv"
+
+
+print.inline <- TRUE
+
+
+skip.figures <- TRUE # figures can be time consuming - specify TRUE to skip and save reference markers alone. 
+
+
+
+```
+
+
+```{r analysis log}
+
+# Module
+df.log <- data.frame()
+df.log[nrow(df.log)+1, 1] <- as.character("Module")
+df.log[nrow(df.log), 2] <- as.character("4, Reference Set")
+colnames(df.log) <- c("Parameter", "Value")
+
+# User 
+df.log[nrow(df.log)+1, 1] <- as.character("User")
+df.log[nrow(df.log), 2] <- as.character(Sys.getenv("USERDOMAIN"))
+
+# Date
+df.log[nrow(df.log)+1, 1] <- as.character("Date")
+df.log[nrow(df.log), 2] <- as.character(Sys.time())
+
+# Input Format
+df.log[nrow(df.log)+1, 1] <- as.character("Input Format Type")
+df.log[nrow(df.log), 2] <- as.character(reference_set_type)
+
+if (reference_set_type == 1){
+  # Input Data
+  df.log[nrow(df.log)+1, 1] <- as.character("Input Data (.Rdata)")
+  df.log[nrow(df.log), 2] <- as.character(filename)
+} else if (reference_set_type == 2){
+  # Input GEO object
+  df.log[nrow(df.log)+1, 1] <- as.character("Input GEO object")
+  df.log[nrow(df.log), 2] <- as.character(GEO.object) 
+  # Query Samples
+  df.log[nrow(df.log)+1, 1] <- as.character("Query Samples")
+  if (length(query.samples) > 1){
+    df.log[nrow(df.log), 2] <- as.character(paste(query.samples, collapse=", ")) 
+  } else if (length(query.samples) == 1) {
+    df.log[nrow(df.log), 2] <- as.character(query.samples) 
+  }
+}
+
+# Cell of interest
+df.log[nrow(df.log)+1, 1] <- as.character("Reference Cell Type")
+if (length(cells_of_interest) == 1){
+  df.log[nrow(df.log), 2] <- as.character(cells_of_interest)
+} else if (length(cells_of_interest) >1){
+  df.log[nrow(df.log), 2] <- as.character(paste(cells_of_interest, collapse=", "))   
+}
+
+# Output file
+df.log[nrow(df.log)+1, 1] <- as.character("Output Results (.Rdata)")
+df.log[nrow(df.log), 2] <- as.character(save_filename)
+
+
+```
+
+
+```{r function to rename CellTypes to Barcode (fix artefact of earlier analysis pipeline) PACKAGE}
+
+fix.barcode.label <- function (so){
+  # merge CellType and Barcode, if necessary
+  meta.data.names <- names(so@meta.data)
+  
+  if (("CellType" %in% meta.data.names) & ("Barcode" %in% meta.data.names)){
+    if (DefaultAssay(so) == "integrated"){
+      barcode <- so@meta.data[["Barcode"]]
+      celltype <- so@meta.data[["CellType"]]
+      barcode[is.na(barcode)] <- celltype[is.na(barcode)] 
+    } else {
+      barcode <- so@meta.data[["CellType"]]
+    }
+  } else if (!("CellType" %in% meta.data.names) & ("Barcode" %in% meta.data.names)) {
+    barcode <- so@meta.data[["Barcode"]]
+  } else if (("CellType" %in% meta.data.names) & !("Barcode" %in% meta.data.names)) {
+    barcode <- so@meta.data[["CellType"]]
+    
+  } else {stop("Problem with CellType/Barcode metadata detected. Troubleshooting required")}
+  
+  so@meta.data[["Barcode"]] <- barcode
+  
+  return(so)
+}
+
+```
+
+
+```{r import data}
+
+if (reference_set_type == 1){
+  load(filename) 
+  so <- fix.barcode.label(so)
+} else if (reference_set_type == 3){
+  
+  # import data
+  df.raw <- read.table(filename, header = TRUE)
+  
+  # get genes names and deduplicate
+  gene_names <- df.raw$NAME
+  to_dedup <-data.frame(id=gene_names,var=seq(1, length(gene_names)))
+  dedup <- to_dedup[!duplicated(to_dedup$id, fromLast = TRUE), ]
+  df.exp <- df.raw[dedup$var, ]
+  rownames(df.exp) <- df.exp$NAME
+  
+  ENS <- df.exp$ID
+  SYM <- df.exp$NAME
+  df.genes <- data.frame(ens = ENS, sym = SYM)
+  
+  df.expf <- df.exp[ ,3:ncol(df.exp)]
+  
+  # get cRPKM columns only
+  cN <- colnames(df.expf)
+  cN.split <- reshape2::colsplit(cN, "[.]", names = c("cell", "type"))
+  cN.split$CRPKM <- cN.split$type == "cRPKM"
+  df.expf2 <- df.expf[, which(cN.split$CRPKM)]
+  colnames(df.expf2) <- cN.split$cell[which(cN.split$CRPKM)]
+  
+  # final expression matrix
+  bulk_data_input <- df.expf2
+  
+} else if (reference_set_type == 4){
+  
+  DEG <- read.csv(csv_DEG_type4, header = TRUE)
+  cell_annotation <- read.csv(csv_annotation_type4, header = TRUE)
+  
+} else if (reference_set_type == 5){
+  cell.markers <- read.csv(filename, header = TRUE)
+  
+  species <- c("Mouse", "Human")
+  
+  annotations <- c("tissueType", "cancerType", "cellType", "cellName")
+  
+  select.annotation <- annotations[4] # REQUIRED INPUT
+  select.species <- species[2]        # REQUIRED INPUT
+  
+  df <- dplyr::select(cell.markers, c("ï..speciesType", select.annotation, "geneSymbol"))
+  colnames(df) <- c("species", "annotation", "gene")
+  
+  df <- dplyr::filter(df, species == select.species)
+  df <- df[complete.cases(df), ]
+  
+}
+```
+
+```{r TYPE 5}
+
+# df.symbol
+if (reference_set_type == 5){
+  
+  
+  markers.list <- list()
+  max.length <- 0
+for (i in 1:nrow(df)){
+  
+  split.genes <- strsplit(as.vector(df$gene[i]), ",")[[1]]
+  if (length(split.genes) > max.length){max.length <- length(split.genes)}
+  markers.list[[as.vector(df$annotation[i])]] <- split.genes
+  
+}
+  
+  df.output <- as.data.frame(matrix(data = NA, nrow = max.length, ncol = length(markers.list)))
+  
+  
+  for (i in 1:ncol(df.output)){
+    
+    if (length(markers.list[[i]]) > 0){
+      df.output[seq(1, length( markers.list[[i]])), i] <- markers.list[[i]]
+    }
+    
+  }
+  
+  colnames(df.output) <- names(markers.list)
+  
+df.symbol <- df.output
+  
+  
+}
+
+```
+
+
+```{r TYPE 4}
+
+# get mouse cell atlas differentially expressed genes
+if (reference_set_type == 4){
+  
+  ref_label <- as.vector(cell_annotation[ ,"Main_Cluster"])
+  query_label <- as.vector(DEG[ ,"class"])
+  matched.pos <- match(query_label, ref_label)
+  DEG[,"cell_type"] <- cell_annotation[ ,"Main_cell_type"][matched.pos]
+  DEG.filtered <- DEG[(DEG$qval < 0.05), ]
+  
+  DEG.filtered_top <- DEG.filtered %>%
+    group_by(cell_type) %>%
+    top_n(fold.change, n = 100)
+  DEG.genesCell <- DEG.filtered_top[ ,c("gene_short_name", "cell_type")]
+  
+  # DEG.wide <- spread(DEG.genesCell, cell_type, gene_short_name)
+  
+  
+  cell_names <- unique(DEG.genesCell$cell_type)
+  n_cells <- length(cell_names)
+  n_genes <- length( unique(DEG.genesCell$gene_short_name))
+  
+  output.mat <- matrix(data=NA, 1:(n_cells*n_genes), nrow = n_genes, ncol = n_cells)
+  # df.ensemble <- as.data.frame(output.mat)
+  df.symbol <- as.data.frame(output.mat)
+  
+  # colnames(df.ensemble) <- cell_names
+  colnames(df.symbol) <- cell_names
+  
+  for (i in 1:n_cells){
+    
+    is.marker <- cell_names[i] == DEG.genesCell$cell_type
+    df.symbol[1:sum(is.marker) ,i] <- as.vector(DEG.genesCell$gene_short_name[is.marker])
+    
+  }
+  
+  row.na.sum <- apply(is.na.data.frame(df.symbol), 1, sum)
+  df.symbol <- df.symbol[!(row.na.sum == dim(df.symbol)[2]), ]
+
+  }
+
+
+```
+
+
+
+```{r ENS2SYM and SYM2ENS function }
+
+# for input dataframe, converts ENSEMBLE to SYMBOL 
+ens2sym <- function(df, gNames.list = NULL){
+  
+  for (i in 1:dim(df)[1]){
+    df$ENSEMBLE[i] <- unlist(strsplit(df$Genes[i], "[.]"))[1]
+  }
+  
+  mapping <- AnnotationDbi::select(org.Mm.eg.db, keys=as.character( df$ENSEMBLE), columns='SYMBOL', keytype='ENSEMBL')
+  
+  # match ensemble to original dataset
+  idx_gene_match <- match(df$ENSEMBLE, mapping$ENSEMBL)
+  df$Genes <- mapping$SYMBOL[idx_gene_match]
+  
+  return(df)
+}
+
+# for input dataframe, converts SYMBOL to ENSEMBLE 
+sym2ens <- function(df, gNames.list = NULL){
+  
+  mapping <- AnnotationDbi::select(org.Mm.eg.db, keys=as.character( df$Genes), columns='ENSEMBL', keytype='SYMBOL')
+  
+  # match ensemble to original dataset
+  idx_gene_match <- match(df$Genes, mapping$SYMBOL)
+  df$ENSEMBLE <- mapping$ENSEMBL[idx_gene_match]
+  
+  return(df)
+}
+
+
+```
+
+
+
+```{r TYPE 2 import microarray annotation table, warning=FALSE}
+
+if (reference_set_type == 2){
+  
+  # assertion statements
+  stopifnot(length(cells_of_interest) == 1)
+  
+  # import Affymetrix Mouse Gene 2.0 ST array annotation table
+  df.annotation <- readxl::read_excel("MoGene-2_0-st_ANNOTATION_FILE.xlsx")
+  
+  # trim the file 
+  df.annotation_trim1 <- df.annotation[ ,c("ID", "gene_assignment")]
+  rm(df.annotation) # get rid of this space waster
+  
+  # trim the file further
+  df.annotation_trim2 <- df.annotation_trim1[!(df.annotation_trim1$gene_assignment == "---"), ]
+  
+  # parse out the gene name
+  df.annotation_trim2$gene <- rapply(lapply((strsplit(df.annotation_trim2$gene_assignment, " // ")), unlist), function(x) x[2])
+  
+  # assign ID and gene name to final list
+  df.annotation_final <- df.annotation_trim2[, c("ID", "gene")]
+}
+
+```
+
+
+
+```{r TYPE 2 import microarray bulk data, warning=FALSE}
+
+# import GEO object
+if (reference_set_type == 2){
+  library(Biobase)
+  library(GEOquery)
+  
+  # load series and platform data from GEO
+  gset <- getGEO(GEO.object, GSEMatrix =TRUE, getGPL=FALSE)
+  if (length(gset) > 1) idx <- grep("GPL16570", attr(gset, "names")) else idx <- 1
+  gset <- gset[[idx]]
+  
+  # get bulk data 
+  bulk_data_input <- gset@assayData[["exprs"]]
+}
+
+```
+
+
+```{r TYPE 2 reference set using GEO object}
+
+# get reference set using GEO object
+if (reference_set_type == 2){
+  # get microarrays IDs
+  query_id <- rownames(bulk_data_input)
+  
+  # learn how matching work...for sanity check
+  match_position <- match(df.annotation_final$ID, query_id)
+  df.annotation_final$matched_id <- query_id[match_position]
+  
+  # get matching id and gene name
+  gene_ind <- match(query_id, df.annotation_final$ID)
+  gene_names <- (df.annotation_final$gene[gene_ind])
+  df.query <- data.frame(query_id, gene_ind, gene_names)
+  
+  # find indices where matching did not map to gene name
+  Na_ind <-is.na(df.query$gene_names)
+  
+  # replace microarray ID's with matched gene names. 
+  bulk_data_output <- bulk_data_input
+  rownames(bulk_data_output) <- df.query$gene_names
+  
+  # remove NA's
+  bulk_data_output <- bulk_data_output[!Na_ind, ]
+  
+  # get samples of interest
+  sample.names <- colnames(bulk_data_output)
+  query.pattern <- paste(query.samples, collapse="|")
+  bulk_data_output <- bulk_data_output[ ,grepl(query.pattern, sample.names)]
+  
+  
+  # some additional data preprocessing
+  df.bulk <- data.frame(bulk_data_output)
+  df.bulk$Gene_Expression <- apply(df.bulk, 1, mean)
+  
+  # Calculate z-scores
+  df.bulk$z <- (df.bulk$Gene_Expression - mean(df.bulk$Gene_Expression))/sd(df.bulk$Gene_Expression)
+  z_scores <- data.frame(df.bulk$z, rownames(df.bulk))
+  colnames(z_scores) <- c("Gene_Expression", "Genes")
+  
+  # remove number duplicaes
+  z_scores$Genes <- gsub("\\..*","",as.vector(z_scores$Genes))
+  
+  # current takes first occurence of duplicate...by be worth examining aggregation function in future versions. 
+  z_scores <- z_scores[order(z_scores$Genes, decreasing=TRUE),]
+  z_scores <- z_scores[!duplicated(z_scores$Genes),]
+  
+  # convert gene name to ensembl
+  z_scores <- sym2ens(z_scores)
+  
+  
+  
+  # find signature markers   
+  z_scores$putativeMarkers <- (z_scores$Gene_Expression > 3) | (z_scores$Gene_Expression < -3)
+  z_scores$high_putativeMarkers <- (z_scores$Gene_Expression > 3 ) 
+  z_scores$low_putativeMarkers <- (z_scores$Gene_Expression < -3 ) 
+  
+  # sort from lowest to highest z score
+  z.sort <- z_scores[order(z_scores$Gene_Expression), ]
+  z.sort$ind <- seq(1, dim(z.sort)[1])
+  
+  # define top upper and bottom cuttoffs
+  length_z <- dim(z.sort)[1]
+  bottom10_cutoff <- max(z.sort$Gene_Expression[1:11])
+  top10_cutoff <- min(z.sort$Gene_Expression[(length_z-10):length_z])
+  
+  # generate plot
+  plt.putMarkers_list <- list()
+  if (!skip.figures){
+  plt.putMarkers_list[[cells_of_interest]] <-  ggplot(z.sort, aes(x = ind, y = Gene_Expression, group = putativeMarkers)) + 
+    geom_point(aes(colour = putativeMarkers)) +
+    geom_hline(yintercept = 3)+
+    geom_hline(yintercept = -3) + 
+    ggtitle(paste("Marker Genes: ", cells_of_interest, sep = "")) + 
+    geom_text_repel(aes(label = ifelse(((Gene_Expression>top10_cutoff) | (Gene_Expression<bottom10_cutoff)), 
+                                       as.character(Genes), ''))) + xlab("Gene ID")
+  }
+      # geom_text_repel(aes(label = ifelse(((Gene_Expression>top10_cutoff) | (Gene_Expression<bottom10_cutoff)), 
+                                       # as.character(Genes), '')), hjust=1, vjust = 1) + xlab("Gene ID")
+  
+  n_high_exp_markers <- sum(z_scores$Gene_Expression > top10_cutoff)
+  n_low_exp_markers <- sum(z_scores$Gene_Expression < bottom10_cutoff)
+  
+  
+  
+  
+  z_scores.list <- list() # store z-scores
+  z_sort.list <- list() # store z-scores
+  putative_markers.list <- list() # store putative markers; highly express (z score > 3)
+  z_scores.list[[cells_of_interest]] <- z_scores
+    z_sort.list[[cells_of_interest]] <- z.sort
+    putative_markers.list[[cells_of_interest]] <- z.sort[z.sort$high_putativeMarkers == TRUE, ]
+  
+}
+
+```
+
+
+```{r TYPE 1 annotate cells and parse out cell of interest}
+
+
+if (reference_set_type == 1){
+  
+  # This chunk must be customized depending on input (currently setup for pilot 1 and 2)
+  
+  # ensure that pilot 1 or 2 are present in input datasets
+  u_batch <- unique(so@meta.data[["batch"]])
+  stopifnot(sum((u_batch == "Pilot1") | (u_batch == "Pilot2")) > 0)
+  
+  organisms <- c("Hs", "Mm")
+  cells_Hs <- c("HAP1", "293T")
+  cells_Mm <- c("3T3", "CGR8", "Renca", "N2A")
+  
+  cells_shared <- c("HAP1", "293T", "Renca")
+  cells_all <- c(cells_Hs, cells_Mm)
+  cells_Mm_shared <- intersect(cells_Mm, cells_shared)
+  cells_Hs_shared <- intersect(cells_Hs, cells_shared)
+  
+  df.identity <- data.frame(so@meta.data[["Barcode"]], so@meta.data[["Organism"]])
+  colnames(df.identity) <- c("cell", "organism")
+  
+  for (i in 1:dim(df.identity)[1]){
+    for (k in 1:length(cells_all)){
+      if (is.element(cells_all[k], cells_Hs)){
+        current_org <- "Hs"
+      } else if (is.element(cells_all[k], cells_Mm)) {
+        current_org <- "Mm"
+      }
+      if (grepl(cells_all[k], as.vector(df.identity[i,"cell"])) & (as.vector(df.identity[i,"organism"]) == current_org)){
+        df.identity[i,"cell_true"] <- cells_all[k]
+      }
+    }
+  }
+  
+  so <- AddMetaData(
+    object = so,
+    metadata =  df.identity$cell_true,
+    col.name = 'CellType_True'
+  )
+}
+
+
+```
+
+
+```{r TYPE 1 subset seurat object - only get cell types of interest}
+
+if (reference_set_type == 1){
+  so.list <- list()       # store seurat subsets
+  z_scores.list <- list() # store z-scores
+  z_sort.list <- list()   # store z-scores
+  plt.putMarkers_list <- list () # store graphs
+  putative_markers.list <- list ()
+  hi_marker.list <- list()
+  lo_marker.list <- list()
+  
+  
+  for (i in 1:length(cells_of_interest)){
+    # dataframe to store results
+    z_scores <- data.frame()
+    
+    # get Seurat subset for cells of interest
+    so.list[[cells_of_interest[i]]] <- subset(so, subset = CellType_True == cells_of_interest[i])
+    
+    gene_symbol <- rownames(so.list[[cells_of_interest[i]]]@assays[["integrated"]]@scale.data)
+    batch <- so.list[[cells_of_interest[i]]]@meta.data[["batch"]]
+    u_batch <- unique(batch)
+    
+    # calculate z-scores for each batch
+    for (j in 1:length(u_batch)){
+      idx_subset <- batch == u_batch[j]
+      exp_subset <- rowMeans(so.list[[cells_of_interest[i]]]@assays[["integrated"]]@scale.data[, idx_subset]) # gene level means
+      z_scores[seq(1, length(exp_subset) ) ,ncol(z_scores) + 1] <- (exp_subset - mean(exp_subset)) / sd(exp_subset) # gene-level z-scores
+      
+    }
+    z_scores$Genes <- gene_symbol
+    colnames(z_scores) <- c(u_batch, "Genes")
+    
+    z_scores <- ens2sym(z_scores)
+    
+    # define putatitive markers based on z-scores
+    if (length(u_batch) == 1){ # if only 1 pilot experiment exists
+      
+      colnames(z_scores)[colnames(z_scores) == u_batch[1]] <- "Gene_Expression"
+      
+      z_scores$putativeMarkers <- (z_scores$Gene_Expression > 3) | (z_scores$Gene_Expression < -3)
+      z_scores$high_putativeMarkers <- (z_scores$Gene_Expression > 3 ) 
+      z_scores$low_putativeMarkers <- (z_scores$Gene_Expression < -3 ) 
+      
+      
+      z.sort <- z_scores[order(z_scores$Gene_Expression), ]
+      z.sort$ind <- seq(1, dim(z.sort)[1])
+      
+      # colnames(z.sort)[colnames(z.sort) == u_batch[1]] <- "Gene_Expression"
+      
+      
+      length_z <- dim(z.sort)[1]
+      bottom10_cutoff <- max(z.sort$Gene_Expression[1:11])
+      top10_cutoff <- min(z.sort$Gene_Expression[(length_z-10):length_z])
+      
+      
+      if (!skip.figures){
+      plt.putMarkers_list[[cells_of_interest[i]]] <-  ggplot(z.sort, aes(x = ind, y = Gene_Expression, group = putativeMarkers)) + 
+        geom_point(aes(colour = putativeMarkers)) +
+        geom_hline(yintercept = 3)+
+        geom_hline(yintercept = -3) + 
+        ggtitle(paste("Marker Genes: ", cells_of_interest[i], sep = "")) + 
+        geom_text_repel(aes(label = ifelse(((Gene_Expression>top10_cutoff) | (Gene_Expression<bottom10_cutoff)), as.character(Genes), '')), hjust=1, vjust = 1) +
+        xlab("Gene ID")
+      }
+      
+      n_high_exp_markers <- sum(z_scores$Gene_Expression > top10_cutoff)
+      n_low_exp_markers <- sum(z_scores$Gene_Expression < bottom10_cutoff)
+      
+      
+      
+    } else if (length(u_batch) == 2){ # if 2 pilots exist
+      
+      z_scores$putativeMarkers <- (z_scores$Pilot1 > 3 & z_scores$Pilot2 > 3) | (z_scores$Pilot1 < -3 & z_scores$Pilot2 < -3)
+      z_scores$high_putativeMarkers <- (z_scores$Pilot1 > 3 & z_scores$Pilot2 > 3) 
+      z_scores$low_putativeMarkers <- (z_scores$Pilot1 < -3 & z_scores$Pilot2 < -3)  
+      
+      z_scores$Gene_Expression <- rowMeans(z_scores[, 1:2])
+      
+      z.sort <- z_scores[order(z_scores$Gene_Expression), ]
+      z.sort$ind <- seq(1, dim(z.sort)[1])
+      
+      bottom10_cutoff <- -3
+      top10_cutoff <- 3
+      
+      if (!skip.figures){
+      plt.putMarkers_list[[cells_of_interest[i]]] <-  ggplot(z_scores, aes(x = Pilot1, y = Pilot2, group = putativeMarkers)) + 
+        geom_point(aes(colour = putativeMarkers)) + 
+        geom_text_repel(aes(label = ifelse(((Pilot1>top10_cutoff) & (Pilot2>top10_cutoff))  | ((Pilot1<bottom10_cutoff) & (Pilot2<bottom10_cutoff)), as.character(Genes), '')), hjust=1, vjust = 1) + 
+        geom_hline(yintercept = 3)+
+        geom_hline(yintercept = -3)+
+        geom_vline(xintercept = 3)+
+        geom_vline(xintercept = -3) + 
+        ggtitle(paste("Marker Genes: ", cells_of_interest[i], sep = "")) 
+      }
+      
+      n_high_exp_markers <- sum((z_scores$Pilot1 > 3 & z_scores$Pilot2 > 3))
+      n_low_exp_markers <- sum((z_scores$Pilot1 < -3 & z_scores$Pilot2 < -3))
+      
+    }
+    
+    z_scores.list[[cells_of_interest[i]]] <- z_scores
+    z_sort.list[[cells_of_interest[i]]] <- z.sort
+    hi_marker.list[[cells_of_interest[i]]] <- n_high_exp_markers
+    lo_marker.list[[cells_of_interest[i]]] <- n_low_exp_markers
+    putative_markers.list[[cells_of_interest[i]]] <- z.sort[z.sort$high_putativeMarkers == TRUE, ]
+    
+  }
+}
+
+
+```
+
+
+```{r TYPE 3 VastDB Reference}
+
+if (reference_set_type == 3){
+  # get microarrays IDs
+  
+  # bulk_data_input <- bulk_data_input[ , 1:3]
+  query_id <- rownames(bulk_data_input)
+  cells_of_interest <- colnames(bulk_data_input)
+  
+  # initialize lists
+    so.list <- list()       # store seurat subsets
+  z_scores.list <- list() # store z-scores
+  z_sort.list <- list()   # store z-scores
+  plt.putMarkers_list <- list () # store graphs
+  putative_markers.list <- list ()
+  hi_marker.list <- list()
+  lo_marker.list <- list()
+  complete_ind.list <- list()
+
+  df.bulk <- bulk_data_input
+  # df.genes
+  
+  # calculate z_scores
+  # df.bulk <- cbind(df.genes, bulk_data_input) # RESUME HERE (ensure that na omit isn't removing needed rows)
+  df.bulk_z <- (df.bulk - apply(df.bulk, 2, mean,  na.rm = TRUE))/apply(df.bulk, 2, sd,  na.rm = TRUE)
+
+  
+  for (i in 1:length(cells_of_interest)){
+    
+  z_scores <- data.frame(df.bulk_z[ , i], rownames(df.bulk))
+  colnames(z_scores) <- c("Gene_Expression", "Genes")
+  
+  # convert gene name to ensembl
+  # z_scores <- sym2ens(z_scores)
+  z_scores$ENSEMBLE <- df.genes$ens
+  
+  
+  complete_ind <- which(complete.cases(z_scores))
+  z_scores <- z_scores[complete.cases(z_scores), ]
+    
+    # find signature markers   
+  z_scores$putativeMarkers <- (z_scores$Gene_Expression > 3) | (z_scores$Gene_Expression < -3)
+  z_scores$high_putativeMarkers <- (z_scores$Gene_Expression > 3 ) 
+  z_scores$low_putativeMarkers <- (z_scores$Gene_Expression < -3 ) 
+  
+    # sort from lowest to highest z score
+  z.sort <- z_scores[order(z_scores$Gene_Expression), ]
+  z.sort$ind <- seq(1, dim(z.sort)[1])
+  
+   # define top upper and bottom cuttoffs
+  length_z <- dim(z.sort)[1]
+  bottom10_cutoff <- max(z.sort$Gene_Expression[1:11])
+  top10_cutoff <- min(z.sort$Gene_Expression[(length_z-10):length_z])
+  
+  # generate plot
+  # plt.putMarkers_list <- list()
+  if (!skip.figures){
+  plt.putMarkers_list[[cells_of_interest[i]]] <-  ggplot(z.sort, aes(x = ind, y = Gene_Expression, group = putativeMarkers)) + 
+    geom_point(aes(colour = putativeMarkers)) +
+    geom_hline(yintercept = 3)+
+    geom_hline(yintercept = -3) + 
+    ggtitle(paste("Marker Genes: ", cells_of_interest[i], sep = "")) + 
+    geom_text_repel(aes(label = ifelse(((Gene_Expression>top10_cutoff) | (Gene_Expression<bottom10_cutoff)), 
+                                       as.character(Genes), ''))) + xlab("Gene ID")
+  }
+      # geom_text_repel(aes(label = ifelse(((Gene_Expression>top10_cutoff) | (Gene_Expression<bottom10_cutoff)), 
+                                       # as.character(Genes), '')), hjust=1, vjust = 1) + xlab("Gene ID")
+  
+  n_high_exp_markers <- sum(z_scores$Gene_Expression > top10_cutoff)
+  n_low_exp_markers <- sum(z_scores$Gene_Expression < bottom10_cutoff)
+  
+  complete_ind.list[[cells_of_interest[i]]] <- complete_ind
+    z_scores.list[[cells_of_interest[i]]] <- z_scores
+    z_sort.list[[cells_of_interest[i]]] <- z.sort
+    putative_markers.list[[cells_of_interest[i]]] <- z.sort[z.sort$high_putativeMarkers == TRUE, ]
+    
+    
+  }
+  
+ 
+ 
+}
+
+```
+
+
+
+```{r prep for export}
+
+if (exists("z_scores.list")){
+df.export <- data.frame()
+
+
+cell_names <- names(z_scores.list)
+n_cells <- length(cell_names)
+n_genes <- dim(df.genes)[1]
+
+output.mat <- matrix(data=NA, 1:(n_cells*n_genes), nrow = n_genes, ncol = n_cells)
+df.ensemble <- as.data.frame(output.mat)
+df.symbol <- as.data.frame(output.mat)
+
+colnames(df.ensemble) <- cell_names
+colnames(df.symbol) <- cell_names
+
+
+  
+  
+  for (i in 1:n_cells){
+    is.marker <- z_scores.list[[i]]["high_putativeMarkers"]
+    is.ensemble <- z_scores.list[[i]]["ENSEMBLE"]
+    is.symbol <- z_scores.list[[i]]["Genes"]
+    
+    df.ensemble[1:sum(is.marker$high_putativeMarkers) ,i] <- as.vector(is.ensemble$ENSEMBLE[is.marker$high_putativeMarkers])
+    df.symbol[ 1:sum(is.marker$high_putativeMarkers),i] <- as.vector(is.symbol$Genes[is.marker$high_putativeMarkers])
+    
+  }
+}
+
+```
+
+
+
+Ranked Genes
+===================================== 
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+```{r marker plots, echo = FALSE, eval = TRUE}
+
+out <- lapply(seq_along(plt.putMarkers_list), function(i) {
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", names(plt.putMarkers_list)[i])) # tab header
+  a2 <- knitr::knit_expand(text = "\n```{r}") # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\ngrid.draw(plt.putMarkers_list[[%d]])", i)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+```{r marker tables, echo = FALSE, eval = TRUE}
+
+out <- lapply(seq_along(putative_markers.list), function(i) {
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", names(putative_markers.list)[i])) # tab header
+  a2 <- knitr::knit_expand(text = "\n```{r}") # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\nknitr::kable(putative_markers.list[[cells_of_interest[%d]]])", i)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+
+```{r analysis log and save results}
+
+# Rune time #
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
+df.log[nrow(df.log), 2] <- as.character(elapsed.time)
+
+df.log_Module_4 <- df.log
+
+# if (save_flag == TRUE){
+#     df.log[nrow(df.log)+1, 1] <- as.character("Exported Variables")
+#     df.log[nrow(df.log), 2] <- as.character("z_scores.list, z_sort.list, df.log_Module_4")
+#     save(z_scores.list, z_sort.list, df.log_Module_4, file = paste(save_filename,  ".Rdata", sep = ""))
+# }
+
+```
+
+
+
+```{r export to excel}
+
+# try(
+if (save_flag == TRUE){
+  # output file name
+  
+  
+  csv_output_filename_sym <- paste(save_filename ,"_SYMBOLS", gsub(":", "-",as.character(Sys.time())),  ".csv", sep = "") 
+  write.csv(df.symbol, file = csv_output_filename_sym, na = '', row.names = FALSE)
+  
+  
+  if (!(reference_set_type == 4) & !(reference_set_type == 5)){
+    csv_output_filename_ens <- paste(save_filename ,"_ENSEMBL", gsub(":", "-",as.character(Sys.time())),  ".csv", sep = "") 
+    write.csv(df.ensemble, file = csv_output_filename_ens, na = '', row.names = FALSE)
+  }
+  
+}
+
+```
+
+
+
+
+Log (Module 4)
+===================================== 
+
+```{r table.log_current}
+
+knitr::kable(df.log_Module_4)
+
+```
+
+

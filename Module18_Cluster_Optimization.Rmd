@@ -1,0 +1,1128 @@
+---
+title: "Module18_Cluster_Optimization"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+library(scMiko)
+packages2load <- c("Seurat", "sctransform",
+                   "plyr", "dplyr", "tidyr", "reshape2", "RColorBrewer", "ggplot2", "gridExtra", 
+                   "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", 
+                   "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "readxl", "MAST", "future", "cluster", "doParallel", "parallel", "foreach")
+
+# load packages
+lapply(packages2load, library, character.only = TRUE)
+
+
+```
+
+
+```{r check available input files}
+
+show.available.files <- FALSE
+if (show.available.files){
+  list.files("Preprocessed_Datasets/")
+}
+
+```
+
+```{r parameter specification}
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed_Datasets/"
+
+# Query input
+input.file <- "Module16_UHN_0231_filtered_aggr_labeled_290120.RData"
+
+# Rapid marker finding (logical flag)
+quick_markers <- TRUE 
+
+# specify cluster resolution
+cluster_resolution <- c(0.01, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
+
+# log fold change threshold
+lfc.threshold <- 0.5
+
+# p.value threshold <- p.threshold
+p.threshold <- 0.01
+
+# print inline
+print.inline <- FALSE
+
+# Data subsampling
+subsample_factor <- 0.15 # OPTIONAL; range 0 to 1 (default = 1)
+
+# specify number of workers (for parallelization)
+n.workers <- list(
+  clustering = 4, # data clustering
+  deg = 6         # DEG analysis
+)
+
+# which markers to return
+only.pos <- T # 
+
+# DEG test
+DEG.test <- "MAST" #options: wilcox, bimod, roc, t, poisson, negbinom, LR, MAST, DESeq2
+
+
+```
+
+
+```{r analysis log}
+
+# Module
+df.log <- initiateLog("18, Cluster Optimization")
+
+df.log <- addLogEntry("Input File (.Rdata)", input.file, df.log, "input.file")
+df.log <- addLogEntry("Log FC Threshold", lfc.threshold, df.log, "lfc.threshold")
+df.log <- addLogEntry("p value Threshold", p.threshold, df.log, "p.threshold")
+df.log <- addLogEntry("Rapid Marker Find", quick_markers, df.log, "quick_markers")
+df.log <- addLogEntry("Positive Markers Only", only.pos, df.log, "only.pos")
+df.log <- addLogEntry("DEG test", DEG.test, df.log, "DEG.test")
+df.log <- addLogEntry("Cluster Resolution", cluster_resolution, df.log, "cluster_resolution")
+df.log <- addLogEntry("Subsample Factor", subsample_factor, df.log, "subsample_factor")
+df.log <- addLogEntry("Figures Printed in Notebook", unlist(print.inline), df.log, "print.inline")
+
+
+```
+
+
+
+
+
+```{r load data}
+# load data
+load(paste(dir.preprocessed, input.file, sep = ""))
+
+so.query <- prepSeurat(so)
+rm(so)
+
+
+# subsample (for dev purposes)
+n.subset <- round(subsample_factor *ncol(so.query))
+cell.ind <- sample(x = seq(1, ncol(so.query)), size = n.subset, replace = FALSE, prob = NULL)
+so.query <- SubsetData(so.query , cells = cell.ind)
+
+```
+
+
+```{r}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+
+```{r prep gene list}
+
+# prep gene sets
+gNames.list <- prepGeneList( so.query, objects())
+
+# # ensure gene list is available
+stopifnot(exists("gNames.list"))
+```
+
+
+```{r cluster data}
+
+# initiate list to store cluster plots
+plt.umap_by_cluster <- list()
+cluster.name <- c()
+
+# get cluster identify pattern
+current.assay <- DefaultAssay(so.query)
+assay.pattern <- paste0(current.assay, "_snn_res.")
+
+# start cluster
+cl <- parallel::makeCluster(n.workers$clustering)
+doParallel::registerDoParallel(cl)
+
+# iterate through each input file
+cluster.membership <- foreach(i = 1:length(cluster_resolution), .packages = c("Seurat"))  %dopar% {
+  so.query <- FindClusters(object = so.query, resolution = cluster_resolution[i], verbose = 0, algorithm = 1, modularity.fxn = 1)
+  return(so.query@meta.data[[paste0(assay.pattern, cluster_resolution[i])]])
+}
+
+# stop workers
+parallel::stopCluster(cl)
+
+
+# retrieve data
+for (i in 1:length(cluster_resolution)) {
+  current.cluster <- paste0(assay.pattern, cluster_resolution[i])
+  so.query@meta.data[[current.cluster]] <- cluster.membership[[i]]
+  cluster.name[i] <- paste(DefaultAssay(so.query),"_snn_res.", cluster_resolution[i], sep = "")
+  plt.umap_by_cluster[[i]] <- DimPlot(so.query, reduction = "umap", group.by = cluster.name[i], label = TRUE)  + 
+    ggtitle(label = paste("Resolution: ", cluster_resolution[i], sep = "")) + 
+    xlab("UMAP 1") + 
+    ylab("UMAP 2")
+  
+  if (print.inline){
+    print(plt.umap_by_cluster[[i]])
+  }
+}
+
+# clean baggage
+rm(cluster.membership)
+
+# generate barcode-stratified UMAP
+plt.umap_by_barcode <- DimPlot(so.query, reduction = "umap", group.by = "Barcode")  + ggtitle(label = "UMAP") + xlab("UMAP 1") + ylab("UMAP 2")
+plt.umap_by_cluster[[length(plt.umap_by_cluster)+1]] <- plt.umap_by_barcode
+
+if (print.inline){
+  print(plt.umap_by_barcode)
+}
+
+cr_names <- c(cluster_resolution, "barcodes")
+```
+
+
+```{r function for long to wide annotation table}
+
+long2wide <- function(df){
+  
+  # create wide version (for output to excel), reorder factors, and get basic descriptive stats
+  df.wide <- dcast(df, cluster_membership ~ predicted_labels, value.var = "n")
+  df.wide[is.na(df.wide)] <- 0
+  reordered_factors <- order(as.numeric(as.vector(df.wide$cluster_membership)))
+  df.wide <- df.wide[reordered_factors, ]
+  rownames(df.wide) <- df.wide$cluster_membership
+  df.wide <- as.data.frame(t(df.wide))
+  df.wide <- df.wide[2:dim(df.wide)[1], ]
+  df_id_rnames <- rownames(df.wide)
+  colnames(df.wide) <- paste("cluster", colnames(df.wide), sep = "")
+  df.wide <- data.frame(apply(df.wide, 2, function(x) as.numeric(as.character(x))))
+  df.wide[dim(df.wide)[1]+1, ] <- apply(df.wide, 2, sum)
+  rownames(df.wide) <- c(df_id_rnames, "TOTAL")
+  df.wide[, dim(df.wide)[2]+1] <- apply(df.wide, 1, sum)
+  colnames(df.wide)[dim(df.wide)[2]] <- "TOTAL"
+  
+  return(df.wide)
+}
+
+```
+
+
+
+
+```{r check gene rep and convert if necessary}
+
+# check.gene_rep <- function(cur_gene.list, cur_rep)
+# so.temp <- so.query
+current.assay <- DefaultAssay(so.query)
+gene.rep <- checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+if (gene.rep == "ensembl"){
+  so.query <- ens2sym.so(so.query, gNames.list)
+}
+
+```
+
+
+```{r find query markers}
+
+# initiate list to store cluster markers
+query_markers.list <- list()
+
+# store current identities
+cur_idents <- Idents(so.query)
+so.markers <- so.query
+
+# start cluster
+cl <- parallel::makeCluster(n.workers$deg)
+doParallel::registerDoParallel(cl)
+
+# iterate through each input file
+marker.list <- foreach(i = 1:length(cluster.name), .packages = c("scMiko", "Seurat"))  %dopar% {
+  
+  Idents(so.markers) <- so.markers@meta.data[[cluster.name[i]]]
+  
+  if (quick_markers == TRUE){
+    qm.res <- FindAllMarkers(so.markers, 
+                             assay = DefaultAssay(so.markers),
+                             slot = "data",
+                             only.pos = only.pos, 
+                             min.pct = 0.25,
+                             test.use = DEG.test,
+                             logfc.threshold = lfc.threshold, 
+                             max.cells.per.ident = 200,
+                             return.thresh = p.threshold,
+                             verbose = F)
+  } else if (quick_markers == FALSE){
+    qm.res <-  FindAllMarkers(so.markers, 
+                              assay = DefaultAssay(so.markers),
+                              slot = "data",
+                              only.pos = only.pos, 
+                              min.pct = 0.01, 
+                              test.use = DEG.test,
+                              logfc.threshold = 0.01,
+                              verbose = F)
+  } else {
+    qm.res <- NULL
+  }
+  
+  return(qm.res)
+  
+}
+
+# stop workers
+parallel::stopCluster(cl)
+
+# unpackage results
+query_markers.list <- marker.list
+names(query_markers.list) <- cluster.name
+
+# remove baggage
+rm(marker.list)
+rm(so.markers)
+
+```
+
+```{r make wide function}
+
+
+make.wide <- function(u_clusters, top_markers, n_top_markers, rename_clusters = TRUE){
+  top_markers_wide <- data.frame()
+  
+  top_marker_clusters <- as.vector(top_markers$cluster)
+  
+  u_clusters <- as.numeric(as.character(u_clusters))
+  u_clusters <- u_clusters[order(u_clusters)]
+  for (i in 1:length(u_clusters)){
+    
+    top_markers_current <- top_markers$gene[top_marker_clusters == u_clusters[i]]
+    n_markers_cur <- length(top_markers_current)
+    
+    if (!(n_markers_cur >= n_top_markers)){
+      top_markers_current <- c(top_markers_current, rep(NaN, n_top_markers-n_markers_cur))
+    }
+    
+    top_markers_wide[seq(1, n_top_markers), c(paste("c", u_clusters[i], sep = ""))] <- as.data.frame(top_markers_current)
+    if (!rename_clusters){
+      colnames(top_markers_wide)[i] <- u_clusters[i]
+    }
+  }
+  
+  return(top_markers_wide)
+}
+
+```
+
+
+```{r get top markers function}
+
+
+
+# function to get top cluster-specific markers
+get.topmarkers <- function(query.markers, n_top_markers = 10, cluster_res_label = "", rename_clusters = TRUE){
+  
+  top_markers <- query.markers %>% 
+    group_by(cluster) %>% 
+    arrange(desc(avg_logFC)) 
+  
+  top_markers_filter <- top_markers[ , c("cluster", "gene")]
+  
+  top_marker.tally <- top_markers_filter %>%
+    group_by(cluster) %>%
+    tally()
+  max.n <- max(top_marker.tally$n)
+  
+  # cl <- unique(as.numeric(as.character(top_markers_filter$cluster)))
+  top_markers_filter$cluster <- as.numeric(as.character(top_markers_filter$cluster))
+  # top_markers_filter$cluster <- factor((as.character(top_markers_filter$cluster)), levels = order(cl))
+  
+  top_markers$cluster <- paste("c", as.character(top_markers$cluster), sep = "")
+  top_markers$p_val <- signif( top_markers$p_val, 3)
+  top_markers$p_val_adj <- signif( top_markers$p_val_adj, 3)
+  top_markers$avg_logFC <- signif( top_markers$avg_logFC, 3)
+  
+  top_markers_50 <- query.markers %>% 
+    group_by(cluster) %>% 
+    arrange(desc(avg_logFC)) %>%
+    top_n(n = 50, wt = avg_logFC)
+  
+  top_markers_50 <- top_markers_50[ , c("cluster", "gene")]
+  
+  
+  
+  u_clusters <- as.vector(unique(top_markers_filter$cluster))
+  u_clusters <- u_clusters[order(u_clusters)]
+  
+  top_markers_wide <- make.wide(u_clusters, 
+                                top_markers = top_markers_filter, 
+                                n_top_markers = max.n, 
+                                rename_clusters = rename_clusters)
+  
+  top_markers_50_wide <- make.wide(u_clusters, top_markers = top_markers_50, n_top_markers = 50, rename_clusters = rename_clusters)
+  
+  top5_markers <- query.markers %>% 
+    group_by(cluster) %>% 
+    arrange(desc(avg_logFC)) %>%
+    top_n(n = 50, wt = avg_logFC)
+  
+  
+  # assign outputs to list and return
+  output <- list(top_markers, top_markers_50, top_markers_wide, top_markers_50_wide, top5_markers)
+  names(output) <- c("top_markers_res",
+                     "top_markers_50_res",
+                     "top_markers_wide_res",
+                     "top_markers_50_wide_res",
+                     "top5_markers_res")
+  return(output)
+}
+
+```
+
+
+```{r, get top cluster markers, warning = FALSE }
+
+# get top markers
+which.res2rmv <- c()
+top_markers_res.list <- list()         
+top_markers_50_res.list <- list()      
+top_markers_wide_res.list <- list()    
+top_markers_50_wide_res.list <- list() 
+top5_markers_res.list <- list()  
+
+for (i in 1:length(query_markers.list)){
+  if (length( query_markers.list[[i]]) == 0) {
+    which.res2rmv <- c(which.res2rmv, cluster_resolution[i])
+    next
+  }
+  output.markers <- get.topmarkers(query.markers = query_markers.list[[i]], cluster_res_label = cluster_resolution[i])
+  
+  top_markers_res.list[[as.character(cluster_resolution[i])]] <- as.data.frame(output.markers[["top_markers_res"]])     
+  top_markers_50_res.list[[as.character(cluster_resolution[i])]] <- as.data.frame(output.markers[["top_markers_50_res"]])     
+  top_markers_wide_res.list[[as.character(cluster_resolution[i])]] <- as.data.frame(output.markers[["top_markers_wide_res"]])   
+  top_markers_50_wide_res.list[[as.character(cluster_resolution[i])]] <- as.data.frame(output.markers[["top_markers_50_wide_res"]])
+  top5_markers_res.list[[as.character(cluster_resolution[i])]] <- as.data.frame(output.markers[["top5_markers_res"]])
+  # quiet(list2env(output.markers, env = environment()), all = TRUE)  
+}
+
+# omit resolution where no DEGs were observed
+cluster_resolution <-cluster_resolution[!(cluster_resolution  %in% which.res2rmv)]
+
+```
+
+```{r down sample cells function}
+
+
+# downsample data if necessary
+downsample_cells <- function(so.query, clust.name, n.downsample = 500){
+  
+  cluster_id <- as.vector(so.query@meta.data[[clust.name]])
+  u_clusters <- unique(cluster_id)
+  
+  n_per_cluster <- round(n.downsample / length(u_clusters))
+  
+  cells_to_plot <- c()
+  for (i in 1:length(u_clusters)){
+    
+    cell_to_sample <- Cells(so.query)[cluster_id == u_clusters[i]]
+    if (length(cell_to_sample) < n_per_cluster){
+      cells_to_plot <-  c(cells_to_plot, cell_to_sample)
+    } else {
+      cells_to_plot <-  c(cells_to_plot, sample(Cells(so.query)[cluster_id == u_clusters[i]], n_per_cluster, replace = FALSE))
+    }
+    
+  }
+
+  so.query_small <- subset(so.query, cells = cells_to_plot)
+
+  return(so.query_small)
+}
+```
+
+```{r heatmap, message=FALSE, warning=FALSE, fig.height= 10, fig.width=10}
+
+
+
+plt.heatmap <- list()
+
+sil.list <- list()
+
+plt.heatmap.parameters <- list()
+# generate heatmap
+for (i in 1:length(cluster_resolution)){
+  cur.cluster.name <- paste(DefaultAssay(so.query), "_snn_res.", cluster_resolution[i], sep = "")
+  cluster.name[i] <- cur.cluster.name
+  Idents(so.query) <- so.query@meta.data[[cluster.name[i]]]
+  so.query_small <- downsample_cells(so.query = so.query, clust.name = cluster.name[i])
+  
+  # get expression matrix for top markers
+  exp.mat <- so.query_small@assays[[DefaultAssay(so.query_small)]]@scale.data
+  umap.coord <- so.query_small@reductions[["umap"]]@cell.embeddings
+  heatmap.genes <- unique(top5_markers_res.list[[as.character(cluster_resolution[i])]]$gene)
+  match.ind <- (rownames(exp.mat) %in% heatmap.genes)
+  exp.mat.filtered <- exp.mat[match.ind, ]
+  
+  # specify hierarchial cluster parameters
+  cur.cluster.id <- as.numeric((so.query_small@meta.data[[cur.cluster.name]]))
+  
+  # color palettes
+  cols <- rev(colorRampPalette(brewer.pal(9, "GnBu"))(length(unique(cur.cluster.id))))[cur.cluster.id]
+  hmcol <- rev(colorRampPalette(brewer.pal(9, "RdBu"))(100))
+  
+  # breakpoints
+  min.lim <- min(exp.mat.filtered)
+  max.lim <- max(exp.mat.filtered)
+  which.lim <- max(c(abs(min.lim), abs(max.lim)))
+  break.points <- seq(-which.lim, which.lim, by = (which.lim - (- which.lim)) / 100)
+  
+  # store cluster parameters
+  plt.heatmap.parameters[[as.character(cluster_resolution[i])]] <- list(
+    exp.mat = exp.mat.filtered,
+    lab.col = so.query_small@meta.data[[cur.cluster.name]],
+    ColSideColors = cols,
+    breaks = break.points,
+    col = hmcol,
+    cur.cluster.name = cur.cluster.name,
+    cluster.resolution = cluster_resolution[i]
+  )
+  
+  cluster.id <- as.integer(as.character(plt.heatmap.parameters[[i]][["lab.col"]]))
+  
+  # run hierarchial clustering and generate silhouette object
+  ar <- agnes(t(plt.heatmap.parameters[[i]][["exp.mat"]]))
+  sil.list[[as.character(cluster_resolution[i])]] <- silhouette(cluster.id, daisy(t(plt.heatmap.parameters[[i]][["exp.mat"]])))
+  
+  sil.temp <- sil.list[[as.character(cluster_resolution[i])]]
+  
+  df.umap <- data.frame(cluster = cur.cluster.id,
+                        x = umap.coord[ ,1],
+                        y = umap.coord[ ,2])
+  
+  # Calculate Silhouette based on UMAP coordinates. 
+  df.umap$a <- NA
+  df.umap$b <- NA
+  for (j in 1:nrow(df.umap)){
+    
+    df.cur.cluster <- df.umap[df.umap$cluster[j] == df.umap$cluster, ]
+    df.umap$a[j] <- sum(sqrt(((df.umap$x[j] - df.cur.cluster$x)^2) + ((df.umap$y[j] - df.cur.cluster$y)^2))) / (nrow(df.cur.cluster) - 1)
+    
+    df.cur.other <- df.umap[df.umap$cluster[j] != df.umap$cluster, ]
+    u.other <- unique(df.cur.other$cluster)
+    other.dist <- c()
+    for (k in 1:length(u.other)){
+      df.cur.other.sub <-  df.cur.other[u.other[k] == df.cur.other$cluster, ]
+      other.dist[k] <- sum(sqrt(((df.umap$x[j] - df.cur.other.sub$x)^2) + ((df.umap$y[j] - df.cur.other.sub$y)^2))) / (nrow(df.cur.other.sub))
+    }
+    df.umap$b[j] <- min(other.dist)
+    df.umap$maxab[j] <- max(c( df.umap$a[j], df.umap$b[j]))
+    df.umap$neighbour[j] <- u.other[which( df.umap$b[j] == other.dist)]
+  }
+  
+  df.umap$s <- (df.umap$b - df.umap$a) / df.umap$maxab
+  
+  sil.temp[ ,1] <- df.umap$cluster - 1
+  sil.temp[ ,2] <- df.umap$neighbour - 1
+  sil.temp[ ,3] <- df.umap$s
+  
+  sil.list[[as.character(cluster_resolution[i])]]  <- sil.temp
+  
+  if (print.inline){
+    
+    gplots::heatmap.2( plt.heatmap.parameters[[i]][["exp.mat"]], labCol= plt.heatmap.parameters[[i]][["lab.col"]],
+                       trace="none", 
+                       ColSideColors= plt.heatmap.parameters[[i]][["ColSideColors"]], 
+                       breaks = plt.heatmap.parameters[[i]][["breaks"]], 
+                       col= plt.heatmap.parameters[[i]][["col"]],
+                       distfun = function(x) as.dist(1-cor(t(x))),
+                       hclustfun = function(x) hclust(x, method="average"),
+                       main = paste("resolution: ", cluster_resolution[i], sep = ""),
+                       xlab = "Cluster ID")
+    
+  }
+  
+}
+
+
+```
+
+
+
+
+```{r cluster-level heatmap}
+
+
+plt.heatmap.cluster.parameters <- list()
+
+# generate heatmap
+for (i in 1:length(cluster_resolution)){
+  
+  query.res <- paste(DefaultAssay(so.query), "_snn_res.", cluster_resolution[i], sep = "")
+  cluster.membership <- so.query@meta.data[[query.res]]
+  u.clusters <- unique(as.numeric(as.character((cluster.membership))))
+  u.clusters <- u.clusters[order(u.clusters)]
+  
+  # get expression matrix
+  exp.mat.scale <- so.query@assays[[DefaultAssay(so.query)]]@scale.data
+  
+  
+  gene.scale.name <- rownames(exp.mat.scale)
+  cell.scale.name <- colnames(exp.mat.scale)
+  
+  # get cluster-wise averages
+  df.exp.scale <- NULL
+  for (j in 1:length(u.clusters)){
+    exp.mat.scale.sub <- (exp.mat.scale[, (cluster.membership == u.clusters[j])])
+    exp.mat.scale.mean <- apply(exp.mat.scale.sub, 1, mean)
+    cur.df.scale <- data.frame(exp.mat.scale.mean)
+    colnames(cur.df.scale) <- paste("c", u.clusters[j], sep = "")
+    df.exp.scale <- bind_cols(df.exp.scale, cur.df.scale)
+  }
+  
+  # cast expression data as matrix
+  exp.mat.scale.processed <- as.matrix(df.exp.scale)
+  
+  # convert genes to symbol if necessary
+  gene.rep <- checkGeneRep(gNames.list, gene.scale.name)
+  if (gene.rep == "ensembl"){
+    
+    # get available meta-features
+    available.meta.features <- so.query@assays[["RNA"]]@meta.features
+    if (all(colnames(available.meta.features) %in% c("ENSEMBL", "SYMBOL"))){
+      av.ens <- as.character(available.meta.features$ENSEMBL)
+      av.sym <- as.character(available.meta.features$SYMBOL)
+      gene.rep.ens <- gene.scale.name
+      gene.rep.sym <-  av.sym[av.ens %in% gene.rep.ens]
+    } else {
+      gene.rep.sym <- as.vector(gNames.list)[(as.vector(names(gNames.list))) %in% (gene.scale.name)]
+    }
+  } else if ((gene.rep == "symbol")) {
+    gene.rep.sym <- gene.scale.name
+  }
+  
+  gene.rep <- checkGeneRep(gNames.list, gene.rep.sym)
+  rownames(exp.mat.scale.processed) <- gene.rep.sym
+  rownames(df.exp.scale) <- make.names(gene.rep.sym, unique = T)
+  
+  # use only variable features (other wise gene matrix too large for html file)
+  var.features <- so.query@assays[[DefaultAssay(so.query)]]@var.features
+  var.feature.representation <- checkGeneRep(gNames.list, var.features)
+  
+  # potential gene name manipulation here
+  df.exp.scale.v2 <- as.data.frame(signif(df.exp.scale, 3))
+  rownames(df.exp.scale.v2) <- make.names(rownames(exp.mat.scale.processed), unique = T)
+  
+  # get available meta-features
+  available.meta.features <- so.query@assays[["RNA"]]@meta.features
+  
+  if (var.feature.representation == "ensembl"){
+    if (all(colnames(available.meta.features) %in% c("ENSEMBL", "SYMBOL"))){
+      av.ens <- as.character(available.meta.features$ENSEMBL)
+      av.sym <- as.character(available.meta.features$SYMBOL)
+      var.features.ens <- var.features
+      var.features.sym <-  av.sym[av.ens %in% var.features.ens]
+    } else {
+      var.features.sym <- as.vector(gNames.list)[(as.vector(names(gNames.list))) %in% (var.features)]
+    }
+  } else if ((var.feature.representation == "symbol")) {
+    var.features.sym <- var.features
+  }
+  
+  # filter data to include variable features only
+  match.ind <- rownames(exp.mat.scale.processed) %in% var.features.sym
+  df.exp.scale.v3 <- df.exp.scale.v2[match.ind ,]
+  rownames(df.exp.scale.v3) <- rownames(df.exp.scale.v2)[match.ind]
+  
+  # get mean and sd of all expression values
+  df.exp.scale.v3.long <- pivot_longer(df.exp.scale.v3, colnames(df.exp.scale.v3))
+  mean.val <- mean(df.exp.scale.v3.long$value, na.rm = T)
+  std.val <- sd(df.exp.scale.v3.long$value, na.rm = T)
+  
+  # standardize values
+  df.exp.scale.v4 <- df.exp.scale.v3 %>%
+    mutate_each(funs((.-mean.val)/std.val))
+  df.exp.scale.v4 <- signif(df.exp.scale.v4, 3) 
+  rownames(df.exp.scale.v4) <- rownames(df.exp.scale.v3) 
+  
+  # verify standardization
+  df.exp.scale.v4.long <- pivot_longer(df.exp.scale.v4, colnames(df.exp.scale.v4))
+  mean.val <- mean(df.exp.scale.v4.long$value, na.rm = T)
+  std.val <- sd(df.exp.scale.v4.long$value, na.rm = T)
+  
+  # cast as matrix
+  mat.exp.scale.v4 <- as.matrix(df.exp.scale.v4)
+  
+  # get cluster color keys
+  cur.cluster.id.num <- unique((so.query_small@meta.data[[query.res]]))
+  cur.cluster.id.num <- as.numeric(as.character(cur.cluster.id.num))
+  cur.cluster.id.num <- cur.cluster.id.num[order(cur.cluster.id.num)]
+  cols <- rev(colorRampPalette(brewer.pal(9, "GnBu"))(length(cur.cluster.id.num))[cur.cluster.id.num+1])
+  
+  # heatmap colors
+  hmcol <- colorRampPalette(brewer.pal(9, "RdBu"))(100)
+  
+  scale.min = -2
+  scale.max = 2 
+  
+  break.points <- c(min(mat.exp.scale.v4), seq(scale.min, scale.max, by = ((scale.max-scale.min)/98)), max(mat.exp.scale.v4))
+  
+  
+  # store cluster parameters
+  if (ncol(mat.exp.scale.v4) > 2){ # if only 2 col, distance metric fails.
+    
+    
+    plt.heatmap.cluster.parameters[[as.character(cluster_resolution[i])]] <- list(
+      exp.mat = mat.exp.scale.v4,
+      lab.col = colnames(mat.exp.scale.v4),
+      ColSideColors = cols,
+      breaks = break.points,
+      col = rev(hmcol),
+      cur.cluster.name = query.res,
+      cluster.resolution = cluster_resolution[i]
+    )
+    
+    if (print.inline){
+      
+      # a <-  as.matrix(dist(plt.heatmap.cluster.parameters[[i]][["exp.mat"]]))
+      
+      gplots::heatmap.2( plt.heatmap.cluster.parameters[[i]][["exp.mat"]], 
+                         labCol= plt.heatmap.cluster.parameters[[i]][["lab.col"]],
+                         trace="none", 
+                         labRow = FALSE,
+                         ColSideColors= plt.heatmap.cluster.parameters[[i]][["ColSideColors"]], 
+                         breaks = plt.heatmap.cluster.parameters[[i]][["breaks"]], 
+                         col= plt.heatmap.cluster.parameters[[i]][["col"]],
+                         distfun = function(x) as.dist(1-cor(t(x))),
+                         hclustfun = function(x) hclust(x, method="average"),
+                         main = paste("resolution: ", cluster_resolution[i], sep = ""),
+                         xlab = "Cluster ID")
+    }
+    
+  }
+}
+
+
+
+```
+
+
+
+
+
+```{r create silhouette plots}
+
+sil.plot <- list()
+
+
+mean.silw <- c()
+for (i in 1:length(sil.list)){
+  
+  sil.plot[[ names(sil.list)[i]]] <- factoextra::fviz_silhouette(sil.list[[i]], print.summary = F) 
+  
+  gtitle <-  sil.plot[[names(sil.list)[i]]][["labels"]][["title"]]
+  mean.silw[i] <- as.numeric(gsub("Clusters silhouette plot \n Average silhouette width: ", "", gtitle))  
+  gtitle <- gsub("Clusters silhouette plot", paste("resolution: ", names(sil.list)[i], sep = ""), gtitle)
+  
+  
+  sil.plot[[ names(sil.list)[i]]] <- sil.plot[[ names(sil.list)[i]]] + ggtitle(gtitle)
+  
+  if (print.inline) print(sil.plot[[ names(sil.list)[i]]])
+}
+
+
+```
+
+
+```{r}
+
+df.silw <- NULL
+for (i in 1:length(sil.plot)){
+  df.silw <- bind_rows(df.silw, data.frame(
+    cluster.resolution = as.character(cluster_resolution[i]),
+    sil.width = sil.plot[[as.character(cluster_resolution[i])]][["data"]][["sil_width"]]
+  ))
+}
+
+plt.silw.dep <- df.silw %>%
+  ggplot(aes(x = cluster.resolution, y = sil.width, color = cluster.resolution)) + 
+  geom_boxplot() + 
+  theme_classic() + 
+  theme(legend.position = "none") + 
+  xlab("Cluster Resolution") + 
+  ylab("Silhouette Width") + 
+  ggtitle("Cluster Resolution vs. Silouhette Width")
+
+if (length(cluster_resolution) > 2){
+  
+  plt.silw.line <- df.silw %>%
+    group_by(cluster.resolution) %>%
+    dplyr::summarize(width.mean = mean(sil.width, na.rm = T)) %>% 
+    ggplot(aes(x = cluster.resolution, y = width.mean,group = 1)) + 
+    geom_point(size = 3) + 
+    geom_line() + 
+    xlab("Cluster Resolution") + 
+    ylab("Silhouette Width") + 
+    ggtitle("Cluster Resolution vs. Silouhette Width") + 
+    theme_miko()
+  
+  
+} else {
+  plt.silw.line <- NULL
+}
+
+if (print.inline) print(plt.silw.line)
+if (print.inline) print(plt.silw.dep)
+
+
+```
+
+```{r res vs n clust curve}
+
+# get resolutions
+clust.names <- names(query_markers.list)
+current.assay <- DefaultAssay(so.query)
+assay.pattern <- paste0(current.assay, "_snn_res.")
+clust.res <- as.numeric(gsub(assay.pattern, "",clust.names))
+
+# get cluster number
+clust.n <- purrr::map_dbl(query_markers.list, function(x) length(unique(x[["cluster"]])))
+
+# get number of degs per cluster
+n.deg <- purrr::map(query_markers.list, function(x){
+  df.sum <- x %>%
+    group_by(cluster) %>%
+    summarize(
+      sig.deg = sum(p_val_adj < 0.05)
+    )
+})
+
+# compute deg statistics
+n.deg.summary <- purrr::map(n.deg, function(x){
+  df.sum <- data.frame(
+    min.n = min(x$sig.deg, na.rm = T),
+    max.n = max(x$sig.deg, na.rm = T),
+    mean.n =mean(x$sig.deg, na.rm = T),
+    sd.n = sd(x$sig.deg, na.rm = T),
+    median.n = median(x$sig.deg, na.rm = T),
+    n.clust = length(x$sig.deg)
+  )
+})
+
+df.clust.n <- data.frame(clust.res = clust.res, 
+                         n.clust = clust.n,
+                         deg.meanN = purrr::map_dbl(n.deg.summary, function(x) x$mean.n),
+                         deg.medianN = purrr::map_dbl(n.deg.summary, function(x) x$median.n),
+                         deg.minN = purrr::map_dbl(n.deg.summary, function(x) x$min.n),
+                         deg.maxN = purrr::map_dbl(n.deg.summary, function(x) x$max.n))
+
+df.clust.mean <- df.clust.n[ ,c("clust.res", "deg.meanN")]; df.clust.mean$type = "mean"; colnames(df.clust.mean) <- c("res", "val", "type")
+df.clust.min <- df.clust.n[ ,c("clust.res", "deg.minN")]; df.clust.min$type = "min"; colnames(df.clust.min) <- c("res", "val", "type")
+df.clust.max <- df.clust.n[ ,c("clust.res", "deg.maxN")]; df.clust.max$type = "max"; colnames(df.clust.max) <- c("res", "val", "type")
+
+df.clust.long <- bind_rows(df.clust.mean, df.clust.min, df.clust.max)
+
+plt.deg.n <- df.clust.long %>%
+  ggplot(aes(res, val, color = type)) + 
+  geom_point(size = 3) + 
+  geom_line() + 
+  theme_miko(legend = T) + 
+  ggthemes::scale_color_ptol() + 
+  xlab("Cluster Resolution") + 
+  ylab("DEG Number per Cluster") + 
+  labs(title = "Cluster Resolution vs. Number of DEGs",
+       subtitle = "DEGs = differentially-expressed genes") 
+                         
+
+plt.clust.n <- df.clust.n %>%
+  ggplot(aes(clust.res, n.clust)) + 
+  geom_line() + 
+  geom_point(size = 3) + 
+  theme_miko() + 
+  xlab("Cluster Resolution") + 
+  ylab("Cluster Number") + 
+  labs(title = "Cluster Resolution vs. Number of Cell Populations")
+
+if (print.inline){
+  print(plt.clust.n)
+  print(plt.deg.n)
+}
+```
+
+UMAP
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r plt.umap_by_all_clusters, message=FALSE, warning=FALSE}
+
+out <- lapply(seq_along(cr_names), function(i) {
+  
+  a1 <- knitr::knit_expand(text = sprintf("\n### %s\n", paste("res = ", cr_names[i], sep = ""))) # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE}", paste("clust_umap", i, sep = ""))) # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\nprint(plt.umap_by_cluster[[%d]])",i)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+
+
+Heatmap (cell-level)
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r ph3,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out_heat <- lapply(seq_along(plt.heatmap.parameters), function(i) {
+  
+  s1 <- paste("res = ",  plt.heatmap.parameters[[i]][['cluster.resolution']], sep = "")
+  
+  s2 <- paste("gplots::heatmap.2( plt.heatmap.parameters[[",i, "]][['exp.mat']], labCol= plt.heatmap.parameters[[", i, "]][['lab.col']],
+                       trace='none', 
+                       ColSideColors= plt.heatmap.parameters[[", i, "]][['ColSideColors']], 
+                       breaks = plt.heatmap.parameters[[", i, "]][['breaks']], 
+                       col= plt.heatmap.parameters[[", i, "]][['col']],
+                       distfun = function(x) as.dist(1-cor(t(x))),
+                       labRow = FALSE,
+                       hclustfun = function(x) hclust(x, method='average'),
+                       main = paste('resolution: ', cluster_resolution[", i, "], sep = ''),
+                       xlab = 'Cluster ID')", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=13, fig.height=6, message=FALSE, warning=FALSE}", paste("hm", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out_heat, collapse = '\n')))`
+
+Heatmap (cluster-level)
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r ph3-cluster,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out_heat_cluster <- lapply(seq_along(plt.heatmap.cluster.parameters), function(i) {
+  
+  s1 <- paste("res = ",  plt.heatmap.cluster.parameters[[i]][['cluster.resolution']], sep = "")
+  
+  s2 <- paste("gplots::heatmap.2( plt.heatmap.cluster.parameters[[",i, "]][['exp.mat']], 
+                      labCol= plt.heatmap.cluster.parameters[[", i, "]][['lab.col']],
+                       trace='none', 
+                       ColSideColors= plt.heatmap.cluster.parameters[[", i, "]][['ColSideColors']], 
+                       breaks = plt.heatmap.cluster.parameters[[", i, "]][['breaks']], 
+                       col= plt.heatmap.cluster.parameters[[", i, "]][['col']],
+                       distfun = function(x) as.dist(1-cor(t(x))),
+                       labRow = FALSE,
+                       hclustfun = function(x) hclust(x, method='average'),
+                       main = paste('resolution: '," ,plt.heatmap.cluster.parameters[[i]][['cluster.resolution']], ", sep = '')", 
+              ", xlab = 'Cluster ID')", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=13, fig.height=6, message=FALSE, warning=FALSE}", paste("hm-cluster", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out_heat_cluster, collapse = '\n')))`
+
+
+
+Silhouette
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r plt.Silhouette, message=FALSE, warning=FALSE}
+
+out <- lapply(seq_along(sil.plot), function(i) {
+  
+  a1 <- knitr::knit_expand(text = sprintf("\n### %s\n", paste("res = ", names(sil.list)[i], sep = ""))) # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE}", paste("sil.plt", i, sep = ""))) # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\nprint(sil.plot[[ names(sil.list)[%d]]])",i)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+Metrics
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+
+### Overview
+```{r plt.Silhouette cont, message=FALSE, warning=FALSE, fig.width=16, fig.height=4}
+
+
+cowplot::plot_grid(plt.silw.line, plt.clust.n, plt.deg.n, ncol = 3)
+
+```
+
+### Silhouette Summary
+```{r pplt.silw.dep, message=FALSE, warning=FALSE}
+
+print(plt.silw.dep)
+
+
+```
+
+
+Cluster Markers (1)
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r detailed table output,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out_heat <- lapply(seq_along(top_markers_wide_res.list), function(i) {
+  
+  s1 <- paste("top_markers_wide_res.list[[", i, "]]", sep = "")
+  
+  # table.name <- names(top_markers_wide_res.list)[i]
+  table.name <- paste("res=", names(top_markers_wide_res.list)[i], "")
+  
+  # s4 <- paste("datatable(", s1, ", filter = 'top')", sep = "")
+  
+  s4 <- paste("datatable(", s1, ", 
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(pageLength = 50,
+    dom = 'Bfrtip', 
+    buttons = c('copy', 'csv', 'pdf')))", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("detailed_tab", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s",s4)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out_heat, collapse = '\n')))`
+
+
+
+Cluster Markers (2)
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r detailed table output v2,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out_heat <- lapply(seq_along(top_markers_res.list), function(i) {
+  
+  s1 <- paste("top_markers_res.list[[", i, "]]", sep = "")
+  
+  table.name <- paste("res=", names(top_markers_res.list)[i], "")
+  
+  # s4 <- paste("datatable(", s1, ", filter = 'top')", sep = "")
+  
+  s4 <- paste("datatable(", s1, ", 
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(pageLength = 50,
+    dom = 'Bfrtip', 
+    buttons = c('copy', 'csv', 'pdf')))", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("detailed_tab_v2", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s",s4)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out_heat, collapse = '\n')))`
+
+```{r save analysis log and Rdata results, message=FALSE, warning=FALSE}
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
+df.log[nrow(df.log), 2] <- as.character("elapsed.time")
+df.log[nrow(df.log), 3] <- as.character(elapsed.time)
+
+df.log_Module_18 <- df.log
+
+
+
+```
+
+```{r ph10,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out1 <- lapply(seq_along(module.logs), function(i) {
+  
+  module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
+  
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (Module %s)", paste(module.n)))
+  a2 <- knitr::knit_expand(text = "\n=====================================")
+  a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
+  a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
+  a5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+Log (Module 18)
+===================================== 
+
+```{r table.log_current, message=FALSE, warning=FALSE}
+
+knitr::kable(df.log_Module_18)
+
+```
+
+
+

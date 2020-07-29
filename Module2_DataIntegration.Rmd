@@ -1,0 +1,1449 @@
+---
+title: "scRNAseq: Data Integration"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+---
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+packages2load <- c("Seurat", "sctransform",
+                    "dplyr", "tidyr", "RColorBrewer", "ggplot2", "gridExtra", 
+                   "DT", "flexdashboard", "future", "biomaRt", "foreach", "parallel", "doParallel", "scMiko", "reshape2")
+
+# "reshape2", 
+
+# load packages
+lapply(packages2load, library, character.only = TRUE)
+
+```
+
+
+
+
+```{r check available input files}
+
+show.available.files <- FALSE
+if (show.available.files){
+  list.files("Preprocessed Datasets/")
+}
+
+```
+
+
+```{r parameter specification }
+
+save.flag <- F
+
+save.filename <- "Module2_p4_p7_KRBtest_200720"
+
+k.filter <-  200 # lower k.filter value (e.g., 50) if there is few cells. Default = 200
+
+n.anchors <- 3000  # number of features used for data integration # if datasets are divergent, may need fewer genes to align with (e.g., 1000)
+
+integration_method <- "rPCA" # "CCA" for small datasets, "rPCA" for large datasets
+
+print.inline <- FALSE
+
+n.workers <- list(
+  import = 6,
+  integration = 1 #(limit to 1 for cluster)
+)
+
+  do.memory.limit <- T # specify whether to limit max memory (set T if local)
+  max.memory <- 25 # numeric, in terms of Gb (set to 100 for cluster)
+
+dir <- "Preprocessed_Datasets/"
+
+
+target.species <- "Mm" #if mixed input, specify target as 'Hs' for best performance
+target.cluster.resolution <- 1
+
+
+subset.all <- 0.1
+
+input.data <- list(
+  p4.GL261_01 = list(
+    file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
+    cluster.resolution = 1,
+    species = "Mm",
+    subsample = subset.all,
+    grouping.field = "Barcode",
+    groups = c("01_G(GL261)_FR_CST","02_C(CT2A)_FR_CST","03_H(GL261)_FR_CSTsi")),
+  p7.CT2A_03_R1_GL261_04_R1 = list(
+    file = "Module1_p7_GBM_080720.Rdata",
+    cluster.resolution = 1,
+    species = "Mm",
+    subsample = subset.all,
+    grouping.field = "Barcode",
+    groups = c("03_GBM_CT2A","04_GBM_GL261"))
+)
+
+
+```
+
+```{r alternative input datasets}
+
+# CT2A ###########################################
+
+# input.data <- list(
+#   p4.CT2A_02 = list(
+#     file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("02_C(CT2A)_FR_CST")),
+#   p7.CT2A_03_R1 = list(
+#     file = "Module1_p7_GBM_080720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("03_GBM_CT2A")),
+#   p8.GBM_PBSctrl_06 = list(
+#     file = "Module1_p8_GL261_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("06_GBM_PBSctrl")),
+#   p8.CT2A_01_R2 = list(
+#     file = "Module1_p8_CT2A_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("01_CT2A_R2")),
+#   p8.CT2A_02_R3 = list(
+#     file = "Module1_p8_CT2A_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("02_CT2A_R3")),
+#   p9.CT2A_07_R1 = list(
+#     file = "Module1_p9_CT2A_250620.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("07_PR_CT2A_R1"))
+# )
+
+
+# GL261 ###########################################
+
+
+# input.data <- list(
+#   p4.GL261_01 = list(
+#     file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("01_G(GL261)_FR_CST")),
+#   p4.GL261_03 = list(
+#     file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("03_H(GL261)_FR_CSTsi")),
+#   p7.GL261_04_R1 = list(
+#     file = "Module1_p7_GBM_080720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("04_GBM_GL261")),
+#   p8.GL261_03_R2 = list(
+#     file = "Module1_p8_GL261_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("03_GL261_R2")),
+#   p8.GL261_04_R3 = list(
+#     file = "Module1_p8_GL261_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("04_GL261_R3")),
+#   p8.GL261.GFP_05 = list(
+#     file = "Module1_p8_GL261_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("05_GL261GFP")),
+#   p8.GBM_PBSctrl_06 = list(
+#     file = "Module1_p8_GL261_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("06_GBM_PBSctrl"))
+# )
+
+
+
+# GBM ###########################################
+
+# input.data <- list(
+#   p4.GL261_01 = list(
+#     file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("01_G(GL261)_FR_CST")),
+#   p4.CT2A_02 = list(
+#     file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("02_C(CT2A)_FR_CST")),
+#   p4.GL261_03 = list(
+#     file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("03_H(GL261)_FR_CSTsi")),
+#   p7.CT2A_03_R1 = list(
+#     file = "Module1_p7_GBM_080720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("03_GBM_CT2A")),
+#   p7.GL261_04_R1 = list(
+#     file = "Module1_p7_GBM_080720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("04_GBM_GL261")),
+#   p8.GL261_03_R2 = list(
+#     file = "Module1_p8_GL261_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("03_GL261_R2")),
+#   p8.GL261_04_R3 = list(
+#     file = "Module1_p8_GL261_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("04_GL261_R3")),
+#   p8.GL261.GFP_05 = list(
+#     file = "Module1_p8_GL261_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("05_GL261GFP")),
+#   p8.GBM_PBSctrl_06 = list(
+#     file = "Module1_p8_GL261_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("06_GBM_PBSctrl")),
+#   p8.CT2A_01_R2 = list(
+#     file = "Module1_p8_CT2A_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("01_CT2A_R2")),
+#   p8.CT2A_02_R3 = list(
+#     file = "Module1_p8_CT2A_tumor_090720.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("02_CT2A_R3")),
+#   p9.CT2A_07_R1 = list(
+#     file = "Module1_p9_CT2A_250620.Rdata",
+#     cluster.resolution = 1,
+#     species = "Mm",
+#     subsample = subset.all,
+#     grouping.field = "Barcode",
+#     groups = c("07_PR_CT2A_R1"))
+# )
+
+
+```
+
+```{r parameter assignment and assertion statements}
+
+
+if (exists("k.filter")){
+  stopifnot(is.numeric(k.filter))
+} else {k.filter <- 200}
+
+# ensure output file is specified 
+if (save.flag){
+  stopifnot(exists("save.filename"))
+  if (!(grepl(".Rdata", save.filename))){
+    save.filename <- paste0(save.filename, ".Rdata")
+  }
+}
+
+n.cor.available <- parallel::detectCores()
+for (i in 1:length(n.workers)){
+  if (n.workers[[i]] > n.cor.available) n.workers[[i]] <- n.cor.available
+}
+
+input.labels <- names(input.data)
+n.datasets <- length(input.data)
+
+input.species <- c()
+subsample_factors <- c()
+input.files <- c()
+
+for (i in 1:length(input.data)){
+  
+  input.list <- input.data[[i]]
+  
+  if (!all(c("file", "species", "cluster.resolution") %in% names(input.list))){
+    stop("file, species and cluster.resolution must be specied for each input dataset")
+  }
+  
+  if (!(c("subsample") %in% names(input.list))) input.list$subsample <- 1
+  if (!(c("grouping.field") %in% names(input.list))) input.list$grouping.field <- NA
+  if (!(c("groups") %in% names(input.list))) input.list$groups <- NA
+  
+  input.data[[i]] <- input.list
+
+}
+
+```
+
+
+```{r analysis log}
+
+# generate analysis log
+df.log <- initiateLog("2, Data Integration")
+df.log <- addLogEntry("Number of datasets", n.datasets, df.log, "n.datasets")
+df.log <- addLogEntry("input species", (as.vector(unlist(lapply(input.data, function(x) x$species)))), df.log, "")
+df.log <- addLogEntry("target species", (target.species), df.log, "target.species")
+df.log <- addLogEntry("Subsample Factor", (as.vector(unlist(lapply(input.data, function(x) x$subsample)))), df.log, "")
+df.log <- addLogEntry("Integrated Data (.Rdata)", ((as.vector(unlist(lapply(input.data, function(x) x$file))))), df.log, "input.data")
+df.log <- addLogEntry("Data Labels", (input.labels), df.log, "input.labels")
+df.log <- addLogEntry("Cluster Resolution",(as.vector(unlist(lapply(input.data, function(x) x$cluster.resolution)))), df.log, "")
+df.log <- addLogEntry("K Filter", (k.filter), df.log, "k.filter")
+df.log <- addLogEntry("N Integration Anchors", (n.anchors), df.log, "n.anchors")
+df.log <- addLogEntry("N workers", (paste(names(n.workers), "=", (purrr::map_dbl(n.workers,  1)), "workers",  collapse = "; ")), df.log, "n.workers")
+df.log <- addLogEntry("max memory (Gb)",max.memory, df.log, "max.memory")
+df.log <- addLogEntry("Output File", (save.filename), df.log, "save.filename")
+
+
+```
+
+
+```{r convert gene symbols to species-appropriate notation}
+# species-specific gene symbols
+# genes4species <- function(x, input.species, target.species) {
+#   if (input.species == "Mm" & target.species == "Hs") {
+#     y <- toupper(x)
+#   } else if (input.species == "Hs" &  target.species == "Mm") {
+#     y <- tolower(x)
+#     substr(y, 1, 1) <- toupper(substr(y, 1, 1))
+#   } else {
+#     y <- x
+#   }
+#   return (y)
+# }
+```
+
+
+
+```{r subsetting helper function}
+
+preIntegrationSubsetting <- function(so, subset.df){
+
+rna.assay <- so@assays[["RNA"]]
+a.meta <- rna.assay@meta.features
+v.meta <- so@assays[["SCT"]]@meta.features
+
+gene.rep <- checkGeneRep(gNames.list, rownames(so))
+if (is.null(rna.assay@counts@Dimnames[[1]])){
+  if (gene.rep == "symbol"){
+    rna.assay@data@Dimnames[[1]] <- rna.assay@counts@Dimnames[[1]] <- a.meta$SYMBOL
+  } else if (gene.rep == "ensembl"){
+    rna.assay@data@Dimnames[[1]] <- rna.assay@counts@Dimnames[[1]] <- a.meta$ENSEMBL
+  }
+}
+
+so@assays[["RNA"]] <- rna.assay
+rm (rna.assay)
+
+# check if subset input is validd
+if (is.na(unique(subset.df$field))){
+  subset.flag <- FALSE
+} else if ( unique(subset.df$field) %in% names(so@meta.data)) {
+  subset.flag <- TRUE
+} else {
+  subset.flag <- FALSE
+}
+
+# subset data
+if (subset.flag){
+  
+      cur.field <- as.vector(unique(subset.df$field))
+  
+  match.ind <- rep(F, length(as.character(so@meta.data[[cur.field]])))
+  for (i in 1:length(subset.df$subgroups)){
+    pattern <- as.vector(subset.df$subgroups)[i]
+    pattern <- gsub(" ", "", pattern)
+
+    match.ind <- (match.ind | grepl(pattern, as.character(so@meta.data[[cur.field]]), fixed = T))
+  }
+  
+  so <- subset(x = so, cells = colnames(so)[which(match.ind)])
+  so <- UpdateSeuratObject(so)
+}
+
+so@assays[["RNA"]]@meta.features <- a.meta
+so@assays[["SCT"]]@meta.features <- v.meta
+
+return(so)
+
+}
+
+
+```
+
+
+
+```{r load data v2}
+
+
+# get input file paths
+input.files <- (as.vector(unlist(lapply(input.data, function(x) x$file))))
+input.files <- paste0(dir, input.files)
+
+# intitiate lists
+import.list <- list()
+
+# start cluster
+cl <- parallel::makeCluster(if (n.workers$import > n.datasets) n.datasets else n.workers$import)
+doParallel::registerDoParallel(cl)
+
+# iterate through each input file
+import.list <- foreach(i = 1:length(input.files), .packages = c("scMiko"))  %dopar% {
+  
+  # get dataset name
+  input.label <- input.labels[i]
+  
+  # load and prep data
+  load(input.files[i])
+  so <- prepSeurat(so)
+  
+  # set correct cluster resolution
+  so <- setResolution(so, input.data[[input.label]]$cluster.resolution)
+  
+  # assign batch name
+  so@meta.data[["batch"]] <- input.label
+  
+  # subset data (if subgroup specified)
+  if (!is.na(input.data[[input.label]]$grouping.field)){
+    subsetting.df <- data.frame(field = input.data[[input.label]]$grouping.field,
+                                subgroups = input.data[[input.label]]$groups)
+    so <- preIntegrationSubsetting(so, subsetting.df)
+    
+  } else {
+    
+    # ensure the dimensions are correctly defined in RNA assay (sometimes they are not?)
+    a.meta <- so@assays[["RNA"]]@meta.features
+    
+    gene.rep <- checkGeneRep(gNames.list, rownames(so))
+    if (is.null(so@assays[["RNA"]]@counts@Dimnames[[1]])){
+      if (gene.rep == "symbol"){
+        so@assays[["RNA"]]@counts@Dimnames[[1]] <- so@assays[["RNA"]]@data@Dimnames[[1]] <- a.meta$SYMBOL
+      } else if (gene.rep == "ensembl"){
+        so@assays[["RNA"]]@counts@Dimnames[[1]] <- so@assays[["RNA"]]@data@Dimnames[[1]]  <- a.meta$ENSEMBL
+      }
+    }
+    
+  }
+  
+  # subsample 
+  if (input.data[[input.label]]$subsample < 1)  so <- downsampleSeurat(so, input.data[[input.label]]$subsample)
+  
+  # store results
+  list(so = so,
+       gList = gNames.list,
+       gNames = names(gNames.list)
+  )
+}
+
+# stop workers
+parallel::stopCluster(cl)
+
+# unpack results
+so.list <- list()
+gList <- list()
+gNames <- list()
+
+for (i in 1:length(input.labels)){
+  input.label <- input.labels[i]
+  so.list[[input.label]] <- import.list[[i]]$so
+  gList[[input.label]] <- import.list[[i]]$gList
+  gNames[[input.label]] <- import.list[[i]]$gNames
+}
+
+# remove excess baggage
+rm(import.list)
+
+
+```
+
+
+```{r}
+
+ens2sym.so.dev <- function(so, gNames.list, convert.RNA = TRUE){
+  
+  # var features
+  so_temp <- so@assays[["SCT"]]@var.features
+  gene.rep <- checkGeneRep (gNames.list, so_temp)
+  if (gene.rep == "ensembl") so@assays[["SCT"]]@var.features <- as.vector((gNames.list[so_temp]))
+  
+  # scale data
+  so_temp <- so@assays[["SCT"]]@scale.data
+  gene.rep <- checkGeneRep (gNames.list, row.names(so_temp))
+  if (gene.rep == "ensembl") {
+    row.names(so_temp) <-  as.vector((gNames.list[row.names(so_temp)]))
+    so@assays[["SCT"]]@scale.data <- so_temp
+  }
+  
+  # data
+  so_temp <- so@assays[["SCT"]]@data
+  gene.rep <- checkGeneRep (gNames.list, row.names(so_temp))
+  if (gene.rep == "ensembl") {
+    row.names(so_temp) <-  as.vector((gNames.list[row.names(so_temp)]))
+    so@assays[["SCT"]]@data <- so_temp
+  }
+  
+  # metadata
+  so_m <- so@assays[["SCT"]]@meta.features
+  so_m$ENSEMBLE <- rownames(so_m)
+  gene.rep <- checkGeneRep (gNames.list,  so_m$ENSEMBLE)
+  if (gene.rep == "ensembl") {
+    so_m$SYMBOL <- as.vector((gNames.list[so_m$ENSEMBLE]))
+    rownames(so_m) <-  make.names(so_m$SYMBOL, unique = T)
+    so@assays[["SCT"]]@meta.features <- so_m
+  }
+  
+  # dimnames
+  so_temp <- so@assays[["SCT"]]@counts@Dimnames[[1]]
+  gene.rep <- checkGeneRep (gNames.list, so_temp)
+  if (gene.rep == "ensembl") {
+    so@assays[["SCT"]]@counts@Dimnames[[1]] <- as.vector((gNames.list[so_temp]))
+  }
+  
+  # pca feature loading
+  if ("pca" %in% names(so@reductions)){
+    so_temp <-  so@reductions[["pca"]]@feature.loadings
+    gene.rep <- checkGeneRep (gNames.list, row.names(so_temp))
+    if (gene.rep == "ensembl") {
+      row.names(so_temp) <-  as.vector((gNames.list[row.names(so_temp)]))
+      so@reductions[["pca"]]@feature.loadings <- so_temp
+    }    
+  }
+
+  # vst
+  gene.rep <- checkGeneRep (gNames.list,  names(so@assays[["SCT"]]@misc[["vst.out"]][["genes_log_gmean_step1"]]))
+  if (gene.rep == "ensembl") {
+    names(so@assays[["SCT"]]@misc[["vst.out"]][["genes_log_gmean_step1"]]) <- as.vector((gNames.list[names(so@assays[["SCT"]]@misc[["vst.out"]][["genes_log_gmean_step1"]])]))
+  }
+  
+  if (!is.null(so@assays[["SCT"]]@misc[["vst.out"]][["umi_corrected"]])){
+      gene.rep <- checkGeneRep (gNames.list,   so@assays[["SCT"]]@misc[["vst.out"]][["umi_corrected"]]@Dimnames[[1]])
+  if (gene.rep == "ensembl") {
+    so@assays[["SCT"]]@misc[["vst.out"]][["umi_corrected"]]@Dimnames[[1]] <- as.vector((gNames.list[ so@assays[["SCT"]]@misc[["vst.out"]][["umi_corrected"]]@Dimnames[[1]]]))
+  }
+  }
+
+  
+  gene.rep <- checkGeneRep (gNames.list,  rownames(so@assays[["SCT"]]@misc[["vst.out"]][["gene_attr"]]))
+  try({
+    if (gene.rep == "ensembl") {
+      rownames(so@assays[["SCT"]]@misc[["vst.out"]][["gene_attr"]]) <- as.vector((gNames.list[rownames(so@assays[["SCT"]]@misc[["vst.out"]][["gene_attr"]])]))
+    }    
+  }, silent = T)
+  
+  try({
+    so.temp <- rownames(so@assays[["SCT"]]@misc[["vst.out"]][["model_pars"]]) 
+    gene.rep <- checkGeneRep (gNames.list, so.temp)
+    if (gene.rep == "ensembl") {
+      rownames(so@assays[["SCT"]]@misc[["vst.out"]][["model_pars"]]) <- as.vector((gNames.list[so.temp]))
+    }      
+  }, silent = T)
+  
+    try({
+    so.temp <- rownames(so@assays[["SCT"]]@misc[["vst.out"]][["model_pars_fit"]]) 
+    gene.rep <- checkGeneRep (gNames.list,  so.temp)
+    if (gene.rep == "ensembl") {
+      rownames(so@assays[["SCT"]]@misc[["vst.out"]][["model_pars_fit"]]) <- as.vector((gNames.list[so.temp]))
+    }      
+  }, silent = T)
+  
+  # RNA ASSAY
+  
+  if (convert.RNA == TRUE){
+    # var features
+    so_temp <- so@assays[["RNA"]]@var.features
+    if (length(so_temp) > 0){
+      gene.rep <- checkGeneRep (gNames.list, so_temp)
+      if (gene.rep == "ensembl") {
+        so@assays[["RNA"]]@var.features <- as.vector((gNames.list[so_temp]))
+      }      
+    }
+
+    
+    # data
+    so_temp <- so@assays[["RNA"]]@data
+    gene.rep <- checkGeneRep (gNames.list, row.names(so_temp))
+    if (gene.rep == "ensembl") {
+      row.names(so_temp) <-   as.vector((gNames.list[ row.names(so_temp)]))
+      so@assays[["RNA"]]@data <- so_temp
+    }
+    
+    # counts
+    so_temp <- so@assays[["RNA"]]@counts
+    gene.rep <- checkGeneRep (gNames.list, row.names(so_temp))
+    if (gene.rep == "ensembl") {
+      row.names(so_temp) <-   as.vector((gNames.list[ row.names(so_temp)]))
+      so@assays[["RNA"]]@counts <- so_temp
+    }
+    
+  }
+  
+  if ("integrated" %in% names(so@assays)){
+    
+    # var features
+    so_ens <- so@assays[["integrated"]]@var.features
+    gene.rep <- checkGeneRep (gNames.list, so_ens)
+    if (gene.rep == "ensembl") {
+      so@assays[["integrated"]]@var.features <-as.vector((gNames.list[so_ens]))
+    }
+    
+    # scale data
+    so_sd <- so@assays[["integrated"]]@scale.data
+    gene.rep <- checkGeneRep (gNames.list,  row.names(so_sd))
+    if (gene.rep == "ensembl") {
+      row.names(so_sd) <-  as.vector((gNames.list[row.names(so_sd)]))
+      so@assays[["integrated"]]@scale.data <- so_sd
+    }
+    
+    # data
+    so_d <- so@assays[["integrated"]]@data
+    gene.rep <- checkGeneRep (gNames.list,  row.names(so_d))
+    if (gene.rep == "ensembl") {
+      row.names(so_d) <-  as.vector((gNames.list[row.names(so_d)]))
+      so@assays[["integrated"]]@data <- so_d
+    }
+    
+  }
+  
+  # ensure dim names are correctly specified
+  so <- updateDimNames(so)
+  
+  
+  return(so)
+}
+
+```
+
+
+```{r}
+
+# so.orig <- so.list
+```
+
+```{r subset common set of genes}
+
+gene.av.list <- list()
+
+gList.consolidate <- NULL
+
+for (i in 1:length(so.list)){
+  
+  set.name <- names(so.list)[i]
+  which.species <- input.data[[set.name]]$species
+  
+  if (which.species == "Mm") {
+    ens.prefix <- "ENSMUSG"
+  } else if (which.species == "Hs") {
+    ens.prefix <- "ENSG"
+  } else {
+    stop("Species must be specified as 'Mm' or 'Hs'")
+  }
+  
+  gene.rep <- rownames(so.list[[set.name]])
+  
+  which.match <- grepl(ens.prefix, gene.rep)
+  
+  if (!(sum(which.match) == length(gene.rep))) {
+    so.list[[set.name]] <- subset(so.list[[set.name]], features = gene.rep[which.match])
+  }
+  
+  so.list[[set.name]] <- ens2sym.so.dev(so = so.list[[set.name]], gNames.list = gList[[set.name]])
+  
+  # gList.consolidate <- c(gList.consolidate, gList[[set.name]])
+  gList.consolidate <- bind_rows(gList.consolidate, data.frame(ens = gNames[[set.name]], sym = gList[[set.name]]))
+  
+  gene.av.list[[set.name]] <-  rownames(so.list[[set.name]])
+  
+}
+
+
+# get intersecting set of genes
+gene.intersect <- Reduce(intersect, gene.av.list)
+
+for (i in 1:length(so.list)){
+  set.name <- names(so.list)[i]
+  so.list[[set.name]] <- subset(so.list[[set.name]], features = gene.intersect)
+}
+
+# generate master ens-sym mapping list
+rownames(gList.consolidate) <- NULL
+gList.cu <- unique(gList.consolidate)
+gList.cu <- gList.cu[!duplicated(gList.cu$sym), ]
+gList.cu <- gList.cu[!duplicated(gList.cu$ens), ]
+gNames.list <- gList.cu$sym
+names(gNames.list) <- gList.cu$ens
+
+
+```
+```{r}
+
+# so <- so.list[[1]]
+# str(so.list[[1]])
+```
+
+
+```{r get top n genes for integrations}
+
+  # external panels ######################################
+  # get L1000 panel
+  uni.panels <- geneSets[["universal_literaturePanel"]]
+  L1000.panel <- uni.panels$Subramanian2017_L1000_Universal
+  L1000.panel <- L1000.panel[!is.na(L1000.panel)]
+  
+  # get cell cycle marker panel
+  s.genes <- cc.genes$s.genes
+  g2m.genes <- cc.genes$g2m.genes
+  
+  # ensure proper representation
+  which.species <- unique(target.species)
+  
+  if (length(unique(which.species)) > 1){
+    s.genes <-  toupper(s.genes)
+    g2m.genes <-  toupper(g2m.genes)
+    L1000.panel <-  toupper(L1000.panel)
+  } else if (unique(which.species) == "Mm"){
+    s.genes <-  firstup(s.genes)
+    g2m.genes <-  firstup(g2m.genes)
+    L1000.panel <-  firstup(L1000.panel)
+  } else if (unique(which.species) == "Hs"){
+    s.genes <-  toupper(s.genes)
+    g2m.genes <-  toupper(g2m.genes)
+    L1000.panel <-  toupper(L1000.panel)
+  }
+  
+  # combine external panels
+  ext.panel <- unique(c(s.genes, g2m.genes, L1000.panel))
+  
+  # internal panel ######################################
+  # get top variable genes
+    top.n.var.genes <- 8000
+  var.list <- purrr::map(so.list, function(x) data.frame(genes = rownames(x@assays[["SCT"]]@meta.features),
+                                           var = x@assays[["SCT"]]@meta.features[["sct.residual_variance"]]))
+  var.list <- purrr::map(var.list, function(x) x[complete.cases(x), ])
+  var.list <- purrr::map(var.list, function(x) x %>% dplyr::arrange(-var))
+  var.genes <- var.list %>% purrr::reduce(merge, by = "genes")
+  colnames(var.genes)[seq(2,(length(var.list) + 1))] <- names(var.list)
+  var.genes$mean.val <- apply(var.genes[ ,seq(2,(length(var.list) + 1))], 1, function(x) mean(x))
+  var.genes$rank.val <- rank(-var.genes$mean.val)
+  int.panel <- var.genes$genes[ var.genes$rank.val <= top.n.var.genes]
+  int.panel <- as.character(int.panel)
+  
+  # combine internal and external panels
+  query.panel <- unique(c(ext.panel, int.panel))
+  
+```
+
+```{r get original (input) umaps}
+
+# so.orig <- mergeSeuratList(so.list)
+
+# get original umap embedding and df meta
+
+df.umap.orig <- NULL
+df.meta.orig <- NULL
+for (i in 1:n.datasets){
+  
+  try({
+    batch.name <- names(so.list)[i]
+    df.umap.orig <- bind_rows(df.umap.orig, data.frame(
+      batch = batch.name,
+      umap.x = so.list[[batch.name]]@reductions[["umap"]]@cell.embeddings[ ,1],
+      umap.y = so.list[[batch.name]]@reductions[["umap"]]@cell.embeddings[ ,2]
+    ))
+  }, silent = T)
+  
+}
+
+
+plt.umap.original <- df.umap.orig %>%
+  ggplot(aes(x= umap.x, y = umap.y, color = batch)) + 
+  geom_point(size = 0.02) + 
+  theme_miko(legend = T) + 
+  labs(title = "Pre-Integration Data", subtitle = "UMAP") + 
+  ggthemes::scale_color_ptol() + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+  theme_miko(legend = T) 
+
+if (print.inline){
+  plt.umap.original
+}
+```
+
+
+
+```{r}
+
+cell_per_set <- purrr::map_dbl(so.list, ncol)
+
+cps.df <- data.frame(batch = names(cell_per_set), n = cell_per_set)
+
+cps.df <- cps.df %>% 
+  arrange(desc(batch)) %>%
+  mutate(prop = n / sum(cps.df$n) *100) %>%
+  mutate(ypos = cumsum(prop)- 0.5*prop )
+
+
+# Basic piechart
+plt.pie <- ggplot(cps.df, aes(x="", y=prop, fill=batch)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar("y", start=0) +
+  theme_void() + 
+  geom_text(aes(y = ypos, label = n), color = "white", size=6) +
+  scale_fill_brewer(palette="Set1") + 
+  ggthemes::scale_fill_ptol() + 
+  labs(title = "Number of Cells Per Dataset", subtitle = "piechart")
+
+
+if (print.inline){
+  plt.pie
+}
+
+```
+
+
+```{r ensure cell names are unique}
+
+# Helper function
+appendCellPrefix <- function(so, prefix){
+  
+  if (class(so) != "Seurat") stop("Data must be Seurat Object")
+  
+  # store original names
+  so@meta.data[["orig_cellname"]] <- colnames(so)
+  
+  # update cell names
+  rownames(so@meta.data) <-  paste0(cell.prefix, rownames(so@meta.data))
+  names(so@active.ident) <- paste0(cell.prefix,names(so@active.ident))
+  so@assays[["SCT"]]@misc[["vst.out"]][["cells_step1"]] <- paste0(cell.prefix, so@assays[["SCT"]]@misc[["vst.out"]][["cells_step1"]])
+  
+  rownames(so@assays[["SCT"]]@misc[["vst.out"]][["cell_attr"]]) <- paste0(cell.prefix, rownames(so@assays[["SCT"]]@misc[["vst.out"]][["cell_attr"]]))
+  
+  
+  if (!is.null(so@assays[["SCT"]]@misc[["vst.out"]][["umi_corrected"]])){
+    so@assays[["SCT"]]@misc[["vst.out"]][["umi_corrected"]]@Dimnames[[2]] <- paste0(cell.prefix,  so@assays[["SCT"]]@misc[["vst.out"]][["umi_corrected"]]@Dimnames[[2]])
+  }
+  
+ colnames(so@assays[["SCT"]]@scale.data) <- paste0(cell.prefix,colnames(so@assays[["SCT"]]@scale.data))
+  
+  
+  for (k in 1:length(names(so@assays))){
+    assay.name <- names(so@assays)[k]
+    so@assays[[assay.name]]@counts@Dimnames[[2]] <- paste0(cell.prefix, so@assays[[assay.name]]@counts@Dimnames[[2]])
+    so@assays[[assay.name]]@data@Dimnames[[2]] <- paste0(cell.prefix, so@assays[[assay.name]]@data@Dimnames[[2]])
+  }
+  
+  for (k in 1:length(names(so@reductions))){
+    red.name <- names(so@reductions)[k]
+    rownames(so@reductions[[red.name]]@cell.embeddings) <- paste0(cell.prefix,rownames(so@reductions[[red.name]]@cell.embeddings))
+  }
+  
+  return(so)
+  
+}
+
+
+all.cell.names <- c()
+for (i in 1:length(so.list)){
+
+  # define prefix
+  cell.prefix <- paste0("S", i, "_")
+
+  # append to existing dataset (to ensure unique cell names prior to integration)
+  try({so.list[[i]] <- appendCellPrefix(so.list[[i]], cell.prefix)}, silent = T)
+  
+  all.cell.names <- c(all.cell.names, colnames(so.list[[i]]))
+
+}
+
+# ensure cell names are unique
+stopifnot(length(all.cell.names) == length(unique(all.cell.names)))
+
+```
+
+```{r}
+# so.list.orig <- so.list
+```
+
+
+```{r integrate data}
+
+if (length(so.list) > 1){ # intergrate if there are multiple datasets provided
+  
+  # Select features for downstream integration 
+  assay.vector <- c()
+  for (i in 1:n.datasets) {
+    assay.vector[i] <- DefaultAssay(so.list[[i]])
+     Idents(so.list[[i]]) <- so.list[[i]]@meta.data[["seurat_clusters"]]
+    so.list[[i]]@meta.data[["orig.ident"]] <-Idents(so.list[[i]])
+  }
+  
+  # enable parallelization
+    plan(strategy = "multisession", workers = n.workers$integration)
+    if (do.memory.limit) options(future.globals.maxSize = (max.memory*20480/20 * 1024^2))    
+
+warning("Selecting integration features...")
+  so.features <- SelectIntegrationFeatures(object.list = so.list,
+                                           assay = assay.vector,
+                                           nfeatures = n.anchors,
+                                           fvf.nfeatures = n.anchors)
+  
+  # prepare seurat object for integration
+  warning("Prepping seurat object for integration...")
+  so.list2 <- PrepSCTIntegration(object.list = so.list, anchor.features = so.features, verbose = FALSE)
+  
+  # Added override step
+  # Note: solution to retain sct scaled values post-integration proposed by chlee-tabin (https://github.com/satijalab/seurat/issues/2590)
+  for (i in 1:n.datasets) {
+    so.list2[[i]][["SCT"]] <- SetAssayData( 
+      object = so.list2[[i]][["SCT"]], 
+      slot = "scale.data", 
+      new.data = GetAssayData( so.list[[i]], assay = "SCT", slot = "scale.data" )
+    )
+  }
+  rm(so.list)
+  
+  # ensure the k.filer is not larger than smallest dataset
+  k.filter <- min(200, min(sapply(so.list2, ncol)))
+
+  # # find integration anchors
+  warning("Finding integration anchors...")
+  if (integration_method == "CCA") {
+    so.anchors <- FindIntegrationAnchors(object.list = so.list2, normalization.method = "SCT",
+                                         anchor.features = so.features, verbose = FALSE, k.filter = k.filter)
+  }else if (integration_method == "rPCA") {
+    
+    # run PCA on each object in the list (required for reicprocal PCA workflow)
+    so.list2 <- lapply(X = so.list2, FUN = function(x) {
+      x <- RunPCA(x, features = so.features, verbose = FALSE)
+    })
+    # identify anchors and integrate datasets
+    so.anchors <- FindIntegrationAnchors(object.list = so.list2, normalization.method = "SCT", reduction = "rpca",
+                                         anchor.features = so.features, verbose = FALSE)
+    
+  }
+  
+  rm(so.list2); 
+  # which.features.integrate <- query.panel
+  which.features.integrate <- Reduce(intersect, lapply(so.anchors@object.list, rownames))
+  which.features.integrate <- which.features.integrate[which.features.integrate %in% query.panel]
+
+  # last chance assertions
+  so.anchors@anchor.features <- so.anchors@anchor.features[(so.anchors@anchor.features %in% which.features.integrate)]
+  so.anchors@command@params[["anchor.features"]] <- so.anchors@anchor.features
+  
+  
+  # integrate data
+  warning("Integrating data...")
+  so <- IntegrateData( 
+    anchorset = so.anchors, 
+    normalization.method = "SCT",
+    features.to.integrate = which.features.integrate,
+    verbose = T
+  )
+  
+  # Switch to integrated assay. Variable features are automatically set during IntegrateData()
+  DefaultAssay(so) <- "integrated"
+} else {
+  so <- so.list[[1]]
+  rm(so.list)
+}
+
+n.anchors.effect <- length(which.features.integrate)
+
+# remove baggage
+rm(so.anchors)
+
+
+```
+
+
+
+
+```{r PCA}
+
+# Run PCA
+so <- RunPCA(so, verbose = FALSE)
+
+# proportion of variance explained by each PC 
+pc.std <- so@reductions[["pca"]]@stdev
+pc.var <- pc.std^2
+pc.prop_var <- pc.var/sum(pc.var)
+pc.cum_sum <- cumsum(pc.prop_var)
+pc.id <- c(1:50)
+scree.var <- data.frame(pc.id, pc.prop_var, pc.cum_sum)
+
+# Number of dims to use
+pc.n_relevant_components <- 30
+
+# generate Scree Plot
+plt.scree1 <- ggplot(scree.var, aes(x = pc.id, y = pc.prop_var)) + 
+  geom_point() +  
+  theme(legend.position="right") +
+  geom_vline(xintercept = pc.n_relevant_components+0.5, color = 'red') + 
+  ggtitle("Scree Plot") + 
+  xlab("Principal Components") + 
+  ylab("Variance Explained (proportion)") + 
+  theme_miko()
+
+plt.scree2 <- ggplot(scree.var, aes(x = pc.id, y = pc.cum_sum)) + 
+  geom_point() +
+  theme(legend.position="right") +
+  geom_vline(xintercept = pc.n_relevant_components+0.5, color = 'red') + 
+  ylim(0, 1) + 
+  ggtitle(paste(pc.n_relevant_components, "PCs (", round(100*pc.cum_sum[pc.n_relevant_components],2), "%) of variance")) + 
+  xlab("Principal Components") + 
+  ylab("Cumulative Variance Explained (proportion)") + theme_miko()
+
+
+if (print.inline){
+  print(plt.scree1)
+  print(plt.scree2)
+}
+
+```
+
+
+```{r cluster data}
+# Find clusters ---------------------------------------------------------------------------
+so <- FindNeighbors(object = so, reduction = "pca", dims = 1:pc.n_relevant_components)
+
+# target.cluster.resolution <- 1
+so <- FindClusters(object = so, resolution = target.cluster.resolution, verbose = 0, algorithm = 1, modularity.fxn = 1)
+
+
+```
+
+```{r run_umap}
+
+# Run umap and generate plot --------------------------------------------------------------------
+nDim_umap <- pc.n_relevant_components
+so <- RunUMAP(so, dims = 1:nDim_umap)
+plt.integration <- DimPlot(so, reduction = "umap",group.by = "batch", pt.size = 0.02)  + ggtitle(label = "UMAP") +
+  xlab("UMAP 1") + ylab("UMAP 2")
+
+plt.integration <-  plt.integration + 
+  theme_miko(legend = T) + 
+  labs(title = "Integrated Data", subtitle = "UMAP") + 
+  ggthemes::scale_color_ptol()
+
+
+if (print.inline){
+  print(plt.integration)
+}
+
+```
+
+
+```{r umap by pilot, fig.width=12, fig.height=4}
+
+plt.integration_overlay <- list()
+# show umap stratified by batch
+for (i in 1:n.datasets){
+  plt.integration_overlay[[i]] <- DimPlot(so, 
+                                          reduction = "umap", 
+                                          label = F, cells.highlight = as.vector(which(so@meta.data[["batch"]] == input.labels[i])), 
+                                          label.size = 4,
+                                          pt.size = 0.02,
+                                          sizes.highlight = 0.02)  +   
+    ggtitle(label = input.labels[i]) + 
+    xlab("UMAP 1") +
+    ylab("UMAP 2") + 
+    theme_miko()
+}
+
+plt.ncol <- if (n.datasets > 3) 3 else  n.datasets
+plt.integration_by_batch <- cowplot::plot_grid(plotlist = plt.integration_overlay, ncol = plt.ncol)
+
+if (print.inline){
+  print(plt.integration_by_batch)
+}
+
+```
+
+```{r umap by cluster}
+
+
+# show umap stratified by cluster
+plt.umap_by_cluster <- DimPlot(so, 
+                               reduction = "umap",  
+                               label.size = 4, 
+                               label = TRUE, 
+                               pt.size = 0.02)  +   
+  ggtitle("Clusters") + 
+  xlab("UMAP 1") + 
+  ylab("UMAP 2") 
+
+plt.umap_by_cluster <- plt.umap_by_cluster + 
+        theme_miko(legend = T) + 
+        labs(title = "Integrated Dataset", subtitle = "UMAP stratfiied by clusters")
+
+if (print.inline){
+  print(plt.umap_by_cluster)
+}
+
+
+```
+
+
+
+```{r umap by barcode, fig.height=5, fig.width=10}
+
+plt.umap_by_barcode <- DimPlot(so, split.by = "batch", group.by = "Barcode",  pt.size = 0.02) + 
+  xlab("UMAP 1") + ylab("UMAP 2")
+
+plt.umap_by_batch <- DimPlot(so, group.by = "batch",  pt.size = 0.02) + 
+  xlab("UMAP 1") + ylab("UMAP 2")
+
+if (print.inline){
+  print(plt.umap_by_barcode)
+}
+
+
+```
+
+
+```{r function for long to wide annotation table}
+
+long2wide <- function(df){
+  
+  # create wide version (for output to excel), reorder factors, and get basic descriptive stats
+  df.wide <- dcast(df, cluster ~ batch, value.var = "n")
+  df.wide[is.na(df.wide)] <- 0
+  reordered_factors <- order(as.numeric(as.vector(df.wide$cluster)))
+  df.wide <- df.wide[reordered_factors, ]
+  rownames(df.wide) <- df.wide$cluster
+  df.wide <- as.data.frame(t(df.wide))
+  df.wide <- df.wide[2:dim(df.wide)[1], ]
+  df_id_rnames <- rownames(df.wide)
+  colnames(df.wide) <- paste("cluster", colnames(df.wide), sep = "")
+  df.wide <- data.frame(apply(df.wide, 2, function(x) as.numeric(as.character(x))))
+  df.wide[dim(df.wide)[1]+1, ] <- apply(df.wide, 2, sum)
+  rownames(df.wide) <- c(df_id_rnames, "TOTAL")
+  df.wide[, dim(df.wide)[2]+1] <- apply(df.wide, 1, sum)
+  colnames(df.wide)[dim(df.wide)[2]] <- "TOTAL"
+  
+  return(df.wide)
+}
+
+```
+
+```{r compare cluster composition}
+
+
+batches <- as.vector(so@meta.data[["batch"]])
+clusters <- as.vector(so@meta.data[["seurat_clusters"]])
+
+u.batches <- unique(batches)
+u.clusters <- unique(clusters)
+
+df.cluster_comp <- data.frame(batch = batches, 
+                              cluster = clusters)
+
+
+df.tally <- df.cluster_comp %>%
+  group_by(cluster, batch) %>%
+  tally() %>%
+  mutate(freq = n/sum(n))
+
+df_for_wide <- df.tally
+df.all_id_wide <- long2wide(df_for_wide)
+
+df.cluster_annotations <- df.tally
+
+u.batches <- unique(batches)
+n.batches <- length(u.batches)
+
+color_count <- max(n.batches)
+my_cols = colorRampPalette(brewer.pal(color_count, "Set2"))(color_count)
+
+# ensure that clusters are ordered numerically
+reordered_clusters <- order(as.numeric(as.vector(df.cluster_annotations$cluster)))
+df.cluster_annotations <- df.cluster_annotations[reordered_clusters, ]
+df.cluster_annotations$cluster <- as.numeric(as.vector(df.cluster_annotations$cluster))
+cluster_chart_labels <- unique(df.cluster_annotations$cluster)
+
+# df.cluster_annotations_int <- df.cluster_annotations_int[order(levels(df.cluster_annotations_int$cluster_membership_int)), ]
+plt.cluster_composition <- ggplot(df.cluster_annotations, 
+                                  aes(x = cluster, 
+                                      fill = batch, 
+                                      y = freq)) +
+  geom_bar(position = "fill", stat = "identity") + 
+  scale_x_continuous("Cluster", labels = as.character(cluster_chart_labels), breaks = cluster_chart_labels) + 
+  xlab("Cluster ID") + ylab("Cluster Representation") + 
+  ggtitle("Cluster Composition") + 
+  ggthemes::scale_fill_ptol() + 
+  theme_miko(legend = T) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+  # scale_fill_manual(values = my_cols) + 
+
+
+if (print.inline){
+  plt.cluster_composition
+}
+
+
+```
+
+
+```{r # prep post integration values, fig.width = 12, fig.height = 4}
+
+
+df.exp <- NULL
+
+e.mat.integrated <- getExpressionMatrix(so, which.data = "scale", which.assay = "integrated")
+e.mat.sct <- getExpressionMatrix(so, which.data = "scale", which.assay = "SCT")
+
+df.meta <- so@meta.data
+
+for (i in 1:n.batches){
+  batch.name <- input.labels[i]
+  
+  df.meta.sub <- df.meta[df.meta$batch %in% batch.name, ]
+  
+  which.cells <-  rownames(df.meta.sub)
+  
+  ei.sub <- e.mat.integrated[ ,colnames(e.mat.integrated) %in% which.cells]
+  es.sub <- e.mat.sct[ ,colnames(e.mat.sct) %in% which.cells]
+  
+  # get means and sort according to genes
+  ei.mean <- rowMeans(ei.sub)
+  ei.mean <- ei.mean[order(names(ei.mean))]
+  es.mean <- rowMeans(es.sub)
+  es.mean <- es.mean[order(names(es.mean))]
+  es.mean <- es.mean[names(es.mean) %in% names(ei.mean)]
+  
+  df.exp.sub <- NULL
+  df.exp.sub <- data.frame(batch = batch.name, genes = names(es.mean), sct.expression = es.mean, integrated.expression = ei.mean)
+  
+  df.exp <- bind_rows(df.exp, df.exp.sub)
+  
+}
+
+lm_eqn <- function(df){
+    m <- lm(y ~ x, df);
+    eq <- substitute(italic(y) == a + b %.% italic(x)*","~~italic(r)^2~"="~r2, 
+         list(a = format(unname(coef(m)[1]), digits = 2),
+              b = format(unname(coef(m)[2]), digits = 2),
+             r2 = format(summary(m)$r.squared, digits = 3)))
+    as.character(as.expression(eq));
+}
+
+plt.bulk.comparison <- df.exp %>%
+  ggplot(aes(x = sct.expression, y = integrated.expression)) + 
+  geom_hline(yintercept = 0, color = "grey") + 
+   geom_vline(xintercept = 0, color = "grey") + 
+  geom_point(alpha = 0.5) + 
+  geom_smooth(method = "lm", color = "black", linetype = "dashed", se = FALSE) + 
+  ggpmisc::stat_poly_eq(formula = y~x, aes(label = paste(..rr.label.., sep = "~~~")), parse = T) + 
+  facet_wrap(~batch, ncol = 4) + 
+  theme_miko() + 
+  geom_abline(slope = 1, linetype = "dashed", color ="tomato") + 
+  labs(title = "Pseudobulk Expression", subtitle = "Pre- vs. Post-Integration Gene Expression") + 
+  xlab("SCT, Scaled Gene Expression") + 
+  ylab("Integrated, Scaled Gene Expression")
+
+if (print.inline) {
+  print(plt.bulk.comparison)
+}
+  
+
+# ..eq.label.., 
+
+```
+
+
+
+Data Integration
+===================================== 
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Integration
+```{r plt.integration, fig.width=10, fig.height=4, dpi = 72}
+
+
+print(cowplot::plot_grid(plt.umap.original, plt.integration, ncol = 2))
+```
+
+### Integration by batch
+```{r plt.integration_by_batch, fig.height=4, fig.width=12, dpi = 72}
+print(plt.integration_by_batch)
+```
+
+### Barcodes by batch
+```{r plt.umap_by_barcode, fig.height=4, fig.width=12, dpi = 72}
+print(plt.umap_by_barcode + 
+        theme_miko(legend = T) + 
+        labs(title = "Integrated Data", subtitle = "UMAP stratified by barcodes") + 
+        ggthemes::scale_color_tableau())
+```
+
+
+### SCT vs. Integrated Bulk Expression
+```{r, fig.height=4, fig.width=12, dpi = 72}
+plt.bulk.comparison
+```
+
+### Number of Cells per Dataset
+```{r n pie chart, dpi = 72}
+  plt.pie
+```
+
+
+Row
+-----------------------------------------------------------------------
+
+### Datasets
+```{r valuebox1}
+valueBox(n.datasets)
+```
+
+### Cells
+```{r valuebox1-2}
+valueBox(ncol(so))
+```
+
+### Integration Anchors (Gene N)
+```{r valuebox2}
+valueBox(n.anchors)
+```
+
+### Integrated Genes
+```{r valuebox3}
+valueBox(nrow(so))
+```
+
+PCA & Cluster Resolution
+===================================== 
+
+Row
+-----------------------------------------------------------------------
+
+### PCA
+
+```{r plt.PCA, fig.width=10, fig.height=4, dpi = 72}
+grid.arrange(plt.scree1, plt.scree2, ncol=2)
+```
+
+
+
+Integrated Clusters
+===================================== 
+
+Row
+-----------------------------------------------------------------------
+
+### Clusters
+
+
+```{r plt.cluster_composition, fig.width = 12, fig.height = 4, dpi = 72}
+
+cowplot::plot_grid(plt.umap_by_cluster, plt.cluster_composition)
+```
+
+
+Row
+-----------------------------------------------------------------------
+
+### Principal Components
+```{r valuebox4}
+valueBox(pc.n_relevant_components)
+```
+
+### Clusters
+```{r valuebox5}
+valueBox(length(unique(so@meta.data[["seurat_clusters"]])))
+```
+
+
+```{r save results}
+
+# Data Integration Method
+if (integration_method == "CCA"){int_method <- "CCA"} else if (integration_method == "rPCA"){int_method <- "rPCA"}
+df.log <- addLogEntry("Integration Method", int_method, df.log, "integration_method")
+
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+df.log <- addLogEntry("Results Saved", save.flag, df.log, "save.flag")
+
+df.log_Module_2 <- df.log
+
+if (save.flag == TRUE){
+  if (!exists("dir")){dir <- ""} 
+  save(so, gNames.list, df.log_Module_2, file = paste0(dir, save.filename))
+}
+
+```
+
+
+Log (Module 2)
+===================================== 
+
+```{r table.log_current}
+
+knitr::kable(df.log_Module_2)
+
+```
+
+

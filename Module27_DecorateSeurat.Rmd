@@ -1,0 +1,801 @@
+---
+title: "scRNAseq: QC and Data Preparation"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r Description}
+
+# DECORATE SEURAT ###############################
+
+# Purpose: ######################################
+# Generate intermediary results that are computationally expensive and 
+# frequently required in difference analyses. This includes: 
+#
+# 1) ICA
+# 2) TSNE
+# 3) rho association matrix
+# 4) cell cycle scoring
+# 5) NMF
+# 6) GSVA
+
+# Output: #######################################
+# Seurat object with precomputed intermediate results. 
+
+
+```
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+# load packages
+library(scMiko)
+modulePackages(module.number = 1)
+gc()
+
+```
+
+
+```{r parameter specifications}
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed_Datasets/"
+
+# Query input
+input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+
+# override
+override.input <- F
+
+# output file (required only if override input = F)
+output.file <- "Module1_M16_M27_UHN_240620.Rdata"
+
+# cluster resolution
+cluster.resolution <- 1
+
+# print inline
+print.inline <- F
+
+# Data subsampling
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+
+# gmt path for GSVA scoring
+# check current release at: http://download.baderlab.org/EM_Genesets/current_release/
+which.species <- "Hs"
+if (which.species == "Hs"){
+  gmt.path <- "http://download.baderlab.org/EM_Genesets/current_release/Human/symbol/Human_GOBP_AllPathways_no_GO_iea_July_01_2020_symbol.gmt"
+} else if (which.species == "Mm"){
+ gmt.path <- "http://download.baderlab.org/EM_Genesets/current_release/Mouse/symbol/Mouse_GOBP_AllPathways_no_GO_iea_July_01_2020_symbol.gmt" 
+}
+ 
+
+# specify decorations
+decoration.list <- list(
+  ICA = T,
+  TSNE = T,
+  NMF = T,
+  rho.matrix = T,
+  cell.cycle.scoring = T,
+  DEG = T,
+  GSVA = T
+)
+
+```
+
+
+```{r load data, message=FALSE, warning=FALSE}
+
+# load query dataset
+warning("Importing dataset...")
+load(paste(dir.preprocessed, input.file, sep = ""))
+so <- prepSeurat(so)
+so.query <- so; so.input <- so.query; rm(so)
+
+current.assay <- DefaultAssay(so.query)
+
+# subsample (for dev purposes)
+n.subset <- round(subsample_factor *ncol(so.input))
+cell.ind <- sample(x = seq(1, ncol(so.input)), size = n.subset, replace = FALSE, prob = NULL)
+so.query <- SubsetData(so.query , cells = cell.ind)
+
+rm(so.input)
+
+```
+
+
+```{r analysis log}
+
+# Module
+df.log <- initiateLog("27, Seurat Decoration")
+df.log <- addLogEntry("Query File (.Rdata)", (input.file), df.log, "input.file")
+df.log <- addLogEntry("Default Assay", (current.assay), df.log, "current.assay")
+df.log <- addLogEntry("Cluster Resolution", (cluster.resolution), df.log, "cluster.resolution")
+df.log <- addLogEntry("Subsample Factor", (subsample_factor), df.log, "subsample_factor")
+df.log <- addLogEntry("Override input", (override.input), df.log, "override.input")
+
+```
+
+
+```{r}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+
+```{r prep gene list}
+
+# prep gene list
+gNames.list <- prepGeneList( so.query, objects())
+
+# ensure gene list is available
+stopifnot(exists("gNames.list"))
+```
+
+
+```{r convert to symbol}
+
+gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+
+if (gene.rep == "ensembl"){
+  warning("converting ENSEMBL to SYMBOL...")
+  so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list, convert.RNA = TRUE)
+  gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+}
+
+
+```
+
+
+
+```{r get clusters}
+
+
+# compute clusters
+warning("Computing clusters...")
+so.query <- FindClusters(object = so.query, 
+                         resolution = cluster.resolution, 
+                         verbose = 0, algorithm = 1, modularity.fxn = 1)
+
+
+# prep query parameters with assertions
+cur.cluster.field <- paste(DefaultAssay(so.query), "_snn_res.", cluster.resolution, sep = "")
+stopifnot(cur.cluster.field %in% names(so.query@meta.data))
+
+# get umap
+plt.umap_by_cluster <- DimPlot(so.query, reduction = "umap", label = TRUE)  + 
+  labs(title = "UMAP", subtitle = paste0("cluster resolution = ", cluster.resolution)) +
+  xlab("UMAP 1") + ylab("UMAP 2") + theme_miko(legend = T)
+
+if (print.inline){
+  plt.umap_by_cluster
+}
+
+```
+
+
+
+
+```{r TSNE}
+
+# tsne #####################
+
+if (decoration.list$TSNE){
+  plt.tsne.combo <- tryCatch({
+    nDim <- 30
+    warning("Running TSNE")
+    so.query <-RunTSNE(so.query, dims = 1:nDim)
+    
+    # generate plots
+    plt.tsne_by_cluster <- DimPlot(so.query, reduction = "tsne", label = TRUE)  + ggtitle(label = "TSNE") +
+      xlab("TSNE 1") + ylab("TSNE 2")
+    
+    plt.tsne <- DimPlot(so.query, reduction = "tsne",group.by = "Barcode")  + ggtitle(label = "TSNE") +
+      xlab("TSNE 1") + ylab("TSNE 2")
+    
+    # combine plots
+    plt.tsne.combo <- cowplot::plot_grid(plt.tsne_by_cluster, plt.tsne, ncol = 2)
+  }, error = function(e){
+    plt.tsne.combo <- NULL
+    return(plt.tsne.combo)
+  })
+  
+  # log 
+  df.log <- addLogEntry("TSNE computed", TRUE, df.log, "")
+  
+} else {
+  plt.tsne.combo <- NULL
+  df.log <- addLogEntry("TSNE computed", FALSE, df.log, "")
+}
+
+
+
+
+
+```
+
+
+```{r ICA}
+
+# ICA ########################
+
+if (decoration.list$ICA){
+  warning("Running ICA...")
+  so.query <- RunICA(so.query, verbose = F)
+  
+  # generate plots
+  plt.ica_by_cluster <- DimPlot(so.query, reduction = "ica", label = TRUE)  + ggtitle(label = "ICA") +
+    xlab("ICA 1") + ylab("ICA 2")
+  
+  plt.ica <- DimPlot(so.query, reduction = "ica",group.by = "Barcode")  + ggtitle(label = "ICA") +
+    xlab("ICA 1") + ylab("ICA 2")
+  
+  # combine plots
+  plt.ica.combo <- cowplot::plot_grid(plt.ica_by_cluster, plt.ica, ncol = 2)
+  
+  # log 
+  df.log <- addLogEntry("ICA computed", TRUE, df.log, "")
+  
+} else {
+  plt.ica.combo <- NULL
+  df.log <- addLogEntry("ICA computed", FALSE, df.log, "")
+}
+
+```
+
+
+```{r DEG}
+
+# DEG #####################
+
+if (decoration.list$DEG){
+  
+  # log fold change threshold
+  lfc.threshold <- 0.5
+  
+  # p.value threshold <- p.threshold
+  p.threshold <- 0.01
+  
+  # which markers to return
+  only.pos <- T # 
+  
+  # DEG test
+  DEG.test <- "MAST" #options: wilcox, bimod, roc, t, poisson, negbinom, LR, MAST, DESeq2
+  
+  warning("Identifying differentally expressed genes...")
+  DEG.results <- FindAllMarkers(so.query, 
+                                assay = DefaultAssay(so.query),
+                                slot = "data",
+                                only.pos = only.pos, 
+                                min.pct = 0.25,
+                                test.use = DEG.test,
+                                logfc.threshold = lfc.threshold, 
+                                max.cells.per.ident = 200,
+                                return.thresh = p.threshold,
+                                verbose = F)
+  
+  DEG.results$cluster.resolution <- cluster.resolution
+  DEG.results$lfc.threshold <- lfc.threshold
+  DEG.results$p.threshold <- p.threshold
+  DEG.results$only.pos <- only.pos
+  DEG.results$DEG.test <- DEG.test
+  
+  # store results
+  so.query@misc$deg <- DEG.results
+  
+  # log
+  df.log <- addLogEntry("DEGs computed", TRUE, df.log, "")
+  df.log <- addLogEntry("DEG lfc.threshold", lfc.threshold, df.log, "lfc.threshold")
+  df.log <- addLogEntry("DEG p.threshold", p.threshold, df.log, "p.threshold")
+  df.log <- addLogEntry("DEG only.pos", only.pos, df.log, "only.pos")
+  df.log <- addLogEntry("DEG test", DEG.test, df.log, "DEG.test")
+  
+} else {
+  df.log <- addLogEntry("DEGs computed", FALSE, df.log, "")
+}
+
+```
+
+
+```{r cell cycle scoring, fig.width=14, fig.height = 4}
+
+# cell cycle scoring #####################
+
+if (decoration.list$cell.cycle.scoring){
+  
+  # get cell cycle genes
+  s.genes <- cc.genes$s.genes
+  g2m.genes <- cc.genes$g2m.genes
+  
+  which.species <- unique(so.query@meta.data[["Organism"]])
+  
+  if (length(unique(which.species)) > 1){
+    s.genes <-  toupper(s.genes)
+    g2m.genes <-  toupper(g2m.genes)
+  } else if (unique(which.species) == "Mm"){
+    s.genes <-  firstup(s.genes)
+    g2m.genes <-  firstup(g2m.genes)
+  } else if (unique(which.species) == "Hs"){
+    s.genes <-  toupper(s.genes)
+    g2m.genes <-  toupper(g2m.genes)
+  }
+  
+  # cell cycle scoring and umap
+  plt.cc.umap <- tryCatch({
+    warning("Scoring cell cycle...")
+    so.query <- CellCycleScoring(so.query, s.features = s.genes, g2m.features = g2m.genes, set.ident = F)
+    
+    plt.cc.umap <- cluster.UMAP(
+      so.query,
+      group.by = "Phase",
+      x.label = "UMAP 1",
+      y.label = "UMAP 2",
+      plot.name = "Cell Cycle Classifications",
+      include.labels = F)
+    
+  }, error = function(e){
+    plt.cc.umap <- NULL
+    return(plt.cc.umap)
+  })
+  
+  # cluster-level composition
+  plt.cc <- NULL
+  if ("Phase" %in% names(so.query@meta.data)){
+    df.cc <- data.frame(clusters =  so.query@meta.data[["seurat_clusters"]], phase =  so.query@meta.data[["Phase"]])
+    
+    df.cc.tally <- df.cc %>%
+      group_by(clusters, phase) %>%
+      tally()
+    
+    plt.cc.compo <- df.cc.tally %>%
+      ggplot(aes(x = clusters, y = n, fill = phase)) + 
+      geom_bar(position="fill", stat="identity") + 
+      theme_miko(legend = T) + 
+      labs(title = "Cluster Composition by Cell Cycle") + 
+      xlab("Cluster ID") + ylab("Relative Frequency")
+    
+    plt.cc <- cowplot::plot_grid(plt.umap_by_cluster, plt.cc.umap, plt.cc.compo, ncol = 3)
+  } 
+  
+  
+  if (print.inline) {
+    print(plt.cc)
+  }
+  
+  # log
+  df.log <- addLogEntry("cell cycle scores computed", TRUE, df.log, "")
+  
+} else {
+  plt.cc <- NULL
+  df.log <- addLogEntry("cell cycle scores computed", FALSE, df.log, "")
+}
+
+```
+
+```{r rho matrix}
+
+# rho association constant #####################
+
+if (decoration.list$rho.matrix){
+  
+  # external panels ######################################
+  # get L1000 panel
+  uni.panels <- geneSets[["universal_literaturePanel"]]
+  L1000.panel <- uni.panels$Subramanian2017_L1000_Universal
+  L1000.panel <- L1000.panel[!is.na(L1000.panel)]
+  
+  # get cell cycle marker panel
+  s.genes <- cc.genes$s.genes
+  g2m.genes <- cc.genes$g2m.genes
+  
+  # ensure proper representation
+  which.species <- unique(so.query@meta.data[["Organism"]])
+  
+  if (length(unique(which.species)) > 1){
+    s.genes <-  toupper(s.genes)
+    g2m.genes <-  toupper(g2m.genes)
+    L1000.panel <-  toupper(L1000.panel)
+  } else if (unique(which.species) == "Mm"){
+    s.genes <-  firstup(s.genes)
+    g2m.genes <-  firstup(g2m.genes)
+    L1000.panel <-  firstup(L1000.panel)
+  } else if (unique(which.species) == "Hs"){
+    s.genes <-  toupper(s.genes)
+    g2m.genes <-  toupper(g2m.genes)
+    L1000.panel <-  toupper(L1000.panel)
+  }
+  
+  # combine external panels
+  ext.panel <- unique(c(s.genes, g2m.genes, L1000.panel))
+  
+  # internal panel ######################################
+  # get top variable genes
+  top.n.var.genes <- 8000
+  df.var.meta <- so.query@assays[[DefaultAssay(so.query)]]@meta.features
+  df.var.meta$genes <- rownames(df.var.meta)
+  df.var.meta <- df.var.meta %>% arrange(-sct.residual_variance)
+  int.panel <- df.var.meta$genes[1:top.n.var.genes]
+  
+  # combine internal and external panels
+  query.panel <- unique(c(ext.panel, int.panel))
+  
+  
+  # entire matrix
+  which.data <- "data"
+  exp.mat.data <- getExpressionMatrix(so.query, which.data = "data")
+  exp.mat.scale <- getExpressionMatrix(so.query, which.data = "scale")
+  
+  # filter matrix
+  exp.mat.d <- exp.mat.data[rownames(exp.mat.data) %in% query.panel, ]
+  exp.mat.s <- exp.mat.scale[rownames(exp.mat.scale) %in% query.panel, ]
+  rm(exp.mat.data)
+  rm(exp.mat.scale)
+  
+  # transpose expressio matrix (genes are columns)
+  t.exp.mat.s <- t(exp.mat.s)
+  e.mat.s <- as.matrix(t.exp.mat.s)
+  # transform matrix if necessary
+  if (min(e.mat.s) < 0) e.mat.s <- e.mat.s + abs(min(e.mat.s))
+  SubGeneNames=colnames(e.mat.s)
+  
+  t.exp.mat.d <- t(exp.mat.d)
+  e.mat.d <- as.matrix(t.exp.mat.d)
+  SubGeneNames=colnames(e.mat.d)
+  
+  
+  warning("Computing similarity matrix...")
+  which.cor <- "rho_p"
+  s.mat.s <-  dismay::dismay(e.mat.s, metric = which.cor)
+  s.mat.d <-  dismay::dismay(e.mat.d, metric = which.cor)
+  
+  # omit duplicates
+  s.mat.s <- s.mat.s[!duplicated(rownames(s.mat.s)), !duplicated(colnames(s.mat.s))]
+  s.mat.d <- s.mat.d[!duplicated(rownames(s.mat.d)), !duplicated(colnames(s.mat.d))]
+  
+  cor.list <- list(
+    similarity.matrix = s.mat.d,
+    metric = which.cor,
+    slot = "data",
+    assay = DefaultAssay(so.query),
+    top.n.var.genes = top.n.var.genes,
+    internal.panel = "variable genes",
+    external.panel = c("L1000", "cell cycling genes"),
+    internal.panel.genes = int.panel,
+    external.panel.genes = ext.panel,
+    all.genes = query.panel
+  )
+  
+  # store results
+  so.query@misc$similarity.data <- cor.list
+  
+  cor.list <- list(
+    similarity.matrix = s.mat.s,
+    metric = which.cor,
+    slot = "scale",
+    assay = DefaultAssay(so.query),
+    top.n.var.genes = top.n.var.genes,
+    internal.panel = "variable genes",
+    external.panel = c("L1000", "cell cycling genes"),
+    internal.panel.genes = int.panel,
+    external.panel.genes = ext.panel,
+    all.genes = query.panel
+  )
+  
+  # store results
+  so.query@misc$similarity.scale <- cor.list
+  
+  # log
+  df.log <- addLogEntry("similarity matrix computed", TRUE, df.log, "")
+  df.log <- addLogEntry("similarity matrix metric", which.cor, df.log, "which.cor")
+  df.log <- addLogEntry("similarity matrix assay", DefaultAssay(so.query), df.log, "DefaultAssay(so.query)")
+  df.log <- addLogEntry("similarity matrix var gene n", top.n.var.genes, df.log, "top.n.var.genes")
+  
+} else {
+  
+  df.log <- addLogEntry("similarity matrix computed", FALSE, df.log, "")
+  
+}
+
+```
+
+
+```{r NMF, include = FALSE}
+# library(NMF)
+
+# NMF #####################
+if (decoration.list$NMF){
+  
+  # https://mran.microsoft.com/snapshot/2017-01-23/web/packages/NNLM/vignettes/Fast-And-Versatile-NMF.html 
+  library(NNLM)
+  library(foreach)
+  
+  # external panels ######################################
+  # get L1000 panel
+  uni.panels <- geneSets[["universal_literaturePanel"]]
+  L1000.panel <- uni.panels$Subramanian2017_L1000_Universal
+  L1000.panel <- L1000.panel[!is.na(L1000.panel)]
+  
+  # get cell cycle marker panel
+  s.genes <- cc.genes$s.genes
+  g2m.genes <- cc.genes$g2m.genes
+  
+  # ensure proper representation
+  which.species <- unique(so.query@meta.data[["Organism"]])
+  
+  if (length(unique(which.species)) > 1){
+    s.genes <-  toupper(s.genes)
+    g2m.genes <-  toupper(g2m.genes)
+    L1000.panel <-  toupper(L1000.panel)
+  } else if (unique(which.species) == "Mm"){
+    s.genes <-  firstup(s.genes)
+    g2m.genes <-  firstup(g2m.genes)
+    L1000.panel <-  firstup(L1000.panel)
+  } else if (unique(which.species) == "Hs"){
+    s.genes <-  toupper(s.genes)
+    g2m.genes <-  toupper(g2m.genes)
+    L1000.panel <-  toupper(L1000.panel)
+  }
+  
+  # combine external panels
+  ext.panel <- unique(c(s.genes, g2m.genes, L1000.panel))
+  
+  # internal panel ######################################
+  # get top variable genes
+  top.n.var.genes <- 8000
+  df.var.meta <- so.query@assays[[DefaultAssay(so.query)]]@meta.features
+  df.var.meta$genes <- rownames(df.var.meta)
+  df.var.meta <- df.var.meta %>% arrange(-sct.residual_variance)
+  int.panel <- df.var.meta$genes[1:top.n.var.genes]
+  
+  # combine internal and external panels
+  query.panel <- unique(c(ext.panel, int.panel))
+  
+  
+  # entire matrix
+  which.data <- "data"
+  exp.mat.complete <- getExpressionMatrix(so.query, which.data = "data")
+  
+  # filter matrix
+  exp.mat <- exp.mat.complete[rownames(exp.mat.complete) %in% query.panel, ]
+  rm(exp.mat.complete)
+  exp.mat.sub <- exp.mat
+  
+  
+  # find optimal rank (k) ######################################
+  cols <- c(1:3);
+  B <- exp.mat.sub
+  k <- c(2:15)
+  
+  warning("Searching for optimal NMF rank...")
+  cl <- parallel::makeCluster(3)
+  doParallel::registerDoParallel(cl)
+  
+  subset.n <- 0.1 * ncol(B) * nrow(B)
+  
+  err.res <- list()
+  
+  err.res <- (foreach(i = 1:length(cols), .packages = "NNLM")) %dopar% {
+    index2 <- sample(which(!is.na(B)), subset.n);
+    nsclc3 <- B;
+    nsclc3[index2] <- NA;
+    
+    mean.z <- c()
+    for (j in 1:length(k)){
+      z <- nnmf(nsclc3, k[j], verbose = T, max.iter = 50, n.threads = 0);
+      mean.z[j] <- mean((with(z, W%*%H)[index2] - B[index2])^2)
+    }
+    
+    err.res[[i]] <- mean.z
+    
+    
+  }
+  parallel::stopCluster(cl)
+  
+  mse.grid <- apply(matrix(unlist(err.res), ncol = length(cols)), 1, mean)
+  k.opt <- k[which.min(mse.grid)]
+  df.k <- data.frame(k = k, mse = apply(matrix(unlist(err.res), ncol = length(cols)), 1, mean))
+  
+  plt.kopt <- df.k %>%
+    ggplot(aes(k, mse)) + 
+    geom_point() + 
+    geom_vline(xintercept = k.opt, color = "tomato", linetype = "dashed") + 
+    theme_miko() + 
+    labs(title = "NMF Rank Optimization", subtitle = paste0("Optimal Rank = ", k.opt)) + 
+    ylab("MSE") + xlab("Rank, k")
+  
+  warning("Computing NMF...")
+  #  Compute optimal NMF
+  nmf.opt  <- nnmf(exp.mat.sub, k = k.opt, 
+                   max.iter = 500,
+                   method = "scd", 
+                   loss = "mse", 
+                   rel.tol = 1e-4, 
+                   n.threads = 0, 
+                   verbose = 2);
+  
+  plt.wmat <- pheatmap::pheatmap(nmf.opt$W, show_rownames = F, main = "NMF 'W' Matrix\nrows=genes; columns=gene modules")
+  plt.wmat <- ggplotify::as.ggplot(plt.wmat)
+  
+  plt.hmat <- pheatmap::pheatmap(nmf.opt$H, show_colnames = F, main = "NMF 'H' Matrix\nrows=gene modules; columns=cells")
+  plt.hmat <- ggplotify::as.ggplot(plt.hmat)
+  
+  # store results
+  so.query@misc$nmf <- list(
+    nmf = nmf.opt,
+    ranks.tested = k,
+    w.mat.plot = plt.wmat,
+    h.mat.plot = plt.hmat,
+    optimization.curve = nmf.opt
+  )
+  
+  # log
+  df.log <- addLogEntry("NMF computed", TRUE, df.log, "")
+  df.log <- addLogEntry("NMF optimal rank", k, df.log, "k")
+  
+} else {
+  plt.wmat <- NULL
+  plt.hmat <- NULL
+  plt.kopt <- NULL
+  df.log <- addLogEntry("NMF computed", FALSE, df.log, "")
+}
+
+```
+
+
+```{r GSVA}
+
+# GSVA ###########################################################
+
+if (decoration.list$GSVA){
+  
+  # extract expression matrices
+  data.mat <- getExpressionMatrix(so.query, which.data = "data")
+  scale.mat <- getExpressionMatrix(so.query, which.data = "scale")
+  
+  # get pathways
+  pathwaygmt <- GSEABase::getGmt(gmt.path)
+  
+  # score pathways
+  warning("Computing GSVA using corrected counts...")
+  data.scores <- GSVA::gsva(as.matrix(data.mat),
+                            pathwaygmt, method = "gsva", min.sz = 5, max.sz = 200,
+                            parallel.sz = 1, verbose = F)
+  
+  warning("Computing GSVA using scaled counts...")
+  scale.scores <- GSVA::gsva(as.matrix(scale.mat),
+                             pathwaygmt, method = "gsva", min.sz = 5, max.sz = 200,
+                             parallel.sz = 1, verbose = F)
+  
+  so.query@misc$gsva <- list(
+    gsva.scale = scale.scores,
+    gsva.data = data.scores
+  )
+  
+}
+```
+
+```{r save results}
+
+if (override.input){
+  output.file <- input.file
+}
+
+so <- so.query
+rm(so.query)
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+
+df.log <- addLogEntry("output file", output.file, df.log, "output.file")
+df.log_Module_27 <- df.log
+
+save.filename <- paste(dir.preprocessed , output.file, sep = "")
+
+save(so, gNames.list, df.log_Module_1, df.log_Module_27, file = save.filename)
+
+
+```
+
+
+UMAP
+===================================== 
+### Uniform Manifold Approximation and Projection
+```{r}
+print(plt.umap_by_cluster + theme_miko(legend = T))
+
+```
+
+TSNE
+===================================== 
+### T-Distributed Stochastic Neighbor Embedding
+```{r tsne plots, fig.width = 10, fig.height = 5}
+plt.tsne.combo
+```
+
+
+ICA
+===================================== 
+### Independent Component Analysis
+```{r ica plots, fig.width = 10, fig.height = 5}
+plt.ica.combo
+```
+
+
+Cell Cycle
+===================================== 
+```{r cell cycle plots, fig.width = 14, fig.height = 4}
+plt.cc
+```
+
+
+NMF
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### NMF Rank Optimization
+```{r nmf plot 1}
+plt.kopt
+```
+
+
+
+### W Matrix
+```{r wmat plot}
+plt.wmat
+```
+
+
+
+### H Matrix
+```{r hmat plot}
+plt.hmat
+```
+
+
+
+```{r}
+# determine prior log history
+
+
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+
+```{r ph10,  echo = FALSE, eval = TRUE}
+
+out1 <- lapply(seq_along(module.logs), function(i) {
+  
+  module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
+  
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (Module %s)", paste(module.n)))
+  a2 <- knitr::knit_expand(text = "\n=====================================")
+  a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
+  a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
+  a5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+

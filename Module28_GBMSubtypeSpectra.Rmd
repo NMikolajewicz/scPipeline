@@ -1,0 +1,680 @@
+---
+title: "Module28_GBMSubtypeSpectra"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+---
+
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+# load packages
+library(scMiko)
+modulePackages(module.number = 1)
+gc()
+
+```
+
+
+```{r parameter specifications}
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed Datasets/"
+
+# Query input
+# input.file <- "Module1_p9_GBM_PR_nololim_260620.Rdata"
+# input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
+input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+
+# cluster resolution
+cluster.resolution <- 1
+
+# print inline
+print.inline <- F
+
+# Data subsampling
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+
+# species
+which.species <- "Hs"
+
+```
+
+
+```{r load data, message=FALSE, warning=FALSE}
+
+# load query dataset
+warning("Importing dataset...")
+load(paste(dir.preprocessed, input.file, sep = ""))
+so <- prepSeurat(so)
+so.query <- so; so.input <- so.query; rm(so)
+
+current.assay <- DefaultAssay(so.query)
+
+# subsample (for dev purposes)
+n.subset <- round(subsample_factor *ncol(so.input))
+cell.ind <- sample(x = seq(1, ncol(so.input)), size = n.subset, replace = FALSE, prob = NULL)
+so.query <- SubsetData(so.query , cells = cell.ind)
+
+rm(so.input)
+
+```
+
+
+```{r analysis log}
+
+# Module
+df.log <- initiateLog("28, SGBM Subtype Spectra")
+df.log <- addLogEntry("Query File (.Rdata)", (input.file), df.log, "input.file")
+df.log <- addLogEntry("Default Assay", (current.assay), df.log, "current.assay")
+df.log <- addLogEntry("Cluster Resolution", (cluster.resolution), df.log, "cluster.resolution")
+df.log <- addLogEntry("Subsample Factor", (subsample_factor), df.log, "subsample_factor")
+
+```
+
+
+```{r}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+
+```{r prep gene list}
+
+# prep gene list
+gNames.list <- prepGeneList( so.query, objects())
+
+# ensure gene list is available
+stopifnot(exists("gNames.list"))
+```
+
+
+```{r convert to symbol}
+
+gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+
+if (gene.rep == "ensembl"){
+  warning("converting ENSEMBL to SYMBOL...")
+  so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list, convert.RNA = TRUE)
+  gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+}
+
+
+```
+
+
+
+```{r get clusters, fig.width=10, fig.height=4}
+
+# compute clusters
+warning("Computing clusters...")
+so.query <- FindClusters(object = so.query, 
+                         resolution = cluster.resolution, 
+                         verbose = 0, algorithm = 1, modularity.fxn = 1)
+
+
+# prep query parameters with assertions
+cur.cluster.field <- paste(DefaultAssay(so.query), "_snn_res.", cluster.resolution, sep = "")
+stopifnot(cur.cluster.field %in% names(so.query@meta.data))
+
+# get umap
+plt.umap_by_cluster <- cluster.UMAP(
+  so.query,
+  group.by = "seurat_clusters",
+  x.label = "UMAP 1",
+  y.label = "UMAP 2",
+  plot.name = "UMAP",
+  include.labels = T,
+  reduction = "umap"
+) + labs(subtitle = paste0("Clusters (resolution = ", cluster.resolution ,")"))
+
+
+plt.umap_by_barcode <- cluster.UMAP(
+  so.query,
+  group.by = "Barcode",
+  x.label = "UMAP 1",
+  y.label = "UMAP 2",
+  plot.name = "UMAP",
+  include.labels = F,
+  reduction = "umap"
+) + labs(subtitle = "Barcodes") + 
+  ggthemes::scale_color_tableau()
+
+plt.umap.overview <-   cowplot::plot_grid(plt.umap_by_cluster, plt.umap_by_barcode)
+
+if (print.inline){
+  # fig.width=10, fig.height=4
+  plt.umap.overview
+}
+
+```
+
+
+```{r get GBM meta module genes}
+
+# get GBM genes
+gbm.genes <- data.frame(geneSets[["GBM_Hs_Neftel2019"]])
+
+# convert to list
+gbm.list <- list()
+for (i in 1:ncol(gbm.genes)){
+  
+  # enforce correct species
+  if (which.species == "Hs"){
+    gbm.genes[ ,i] <- toupper(gbm.genes[,i])
+  } else if (which.species == "Mm"){
+    gbm.genes[ ,i] <- tolower(gbm.genes[,i])
+  }
+  
+  # get module name
+  module.name <- colnames(gbm.genes[i]) 
+  
+  # assign to list
+  gbm.list[[module.name]] <- gbm.genes[!is.na(gbm.genes[ ,i]) ,i]
+}
+
+# compute jaccard similarity
+j.mat <- jaccardSimilarityMatrix(gbm.genes, assert.unique = T)
+
+# plot heatmap
+if (print.inline){
+  pheatmap::pheatmap(j.mat, 
+                   main = "GBM Meta-Module Similarities",
+                   color  = viridis::inferno(20))
+}
+
+
+```
+
+```{r compute module scores}
+
+
+module.scores <- matrix(ncol = length(gbm.list), nrow = ncol(so.query))
+
+for (i in 1:length(gbm.list)){
+  current.list <- list(g1 = gbm.list[[i]])
+  
+  so.temp <- AddModuleScore(
+    so.query,
+    features = current.list,
+    pool = NULL,
+    nbin = 17,
+    ctrl = 100,
+    k = FALSE,
+    assay = current.assay,
+    name = "ModuleScore",
+    seed = 1,
+    search = FALSE
+  )
+  
+  module.scores[ ,i] <- so.temp@meta.data[["ModuleScore1"]]
+}
+
+colnames(module.scores) <- names(gbm.list)
+rownames(module.scores) <- rownames(so.query@meta.data)
+rm(so.temp)
+
+
+
+MES.score <- apply(module.scores[ ,c("MES1", "MES2")], 1, mean)
+NPC.score <- apply(module.scores[ ,c("NPC1", "NPC2")], 1, mean)
+
+pooled.scores <- cbind(MES.score, NPC.score)
+colnames(pooled.scores) <- c("MES", "NPC")
+module.scores <- cbind(module.scores, pooled.scores)
+
+```
+
+```{r plot module scores, fig.width=7, fig.height=7}
+
+# heatmap
+if (print.inline){
+  pheatmap::pheatmap(module.scores, show_rownames = F)
+}
+
+
+# UMAP
+umap.x <- so.query@reductions[["umap"]]@cell.embeddings[ ,1]
+umap.y <- so.query@reductions[["umap"]]@cell.embeddings[ ,2]
+
+plt.umap.list <- list()
+
+for (i in 1:length(gbm.list)){
+  
+  module.name <- names(gbm.list)[i]
+  
+  plt.umap.list[[module.name]] <- pseudotime.UMAP(
+    x = umap.x,
+    y = umap.y,
+    module.scores[ ,i],
+    pt.size = 0.9,
+    pt.alpha = 1,
+    x.lab = "UMAP 1",
+    y.lab = "UMAP 2") + 
+    theme_miko(legend = F) + 
+    viridis::scale_color_viridis(module.name, option = "B") + 
+    ggtitle(module.name) + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          axis.title.x=element_blank(),
+          axis.text.x=element_blank(),
+          axis.ticks.x=element_blank(),
+          axis.title.y=element_blank(),
+          axis.text.y=element_blank(),
+          axis.ticks.y=element_blank())
+  
+}
+
+if (print.inline){
+  # , fig.width=7, fig.height=7
+  cowplot::plot_grid(plotlist = plt.umap.list, ncol = 3)
+}
+
+
+
+```
+
+```{r}
+
+cellCycleScores <- function(so, which.species = "Hs", override.existing.scores = F){
+  
+  
+  do.scoring <- F
+  if (!("Phase" %in% colnames(so.query@meta.data))){
+    do.scoring <- T
+  } else {
+    if (override.existing.scores) do.scoring <- T
+  }
+  
+  if (do.scoring){
+    
+    warning("Scoring cell cycle...")
+    
+    # get cell cycle genes
+    s.genes <- cc.genes$s.genes
+    g2m.genes <- cc.genes$g2m.genes
+    
+    # ensure correct species
+    if (which.species == "Mm"){
+      s.genes <-  firstup(s.genes)
+      g2m.genes <-  firstup(g2m.genes)
+    } else if (which.species == "Hs"){
+      s.genes <-  toupper(s.genes)
+      g2m.genes <-  toupper(g2m.genes)
+    }
+    
+    # score cell cycle
+    so <- CellCycleScoring(so, s.features = s.genes, g2m.features = g2m.genes, set.ident = F)
+    
+  } else {
+    warning("Cell cycle not scored...")
+  }
+  
+  
+  # return seurat object
+  return(so)
+}
+
+
+  
+```
+
+```{r 2D representation of malignant cell states, fig.width=6, fig.height=5}
+
+# Note: 
+# for hybrid scoring, create variable in module.scores object and specify subset using class.names list. 
+
+# subset module scores
+class.names <- list(
+  OPC = "OPC",
+  NPC = "NPC",
+  AC = "AC",
+  MES = "MES"
+)
+
+
+ms <- module.scores[ ,unlist(class.names)]
+opc_npc.subset <- c(class.names$OPC, class.names$NPC)
+ac_mes.subset <- c(class.names$AC, class.names$MES)
+
+# define y-axis
+SC_opc_npc_max <- apply(ms[,opc_npc.subset], 1, function(x) max(x))
+SC_ac_mes_max <- apply(ms[,ac_mes.subset], 1, function(x) max(x))
+
+# y-axis value
+D.y <- SC_opc_npc_max-SC_ac_mes_max
+
+# define y axis
+# x-axis sign class
+D.y.sign <- sign(D.y)
+
+# D > 0 class
+Dpos.x <- log((abs(ms[,class.names$NPC] - ms[,class.names$OPC]) + 1), base = 2)
+Dpos.x.class <- Dpos.x.dif <- ms[,class.names$NPC] - ms[,class.names$OPC]
+Dpos.x.class[Dpos.x.dif > 0] <- 1  #NPC
+Dpos.x.class[Dpos.x.dif < 0] <- -1 #OPC
+Dpos.x <- Dpos.x*Dpos.x.class
+
+# D < 0 class
+Dneg.x <- log((abs(ms[,class.names$MES] - ms[,class.names$AC]) + 1), base = 2) 
+Dneg.x.class <- Dneg.x.dif <- ms[,class.names$MES] - ms[,class.names$AC]
+Dneg.x.class[Dneg.x.dif > 0] <- 1   #MES
+Dneg.x.class[Dneg.x.dif < 0] <- -1  #AC
+Dneg.x <- Dneg.x*Dneg.x.class
+
+
+# check if cell cycle scores exist - if not, score. 
+so.query <- cellCycleScores(so.query, which.species = which.species)
+
+df.state <- data.frame(D.y, 
+                       Dpos.x, 
+                       Dneg.x, 
+                       D.y.sign, 
+                       barcode = so.query@meta.data[["Barcode"]],
+                       cluster = so.query@meta.data[["seurat_clusters"]],
+                       cell.cycle = so.query@meta.data[["Phase"]])
+
+df.state$y <- df.state$D.y
+df.state$x <- df.state$Dpos.x
+df.state$x[df.state$y < 0] <- df.state$Dneg.x[df.state$y < 0]
+
+# df.state$PRclass <- "P"
+# df.state$PRclass[grepl("R", df.state$barcode)] <- "R"
+
+scale.max <- max(c(abs(df.state$x), abs(df.state$y))) * 1.1
+# 
+# df.state %>%
+#   ggplot(aes(x, y)) + 
+#   geom_point(size = 0.9) + 
+#   xlab("Relative meta-module score\n[log(|SC1-SC2|+1)]") + 
+#   ylab("Relative meta-module score\n[log(|SC1-SC2|+1)]") + 
+#   geom_hline(yintercept = 0, linetype = "dashed") + 
+#   geom_vline(xintercept = 0, linetype = "dashed") + 
+#   labs(title = "Meta-module Scores") + 
+#   xlim(-scale.max, scale.max) + 
+#   ylim(-scale.max, scale.max) + 
+#   theme_miko() 
+
+```
+
+
+```{r, fig.width=6, fig.height=5}
+
+df.labels <- data.frame(x = c(scale.max*0.9,-scale.max*0.9,-scale.max*0.9,scale.max*0.9),
+                        y = c(scale.max,scale.max,-scale.max,-scale.max),
+                        label = c("NPC", "OPC", "AC", "MES"))
+
+color.pal <- "slategray" # lightgrey
+
+plt.metascores <- df.state %>%
+  ggplot(aes(x, y)) + 
+  xlab("Relative meta-module score\n[log(|SC1-SC2|+1)]") + 
+  ylab("Relative meta-module score\n[log(|SC1-SC2|+1)]") + 
+  labs(title = "GBM Subtypes", subtitle = "2D Representation (Neftel 2019)") + 
+  theme_miko() + 
+  theme(panel.border = element_rect(colour = color.pal, fill=NA, size=4)) + 
+  annotate("rect", xmin = -scale.max, xmax = 0, ymin = -scale.max, ymax = scale.max, fill= "white")  + 
+  annotate("rect", xmin = 0, xmax = scale.max, ymin = 0, ymax = scale.max , fill= "white") + 
+  annotate("rect", xmin = 0, xmax = scale.max, ymin = -scale.max, ymax = scale.max, fill= "white") + 
+  annotate("rect", xmin = -scale.max, xmax = 0, ymin = 0, ymax = scale.max, fill= "white") + 
+  geom_hline(yintercept=0, color = color.pal, size=1.5) + 
+  geom_vline(xintercept=0, color = color.pal, size=1.5) + 
+  geom_point(size = 0.9, alpha = 1.0)  + 
+  geom_label(data = df.labels, aes(x = x, y = y, label = label), fill = color.pal, color="white") 
+# facet_wrap(~barcode)
+# , color = PRclass
+
+```
+
+
+```{r GBM state stratified by groups}
+
+# SPECIFY GBM SUBTYPE
+df.state$GBMstate <- NA
+df.state$GBMstate[df.state$x > 0 & df.state$y > 0] <- "NPC"
+df.state$GBMstate[df.state$x > 0 & df.state$y < 0] <- "MES"
+df.state$GBMstate[df.state$x < 0 & df.state$y > 0] <- "OPC"
+df.state$GBMstate[df.state$x < 0 & df.state$y < 0] <- "AC"
+
+# assign states to seurat object
+so.query$GBMstate <- df.state$GBMstate
+
+# BARPLOTS ################################
+
+plt.cell.cycle.bar <- df.state %>%
+  group_by(GBMstate, cell.cycle) %>%
+  tally() %>%
+  ggplot(aes(x = GBMstate, y = n, fill = cell.cycle)) + 
+  geom_bar(stat = "identity", position = "fill") + 
+  theme_miko(legend = T) + 
+  xlab("GBM State") + 
+  ylab("Relative Frequency") + 
+  labs(title = "Cell Cycle Phase",
+       subtitle = "Distribution") + 
+  ggthemes::scale_fill_tableau()
+
+
+plt.cluster.bar <- df.state %>%
+  group_by(GBMstate, cluster) %>%
+  tally() %>%
+  ggplot(aes(x = cluster, y = n, fill = GBMstate)) + 
+  geom_bar(stat = "identity", position = "fill") + 
+  theme_miko(legend = T) + 
+  xlab("Cluster ID") + 
+  ylab("Relative Frequency") + 
+  labs(title = "GBM Subtype Characteristics",
+       subtitle = "Cluster by GBM Subtype") +
+  ggthemes::scale_fill_ptol()
+
+# plt.barcode.bar <- 
+
+plt.barcode.bar <- df.state %>%
+  group_by(GBMstate, barcode) %>%
+  tally() %>%
+  ggplot(aes(x = barcode, y = n, fill = GBMstate)) + 
+  geom_bar(stat = "identity", position = "fill") + 
+  theme_miko(legend = T) + 
+  xlab("Barcode/Sample") + 
+  ylab("Relative Frequency") + 
+  labs(title = "GBM Subtype Characteristics",
+       subtitle = "Barcode by GBM Subtype") + 
+  ggthemes::scale_fill_ptol() + 
+  theme(axis.text.x = element_text(angle = 35, vjust = 1, hjust=1))
+
+# UMAPs ################################
+plt.umap_by_state <- cluster.UMAP(
+  so.query,
+  group.by = "GBMstate",
+  x.label = "UMAP 1",
+  y.label = "UMAP 2",
+  plot.name = "GBM Subtypes",
+  include.labels = F,
+  reduction = "umap"
+) + labs(subtitle = "UMAP") + 
+  ggthemes::scale_color_ptol() + 
+  theme_miko(legend = T)
+
+plt.umap_by_cc <- cluster.UMAP(
+  so.query,
+  group.by = "Phase",
+  x.label = "UMAP 1",
+  y.label = "UMAP 2",
+  plot.name = "Cell Cycle Phase",
+  include.labels = F,
+  reduction = "umap"
+) + labs(subtitle = "UMAP") + 
+  ggthemes::scale_color_tableau() + 
+  theme_miko(legend = F)
+
+# COMBINE PLOTS  ################################
+
+plt.cc.combo <-   cowplot::plot_grid(plt.umap_by_cc, plt.cell.cycle.bar)
+plt.bc.combo <-   cowplot::plot_grid(plt.umap_by_barcode, plt.barcode.bar)
+
+
+plt.metastate.combo1 <- cowplot::plot_grid(plt.umap_by_state, plt.metascores)
+
+plt.metastate.combo2 <- cowplot::plot_grid(plt.umap_by_cluster + theme_miko(legend = F),
+                                           plt.umap_by_state + theme_miko(legend = T)
+                                          )
+plt.metastate.combo2 <- cowplot::plot_grid(plt.metastate.combo2, plt.cluster.bar, ncol = 1)
+
+
+
+
+```
+
+
+```{r}
+
+e.mat <- getExpressionMatrix(so.query, which.data = "data")
+which.genes <- c("EGFR", "PDGFRA", "CDK4", "NF1")
+e.mat.sub <- t(e.mat[rownames(e.mat) %in% which.genes, ])
+
+
+df.state <- bind_cols(df.state, data.frame(e.mat.sub))
+
+df.state.long <- pivot_longer(df.state, cols = which.genes)
+
+
+plt.expression <- df.state.long %>%
+  group_by(GBMstate) %>%
+  ggplot(aes(x = GBMstate, y = value, fill = GBMstate)) +
+  geom_boxplot() +
+  theme_miko()+ 
+  ggthemes::scale_fill_ptol() + 
+  facet_wrap(~name) + 
+  xlab("GBM Subtype") + ylab("Expression") + 
+  labs(title= "Markers of Interest", subtitle = "GBM subtype-stratified expression")
+
+if (print.inline){
+  print(plt.expression)
+}
+
+```
+
+
+1) cluster UMAP
+===================================== 
+
+### UMAP
+
+```{r overview map, fig.width=10, fig.height=4}
+
+  print(plt.umap.overview)
+
+
+
+```
+
+2) Meta-Modules
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Subtype Classification
+
+```{r, fig.width=9, fig.height=4}
+
+plt.metastate.combo1
+
+```
+
+### Modular Activity
+
+```{r,  fig.width=7, fig.height=7}
+
+  cowplot::plot_grid(plotlist = plt.umap.list, ncol = 3)
+  
+```
+
+### Jaccard Similarity
+
+```{r js map}
+
+  pheatmap::pheatmap(j.mat, 
+                   main = "GBM Meta-Module Similarities",
+                   color  = viridis::inferno(20))
+```
+
+3) Stratified Analyses
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Cell Cycle
+
+```{r, fig.width=9, fig.height=4}
+
+plt.cc.combo
+
+```
+
+### Clusters
+
+```{r, fig.width=9, fig.height=7}
+
+plt.metastate.combo2
+
+```
+
+### Barcodes
+
+```{r, fig.width=11, fig.height=4}
+
+plt.bc.combo
+
+```
+
+4) Expression Plots
+===================================== 
+
+### Markers of Interest
+
+```{r}
+
+plt.expression
+
+```
+
+```{r finalize log}
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+
+df.log_Module_28 <- df.log
+
+```
+
+```{r ph10,  echo = FALSE, eval = TRUE}
+
+try({
+  out1 <- flex.multiTabLogs(module.logs)
+}, silent = T)
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+Log (Module 28)
+===================================== 
+
+```{r table.log_current}
+knitr::kable(df.log_Module_28)
+```
+
+

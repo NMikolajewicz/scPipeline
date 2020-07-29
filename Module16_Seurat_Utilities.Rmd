@@ -1,0 +1,945 @@
+---
+title: "Module16_seurat_utilities"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r setup, include=FALSE}
+
+# Function 1: annotate clusters or labels
+# Function 2: subset data (while annotaing subsetted data)
+
+# clear global enviroment
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+packages2load <- c("Seurat", 
+                   "plyr", "dplyr", "tidyr", "reshape2", "RColorBrewer", "ggplot2", "gridExtra", 
+                   "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", "ggrepel", "scales", 
+                   "future")
+
+# load packages
+lapply(packages2load, library, character.only = TRUE)
+
+```
+
+
+```{r check available input files}
+
+show.available.files <- FALSE
+if (show.available.files){
+  list.files("Preprocessed Datasets/")
+}
+
+```
+
+```{r parameter specification}
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed Datasets/"
+# dir.figures <- "Result Figures/"
+
+# specify inputs and outputs
+# input.file <- "Module2_CCA_GBM_invivo_invitro_010320.Rdata"
+# output.file <- "Module2_CCA_GBM_invivo_invitro_GBMonly_010320.Rdata" # can be same as input, or specify new. 
+
+input.file <- "Module2_Renca_cell_nuc_sci_T12_4000ds_Celsius_integrated_240220.Rdata"
+output.file <- "Module2_Renca_cell_nuc_sci_T12_4000ds_Celsius_v2_integrated_240220.Rdata"
+
+# options
+field.source.options <- c("seurat", "csv") # if csv, input.field automatically updated to csv.barcode
+input.field.options <- c("Barcode", "seurat_clusters", "cell.barcode", "csv.barcode", NA) # cell.barcode = matrix row names
+
+# csv file that maps cell barcode to condition
+csv.files <- list(
+  UHN.barcodes.all = "Raw Datasets/Barcode Labels/UHN_GBM_allBarcodes.csv",
+  UHN.barcodes.0231 = "Raw Datasets/Barcode Labels/UHN_GBM_0231_barcodes.csv",
+  UHN.barcodes.0238 = "Raw Datasets/Barcode Labels/UHN_GBM_0238_barcodes.csv"
+) # e.g., provide as input: csv.file = csv.files[["UHN.barcodes.all"]]
+
+# analysis specifications
+analysis.specification <- list(
+  
+  # function type: annotate, subset 
+  function.type = c("annotate"),  
+  
+  # specify source of input field (see field.source.options)
+  field.source = field.source.options[1], # 1: seurat; 2: csv 
+  
+  # field to subset/annotate/composition (see input.field.options)
+  input.field = input.field.options[2], # 1: barcode, 2: cluster, 3:cell.barcode, 4: csv.barcode
+  
+  # new field name (character)
+  # NA is also accepted
+  output.field = "Barcode",
+  
+  # input group names
+  # if group specified as "other" (or left unspecified), label applied to non-labeled groups
+  # 'other' labels are omitted if function.type == subset
+  # list names are new annotations
+  # if csv source, list entires are csv header names
+  grouping = list(Renca = "invit"),
+  
+
+  csv.file = NA,
+  
+  # seurat_clusters are set to specified cluster.resolution
+  cluster.resolution = 0.4,
+  
+  # Only if  function.type == subset, specify whether to renormalized, dim reduction and cluster
+  subset.reanalyze  = F,
+  
+  # match groups exactly (logical flag)
+  # If TRUE, entire string must match
+  # If FALSE, exact substring match is permitted
+  match.exact = F
+)
+
+# grouping = list(malignant = c(0,4,8,10,18,19,29,32,33,35,36)), 
+
+  # grouping = list(malignant = c(0,4,8,10,18,19,29,32,33,35,36),
+  #                 non.malignant = "other"),
+
+# print inline
+print.inline <- F
+
+# save results
+save.Rdata.flag <- T
+
+
+```
+
+
+```{r function to rename CellTypes to Barcode (fix artefact of earlier analysis pipeline)}
+
+fix.barcode.label <- function (so){
+  # merge CellType and Barcode, if necessary
+  meta.data.names <- names(so@meta.data)
+  
+  if (("CellType" %in% meta.data.names) & ("Barcode" %in% meta.data.names)){
+    if (DefaultAssay(so) == "integrated"){
+      barcode <- so@meta.data[["Barcode"]]
+      celltype <- so@meta.data[["CellType"]]
+      barcode[is.na(barcode)] <- celltype[is.na(barcode)] 
+    } else {
+      barcode <- so@meta.data[["CellType"]]
+    }
+  } else if (!("CellType" %in% meta.data.names) & ("Barcode" %in% meta.data.names)) {
+    barcode <- so@meta.data[["Barcode"]]
+  } else if (("CellType" %in% meta.data.names) & !("Barcode" %in% meta.data.names)) {
+    barcode <- so@meta.data[["CellType"]]
+    
+  } else {stop("Problem with CellType/Barcode metadata detected. Troubleshooting required")}
+  
+  so@meta.data[["Barcode"]] <- barcode
+  
+  return(so)
+}
+
+```
+
+```{r load data, message=FALSE, warning=FALSE}
+
+# load query dataset
+load(paste(dir.preprocessed, input.file, sep = ""))
+so <- fix.barcode.label(so)
+so.query <- so
+rm(so)
+
+current.assay <- DefaultAssay(so.query)
+
+```
+
+
+
+```{r prep gene list}
+
+# TODO drop .N suffix in ensembl IDs
+
+if (exists("gNames.list_master")){
+  gNames.list <- NULL
+  for (i in 1:length(gNames.list_master)){
+    gNames.list <- c(gNames.list, gNames.list_master[[i]] )
+  }
+  
+  # gNames.df <-  data.frame(n = as.vector(names(gNames.list)), g = as.vector(gNames.list))
+  gNames.df <-  data.frame(n = gsub("\\..*","",as.vector(names(gNames.list))), g = as.vector(gNames.list))
+  gNames.df <- unique(gNames.df)
+  gNames.list <- as.vector(gNames.df$g)
+  names(gNames.list) <- as.vector(gNames.df$n)
+} 
+
+# ensure gene list is available
+stopifnot(exists("gNames.list"))
+```
+
+```{r handle csv input, warning=FALSE}
+
+field.source <- analysis.specification[["field.source"]]
+stopifnot(field.source %in% field.source.options)
+
+if (field.source == "csv"){
+  csv.file <- analysis.specification[["csv.file"]]
+  csv.input <- read.csv(csv.file, header = T)
+  colnames(csv.input) <- gsub("ï..", "", colnames(csv.input))
+  if (ncol(csv.input) > 1) {
+    csv.input.long <- tidyr::pivot_longer(csv.input, cols = 1:ncol(csv.input))
+  } else {csv.input.long <- csv.input}
+  
+  analysis.specification[["input.field"]] <- "csv.barcode"
+  input.field <-analysis.specification[["input.field"]] 
+  output.field <- analysis.specification[["output.field"]]
+  
+  colnames(csv.input.long) <- c(output.field, input.field)
+
+  # Additional input.field filtering can be incldued here
+  csv.input.long[ ,input.field] <- gsub("-.*", "", as.vector(dplyr::pull(csv.input.long, input.field)))
+  
+  # head(csv.input.long)
+  
+  n.total <- length(as.vector(dplyr::pull(csv.input.long, input.field)))
+  n.unique <- length(unique(as.vector(dplyr::pull(csv.input.long, input.field))))
+  
+  if (n.total != n.unique)  warning("duplicates detected in csv input.field")
+  
+  
+  # ASSUMPTION - BARCODES ARE TAGGED WITH CONDITION SPECIFIC SUFFIX (SEE UHN-GBM DATA FOR EXAMPLE)
+  groups <- rownames(so.query@meta.data)
+  grp.suffix <- (gsub(".*-", "", groups))
+  groups.trim <- gsub("-.*", "", groups)
+  
+  df.groups <- data.frame(
+    groups = groups,
+    suffix = grp.suffix,
+    trim = groups.trim)
+  
+  df.groups.tally <- df.groups %>%
+    group_by(suffix) %>%
+    tally()
+
+  u.suffix <- unique(grp.suffix)
+
+  # match groups 
+  u.csv <- unique(as.vector(dplyr::pull(csv.input.long, output.field)))
+  
+  csv.input.matched <- NULL
+      
+  df.groups$input <- NA
+  df.groups$output <- NA
+  for (i in 1:length(u.csv)){
+    
+  csv.input.subset <- csv.input.long %>% filter(get(output.field) == u.csv[i])
+
+  match.n <- c()
+  for (j in 1:length(u.suffix)){
+      match.ind <- match(df.groups$trim[df.groups$suffix == u.suffix[j]], as.vector(dplyr::pull(csv.input.subset, input.field)))
+  match.ind <- match.ind[!is.na(match.ind)]
+  match.n[j] <- length(match.ind)
+  }
+  j <- which.max(match.n)
+  match.ind <- match(df.groups$trim[df.groups$suffix == u.suffix[j]], as.vector(dplyr::pull(csv.input.subset, input.field)))
+
+  df.groups$input[df.groups$suffix == u.suffix[j]] <- as.vector(dplyr::pull(csv.input.subset, input.field))[match.ind]
+  df.groups$output[df.groups$suffix == u.suffix[j]] <- as.vector(dplyr::pull(csv.input.subset, output.field))[match.ind]
+
+  }
+  
+  so.query@meta.data[[input.field]] <- df.groups$output
+  
+  
+  # df.groups %>%
+  #   group_by(output) %>%
+  #   tally()
+  
+
+}
+
+```
+
+
+
+```{r check analysis specifications}
+
+warning.list <- list()
+
+# check that function.type is valid
+function.type <- analysis.specification[["function.type"]]
+stopifnot(function.type %in% c("annotate", "subset", "composition"))
+
+# ensure input.field is available
+input.field <- analysis.specification[["input.field"]]
+if (input.field != "cell.barcode") stopifnot(input.field %in% names(so.query@meta.data))
+
+
+# check without output.field is overwritting exisitng data
+output.field <- analysis.specification[["output.field"]]
+if((output.field %in% names(so.query@meta.data))) {
+  n.w.entries <- length(warning.list)
+  warning.list[[n.w.entries+1]] <- "existing output.field was overwritten"
+} else if (is.na(output.field)){
+  output.field <- paste(input.field, "_v2", sep = "")
+}
+
+# check clustering
+cluster.resolution <- analysis.specification[["cluster.resolution"]]
+current.assay <- DefaultAssay(so.query)
+current.cluster <- paste(current.assay, "_snn_res.", cluster.resolution, sep = "")
+if (!(current.cluster %in% so.query@meta.data)){
+  so.query <- FindClusters(object = so.query, 
+                           resolution = cluster.resolution, verbose = 0, algorithm = 1, modularity.fxn = 1)
+} 
+so.query@meta.data[["seurat_clusters"]] <- so.query@meta.data[[current.cluster]]
+
+
+# get matching method
+match.exact <- analysis.specification[["match.exact"]]
+
+# check grouping
+grouping <- analysis.specification[["grouping"]]
+group.names <- names(grouping) 
+
+# get unique groups
+if (input.field != "cell.barcode") {
+groups <- so.query@meta.data[[input.field]]
+} else if (input.field == "cell.barcode") {
+  groups <- rownames(so.query@meta.data)
+  so.query@meta.data[[input.field]] <- groups
+}
+
+u.groups <- as.vector(unique(groups))
+
+
+if (input.field == "seurat_clusters"){
+  numeric.flag <- T
+  u.groups <- as.numeric(u.groups)
+  u.groups <- as.character(u.groups[order(u.groups)])
+} else {numeric.flag <- F}
+
+
+# ensure groups are valid and flag 'other' group
+all.groups <- c()
+which.other <- c()
+
+# match exact
+if (match.exact == T){
+  
+  for (i in 1:length(group.names)){
+    group.membership <- grouping[[group.names[i]]]
+    if (group.membership != "other"){
+      if (numeric.flag) {
+        group.membership <- as.character(as.numeric(group.membership)[order(as.numeric(group.membership))])
+      }
+      stopifnot(sum(group.membership %in% u.groups) == length(group.membership))
+      grouping[[group.names[i]]] <- group.membership
+      all.groups <- c(all.groups, group.membership)
+    } else if (group.membership == "other"){
+      which.other <- group.names[i]
+    }
+  }
+  
+  # match can be substring of entire string (not recommended for numericals)
+} else if (match.exact == F){
+  
+  for (i in 1:length(group.names)){
+    group.membership <- grouping[[group.names[i]]]
+    if (group.membership != "other"){
+      pattern <- paste(as.vector(group.membership), collapse="|")
+      pattern <- gsub(" ", "", pattern)
+      which.groups <- grepl(pattern, u.groups)
+      
+      grouping[[group.names[i]]] <- u.groups[which.groups]
+      all.groups <- c(all.groups, u.groups[which.groups])
+    } else if (group.membership == "other"){
+      which.other <- group.names[i]
+    }
+  }
+  
+}
+
+# get group memberships for other group
+if ((sum(all.groups %in% u.groups) == length(u.groups)) & !is.null(which.other)){
+  n.w.entries <- length(warning.list)
+  warning.list[[n.w.entries+1]] <- "no groups belong to 'other' designation"
+  grouping <- group.names[!(group.names %in% which.other)]
+} else if ((sum(all.groups %in% u.groups) < length(u.groups))) {
+  other.membership <- u.groups[!(u.groups %in% all.groups )]
+  if (!is.null(which.other)){
+    grouping[[which.other]] <- other.membership
+  } else {
+    grouping[["other"]] <- other.membership
+  }
+  
+}
+
+if (function.type == "annotate"){
+  other.omit.flag <- F
+} else if (function.type == "subset"){
+  other.omit.flag <- T
+  names(grouping)[names(grouping)  %in% "other"] <- "omitted"
+} 
+
+# check reanalysis flag
+if (function.type == "subset") {
+  subset.reanalyze <- analysis.specification[["subset.reanalyze"]]
+  stopifnot(is.logical(subset.reanalyze))
+} else if (function.type == "annotate"){
+  subset.reanalyze <- F
+}  
+
+
+```
+
+
+```{r analysis log}
+
+# Module
+df.log <- data.frame()
+df.log[nrow(df.log)+1, 1] <- as.character("Module")
+df.log[nrow(df.log), 2] <- as.character("")
+df.log[nrow(df.log), 3] <- as.character("16, Utility Functions")
+colnames(df.log) <- c("Parameter", "Variable Name", "Value")
+
+# User 
+df.log[nrow(df.log)+1, 1] <- as.character("User")
+df.log[nrow(df.log), 2] <- as.character("Sys.getenv('USERDOMAIN')")
+df.log[nrow(df.log), 3] <- as.character(Sys.getenv("USERDOMAIN"))
+
+# Date
+df.log[nrow(df.log)+1, 1] <- as.character("Date")
+df.log[nrow(df.log), 2] <- as.character("Sys.time()")
+df.log[nrow(df.log), 3] <- as.character(Sys.time())
+
+# Input Data
+df.log[nrow(df.log)+1, 1] <- as.character("Input Data (.Rdata)")
+df.log[nrow(df.log), 2] <- as.character("input.file")
+df.log[nrow(df.log), 3] <- as.character(input.file)
+
+# Output Data
+if (save.Rdata.flag){
+  df.log[nrow(df.log)+1, 1] <- as.character("Output Data (.Rdata)")
+  df.log[nrow(df.log), 2] <- as.character("output.file")
+  df.log[nrow(df.log), 3] <- as.character(output.file)
+}
+
+# Function performed
+df.log[nrow(df.log)+1, 1] <- as.character("Function Performed")
+df.log[nrow(df.log), 2] <- as.character("analysis.specification[['function.type']]")
+df.log[nrow(df.log), 3] <- as.character(analysis.specification[['function.type']])
+
+# Input field
+df.log[nrow(df.log)+1, 1] <- as.character("Input Field")
+df.log[nrow(df.log), 2] <- as.character("analysis.specification[['input.field']]")
+df.log[nrow(df.log), 3] <- as.character(analysis.specification[['input.field']])
+
+# Output Field
+df.log[nrow(df.log)+1, 1] <- as.character("Output Field")
+df.log[nrow(df.log), 2] <- as.character("analysis.specification[['output.field']]")
+df.log[nrow(df.log), 3] <- as.character(analysis.specification[['output.field']])
+
+# group names
+df.log[nrow(df.log)+1, 1] <- as.character("Group Names")
+df.log[nrow(df.log), 2] <- as.character("names(grouping)")
+df.log[nrow(df.log), 3] <- as.character(paste(names(grouping), collapse = ", "))
+
+# group members
+for (i in 1:length(grouping)){
+  cur.grouping.name <- names(grouping)[i]
+  cur.grouping.members <- grouping[[i]]
+  
+  df.log[nrow(df.log)+1, 1] <- as.character(paste(cur.grouping.name, " Membership", sep = ""))
+  df.log[nrow(df.log), 2] <- as.character("grouping[[i]]")
+  df.log[nrow(df.log), 3] <- as.character(paste(cur.grouping.members, collapse = ", "))
+}
+
+# cluster resolution
+df.log[nrow(df.log)+1, 1] <- as.character("Cluster Resolution")
+df.log[nrow(df.log), 2] <- as.character("analysis.specification[['cluster.resolution']]")
+df.log[nrow(df.log), 3] <- as.character(analysis.specification[['cluster.resolution']])
+
+# Omission Flag
+df.log[nrow(df.log)+1, 1] <- as.character("'Other' Data Omitted")
+df.log[nrow(df.log), 2] <- as.character('other.omit.flag')
+df.log[nrow(df.log), 3] <- as.character(other.omit.flag)
+
+# reanalysis flag
+if ((function.type == "subset")){
+  df.log[nrow(df.log)+1, 1] <- as.character("Data Subset Reanlyzed")
+  df.log[nrow(df.log), 2] <- as.character("analysis.specification[['subset.reanalyze']]")
+  df.log[nrow(df.log), 3] <- (analysis.specification[['subset.reanalyze']])
+}
+
+# exact match
+  df.log[nrow(df.log)+1, 1] <- as.character("Exact Membership Matching")
+  df.log[nrow(df.log), 2] <- as.character("analysis.specification[['match.exact']]")
+  df.log[nrow(df.log), 3] <- as.character(analysis.specification[['match.exact']])
+  
+# save flag
+  df.log[nrow(df.log)+1, 1] <- as.character("Results Saved")
+  df.log[nrow(df.log), 2] <- as.character("save.Rdata.flag")
+  df.log[nrow(df.log), 3] <- as.character(save.Rdata.flag)
+
+
+```
+
+
+```{r}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+if (!exists("df.log_Module_16") & (input.file == output.file )) {
+     stop("Cannot overwrite original seurat object")
+}
+
+```
+
+
+```{r annotation function}
+
+
+# if (function.type %in% c("annotate", "subset")){
+  
+  input.md <- as.character(as.vector(groups))
+  output.md <- input.md
+  
+  grouping.ID <- list()
+  
+  # annotate cells
+  for (i in 1:length(grouping)){
+    group.name <- names(grouping)[i]
+    output.md[input.md %in% grouping[[group.name]]] <- group.name
+    
+    grouping.ID[[group.name]] <- colnames(so.query)[input.md %in% grouping[[group.name]]]
+  }
+  
+  # save annotations
+  so.query@meta.data[[output.field]] <- output.md
+  
+  # get corresponding cell barcodes
+  ID.lengths <- unlist(lapply(grouping.ID, function(x){length(unlist(x))}))
+  max.length <- max(ID.lengths)
+  grouping.ID.df <- data.frame()
+  
+  # save barcodes in dataframe
+  for (i in 1:length(grouping)){
+    grouping.ID.df[seq(1, max.length), i] <- NA
+    grouping.ID.df[seq(1, ID.lengths[i]), i]  <- grouping.ID[[i]]
+  }
+  colnames(grouping.ID.df) <- names(grouping)
+  
+  # plot umap by new group
+  if (input.field == "seurat_clusters"){
+    plt.original.umap.input <- DimPlot(so.query, reduction = "umap", 
+                                       group.by = input.field, label = T)  + 
+      ggtitle(label = "Original UMAP (pre-annotation)") + 
+      xlab("UMAP 1") + ylab("UMAP 2") + NoLegend()
+  } else if (input.field == "cell.barcode"){
+        plt.original.umap.input <- DimPlot(so.query, reduction = "umap", 
+                                       group.by = input.field)  + 
+      ggtitle(label = "Original UMAP (pre-annotation)") + 
+      xlab("UMAP 1") + ylab("UMAP 2") + NoLegend()
+    
+  }   else {
+    plt.original.umap.input <- DimPlot(so.query, reduction = "umap", 
+                                       group.by = input.field)  + 
+      ggtitle(label = "Original UMAP (pre-annotation)") + 
+      xlab("UMAP 1") + ylab("UMAP 2")
+  }
+
+  
+  plt.original.umap.output <- DimPlot(so.query, reduction = "umap", 
+                                      group.by = output.field)  + 
+    ggtitle(label = "Original UMAP (post-annotation)") + 
+    xlab("UMAP 1") + ylab("UMAP 2")
+  
+  # print resulting table
+  if (print.inline){
+    datatable(grouping.ID.df, filter="top", extensions = 'Buttons',
+              options = list(pageLength = 10, 
+                             autoWidth = TRUE,
+                             dom = 'Bfrtip',
+                             buttons = c('copy', 'csv', 'pdf')))
+    print(plt.original.umap.input)
+    print(plt.original.umap.output)
+  }
+  
+  # }
+# }
+```
+
+```{r composition function}
+
+
+# long2wide <- function(df){
+#   
+#   # create wide version (for output to excel), reorder factors, and get basic descriptive stats
+#   df.wide <- dcast(df, cluster_membership ~ predicted_labels, value.var = "n")
+#   df.wide[is.na(df.wide)] <- 0
+#   reordered_factors <- order(as.numeric(as.vector(df.wide$cluster_membership)))
+#   df.wide <- df.wide[reordered_factors, ]
+#   rownames(df.wide) <- df.wide$cluster_membership
+#   df.wide <- as.data.frame(t(df.wide))
+#   df.wide <- df.wide[2:dim(df.wide)[1], ]
+#   df_id_rnames <- rownames(df.wide)
+#   colnames(df.wide) <- paste("cluster", colnames(df.wide), sep = "")
+#   df.wide <- data.frame(apply(df.wide, 2, function(x) as.numeric(as.character(x))))
+#   df.wide[dim(df.wide)[1]+1, ] <- apply(df.wide, 2, sum)
+#   rownames(df.wide) <- c(df_id_rnames, "TOTAL")
+#   df.wide[, dim(df.wide)[2]+1] <- apply(df.wide, 1, sum)
+#   colnames(df.wide)[dim(df.wide)[2]] <- "TOTAL"
+#   
+#   return(df.wide)
+# }
+
+plot.cluster_composition <- function(df.cluster_annotations, other_threshold = 0.05, set_color = 2, lab_color = NULL, label_order = NULL){
+  levels(df.cluster_annotations$predicted_labels) <- c(levels(df.cluster_annotations$predicted_labels), "other")
+  df.cluster_annotations$predicted_labels[df.cluster_annotations$freq < other_threshold] <- as.character("other")
+  
+  # create graph to visualize representation across clusters
+  u_predictions <- unique(df.cluster_annotations$predicted_labels)
+  n_subgroups <- length(u_predictions)
+  
+  if (is.null(lab_color)){
+    color_count <- max(n_subgroups)
+    my_cols = colorRampPalette(brewer.pal(8, paste("Set", set_color, sep = "")))(color_count)
+  } else {
+    my_cols <- lab_color
+  }
+  
+  if (is.null(label_order)){
+    label_order <- unique(df.cluster_annotations$predicted_labels)
+  } 
+  
+  
+  # ensure that clusters are ordered numerically
+  reordered_clusters <- order(as.numeric(as.vector(df.cluster_annotations$cluster_membership)))
+  df.cluster_annotations <- df.cluster_annotations[reordered_clusters, ]
+  df.cluster_annotations$cluster_membership <- as.numeric(as.vector(df.cluster_annotations$cluster_membership))
+  cluster_chart_labels <- unique(df.cluster_annotations$cluster_membership)
+  
+  plt.cluster_composition <- ggplot(df.cluster_annotations, 
+                                    aes(x = cluster_membership, fill = factor(predicted_labels, levels = label_order), 
+                                        y = freq)) +
+    geom_bar(position = "fill", stat = "identity") + 
+    scale_x_continuous("Cluster", labels = as.character(cluster_chart_labels), breaks = cluster_chart_labels) + 
+    scale_fill_manual(values = my_cols) + 
+    xlab("Cluster ID") + ylab("Cluster Representation") + ggtitle("Cluster Annotations") + 
+    theme(legend.title = element_blank()) 
+  
+  return(plt.cluster_composition)
+}
+
+
+  # get barcode labels and clusters
+  cluster_membership <- as.vector(so.query@meta.data[["seurat_clusters"]])
+  input_labels <- as.vector(so.query@meta.data[[input.field]])
+  output_labels <- as.vector(so.query@meta.data[[output.field]])
+  
+  df.input.group <- data.frame(cluster_membership, input_labels)
+  df.output.group <- data.frame(cluster_membership, output_labels)
+  
+  # tally up cluster compositions
+  df.input.group.tally <- df.input.group %>% 
+    group_by(cluster_membership, input_labels) %>%
+    tally() %>% 
+    mutate(freq = n / sum(n)) 
+  
+  df.output.group.tally <- df.output.group %>% 
+    group_by(cluster_membership, output_labels) %>%
+    tally() %>% 
+    mutate(freq = n / sum(n)) 
+  
+  # regroup input group by output groups
+  u_groups_input <- as.vector(unique(df.input.group.tally$input_labels))
+  u_groups_output <- as.vector(unique(df.output.group.tally$output_labels))
+  
+  if (length(group.names) <= 5){
+    palette.list <- c("Reds", "Blues", "Greens", "Oranges", "Greys")
+  } else {palette.list <- brewer.pal(length(u_groups_input), "Set1")}
+  
+  u_groups_input.reordered <- c()
+  group.colors.input <- c()
+  group.colors.output <- c()
+  for (i in 1:length(group.names)){
+    match.ind <- grepl(group.names[i], u_groups_input)
+    u_groups_input.reordered <- c(u_groups_input.reordered, u_groups_input[match.ind])
+    cur.colors <- brewer.pal(sum(match.ind), palette.list[i])
+    group.colors.input <- c(group.colors.input,  cur.colors[length(cur.colors): (length(cur.colors)- sum(match.ind)+1)])
+    group.colors.output <- c(group.colors.output,  cur.colors[length(cur.colors)])
+  }
+  
+  # convert long to wide (cell type table)
+  # df.input.group.4wide <- df.input.group.tally
+  # df.output.group.4wide <- df.output.group.tally
+  # colnames(df.input.group.4wide)[colnames(df.input.group.4wide) == "input_labels"] <- "predicted_labels"
+  # df.all_input_groups_wide <- long2wide(df.input.group.4wide)
+  
+  # plot cluster compositio by barcode
+  df.cluster_annotations_input <- df.input.group.tally
+  df.cluster_annotations_output <- df.output.group.tally
+  colnames(df.cluster_annotations_input)[colnames(df.cluster_annotations_input) == "input_labels"] <- "predicted_labels"
+    colnames(df.cluster_annotations_output)[colnames(df.cluster_annotations_output) == "output_labels"] <- "predicted_labels"
+  
+  plt.cluster_composition_pre <- plot.cluster_composition(df.cluster_annotations_input, 
+                                                               other_threshold = 0,
+                                                               lab_color = group.colors.input, 
+                                                               label_order = u_groups_input.reordered)
+  
+    plt.cluster_composition_post <- plot.cluster_composition(df.cluster_annotations_output, 
+                                                               other_threshold = 0,
+                                                               lab_color = group.colors.output, 
+                                                               label_order = group.names)
+  if (print.inline) {
+    print(plt.cluster_composition_pre)
+    print(plt.cluster_composition_post)
+  }
+
+```
+
+
+```{r subset function}
+
+if (function.type == "subset"){
+  input.md <- as.character(as.vector(so.query@meta.data[[input.field]]))
+  which.cells <- input.md %in% as.vector(all.groups)
+  so.subset <- SubsetData(object = so.query, cells = which.cells)
+}
+
+```
+
+```{r reanalyze data subset}
+
+if (subset.reanalyze & function.type == "subset"){
+  
+  # create new seurat object and populate relevant fields
+  so.new <- CreateSeuratObject(
+    counts = so.subset@assays[["RNA"]]@counts,
+    project = paste(so.subset@project.name, "_subset", sep = "")
+  )
+  
+  # add gene symbols as meta data in seurat object
+  mat_ens <- rownames(so.new@assays[["RNA"]])
+  match.id <- match(mat_ens, names(gNames.list)) 
+  # gNames_filtered <- gNames[match.id]
+  
+  # Add gene symbols as meta data that we can use later
+  so.new[["RNA"]] <- AddMetaData( object=so.new[["RNA"]],metadata=names(gNames.list[match.id]),col.name="ENSEMBL");
+  so.new[["RNA"]] <- AddMetaData( object=so.new[["RNA"]],metadata=as.vector(gNames.list[match.id]),col.name="SYMBOL");
+  
+  # Add in inferred organism
+  so.new$Organism <- so.subset@meta.data[["Organism"]]
+  
+  # Specify barcodes
+  so.new$Barcode <- so.subset@meta.data[["Barcode"]]
+  
+  # Specify mito content
+  so.new$percent.mt <- so.subset@meta.data[["percent.mt"]]
+  
+  # Specify feature count
+  so.new$nFeature_RNA <- so.subset@meta.data[["nFeature_RNA"]]
+  
+  # Specify umi count
+  so.new$nCount_RNA <- so.subset@meta.data[["nCount_RNA"]]
+  
+  # Specify other subgroups
+  if ("subset_group" %in% names(so.subset@meta.data)){
+    so.new$subset_group <- so.subset@meta.data[["subset_group"]]
+  }
+  
+  # Specify original groups
+    so.new$original_groups <- so.subset@meta.data[[input.field]]
+  
+  
+  # Specify output group
+  so.new@meta.data[[output.field]] <- so.subset@meta.data[[output.field]]
+  
+  # Normalize Data
+  plan(strategy = "multisession", workers = parallel::detectCores())
+  options(future.globals.maxSize = (20480 * 1024^2) )
+  so.new <- SCTransform(so.new, 
+                    vars.to.regress = "percent.mt", 
+                    verbose = F,
+                    return.only.var.genes = FALSE,
+                    variable.features.n = NULL,
+                    variable.features.rv.th = 1.3)
+
+  # Dimensional reduction
+  nDim <- 30
+  so.new <- RunPCA(so.new, verbose = FALSE)
+  so.new <- FindNeighbors(object = so.new, reduction = "pca", dims = 1:nDim)
+  so.new <- FindClusters(object = so.new, resolution = cluster.resolution, 
+                         verbose = 0, algorithm = 1, modularity.fxn = 1)
+  so.new <- RunUMAP(so.new, dims = 1:nDim)
+  
+  # generate UMAP of reanalyzed subset
+  plt.new.umap <- DimPlot(so.new, reduction = "umap", label = TRUE)  + 
+    ggtitle(label = "Updated UMAP (Cluster IDs)") +
+    xlab("UMAP 1") + 
+    ylab("UMAP 2")
+  
+  plt.new.umap_by_input <- DimPlot(so.new, reduction = "umap",group.by = "original_groups")  + 
+    ggtitle(label = "Updated UMAP (pre-annotation)") +
+    xlab("UMAP 1") + 
+    ylab("UMAP 2")
+  
+  plt.new.umap_by_output <- DimPlot(so.new, reduction = "umap",group.by = output.field)  + 
+    ggtitle(label = "Updated UMAP (post-annotation)") +
+    xlab("UMAP 1") + 
+    ylab("UMAP 2")
+  
+  if (print.inline){
+    print(plt.new.umap)
+    print(plt.new.umap_by_input)
+    print(plt.new.umap_by_output)
+  }
+
+} else if (function.type == "subset") {
+  so.new <- so.subset
+} else {
+  so.new <- so.query
+  warning("new seurat object is copy of input seurat object")
+}
+
+```
+
+
+Annotation Results
+===================================== 
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Original UMAP (pre-annotation)
+```{r plt.original.umap.input}
+if (function.type %in% c("annotate", "subset")) print(plt.original.umap.input)
+```
+
+### Original UMAP (post-annotation)
+```{r plt.original.umap.output}
+if (function.type %in% c("annotate", "subset")) print(plt.original.umap.output)
+```
+
+### Cluster Composition (pre-annotation)
+```{r plt.cluster_composition_pre}
+if (function.type %in% c("annotate", "subset")) print(plt.cluster_composition_pre)
+```
+
+
+### Cluster Composition (post-annotation)
+```{r plt.cluster_composition_post}
+if (function.type %in% c("annotate", "subset")) print(plt.cluster_composition_post)
+```
+
+### Annotation-Stratified Barcodes Table
+```{r datatable barcodes}
+if (function.type %in% c("annotate", "subset")) {
+  datatable(grouping.ID.df, filter="top", extensions = 'Buttons',
+          options = list(pageLength = 50, 
+                         autoWidth = TRUE,
+                         dom = 'Bfrtip',
+                         buttons = c('copy', 'csv', 'pdf')))
+}
+```
+
+Subset Results
+===================================== 
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Updated UMAP (pre-annotation)
+```{r plt.new.umap_by_input}
+if ((function.type == "subset") & subset.reanalyze) print(plt.new.umap_by_input)
+```
+
+### Updated UMAP (post-annotation)
+```{r plt.new.umap_by_output}
+if ((function.type == "subset") & subset.reanalyze) print(plt.new.umap_by_output)
+```
+
+### Updated UMAP (cluster IDs)
+```{r plt.new.umap}
+if ((function.type == "subset") & subset.reanalyze) print(plt.new.umap)
+```
+
+
+```{r}
+
+# specify seurat output
+if (function.type == "annotate"){
+  so <- so.query
+} else if (function.type == "subset"){
+  so <- so.new
+}
+
+```
+
+```{r save analysis log and Rdata results, message=FALSE, warning=FALSE}
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
+df.log[nrow(df.log), 2] <- as.character("elapsed.time")
+df.log[nrow(df.log), 3] <- as.character(elapsed.time)
+
+# ensure existing Module 16 logs are not overwritten
+if (!exists("df.log_Module_16")){
+  df.log_Module_16 <- df.log
+} else if (exists("df.log_Module_16")){
+  df.log_Module_16 <- bind_rows(df.log_Module_16, df.log)
+}
+
+if (save.Rdata.flag == TRUE){
+  # Exported variables
+  df.log[nrow(df.log)+1, 1] <- as.character("Exported Variables")
+  
+  save.var <- c("so", "gNames.list", "df.log_Module_16", module.logs)
+  
+  df.log[nrow(df.log), 2] <- as.character("save.var")
+  df.log[nrow(df.log), 3] <- as.character(paste(save.var, collapse = ", "))
+  
+  save(list = save.var, file = paste(dir.preprocessed, output.file, sep = ""))
+
+}
+
+```
+
+```{r ph10,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out1 <- lapply(seq_along(module.logs), function(i) {
+  
+  module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
+  
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (Module %s)", paste(module.n)))
+  a2 <- knitr::knit_expand(text = "\n=====================================")
+  a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
+  a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
+  a5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+Log (Module 16)
+===================================== 
+
+```{r table.log_current, message=FALSE, warning=FALSE}
+
+knitr::kable(df.log_Module_16)
+
+```
+

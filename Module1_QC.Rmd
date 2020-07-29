@@ -1,0 +1,1582 @@
+---
+title: "scRNAseq: QC and Data Preparation"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+# load packages
+# scMiko::scMikoReload()
+
+library(viridis)        # version 0.5.1
+library(scMiko)         # version 0.1.0
+library(ggpubr)         # version 0.3.0
+library(dplyr)          # version 0.8.5
+library(WGCNA)          # version 1.69
+library(cowplot)        # version 1.0.0
+library(schex)          # version 1.2.0
+library(Seurat)         # version 3.1.5
+library(sctransform)    # version 0.2.1
+library(plyr)           # version 1.8.6
+library(tidyr)          # version 1.0.3
+library(reshape2)       # version 1.4.4
+library(Matrix)         # version 1.2-18
+library(RColorBrewer)   # version 1.1-2
+library(ggplot2)        # version 3.3.0
+library(gridExtra)      # version 2.3
+library(DT)             # version 0.13
+library(flexdashboard)  # version 0.5.1.1
+library(future)         # version 1.17.0
+library(gplots)
+
+# install.packages(c('viridis', 'ggpubr', 'dplyr', 'WGCNA', 'ggVennDiagram', 'cowplot', 'Seurat', 'sctransform', 
+#                    'tidyr', 'plyr', 'reshape2', 'Matrix', 'ggplot2', 'gridExtra', 'DT', 'flexdashboard', 'future'))
+
+# BiocManager::install(c("impute", "AnnotationDbi", "GO.db", "schex"))
+
+#devtools::install_github(
+#    repo = "NMikolajewicz/scMiko",
+#ref = "master",
+#    auth_token = "a3c1c9b15c496991c952d1fe3ccc52db770f22fa")
+```
+
+
+
+
+```{r c1 - input datasets, message=FALSE, warning=FALSE}
+
+input.data <- NULL
+
+# -----------------------------------------------------
+# Pilot 1
+input.data <- bind_rows(input.data, data.frame(names = "pilot1", species = "Mm, Hs", multiple.species = T, pilot.n = 1, 
+                                               files = "scRNAseq_pilot1.RData", pcr.barcodes = "pilot1_pcr_barcodes.txt", 
+                                               rt.barcodes = "pilot1_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+# Pilot 2
+input.data <- bind_rows(input.data, data.frame(names = "pilot2", species = "Mm, Hs", multiple.species = T, pilot.n = 2, 
+                                               files = "scRNAseq_pilot2.RData", pcr.barcodes = "pilot2_pcr_barcodes.txt", 
+                                               rt.barcodes = "pilot2_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+# Pilot 3
+input.data <- bind_rows(input.data, data.frame(names = "pilot3", species = "Mm", multiple.species = F, pilot.n = 3, 
+                                               files = "scRNAseq_pilot3.RData", pcr.barcodes = "pilot3_pcr_barcodes.txt", 
+                                               rt.barcodes = "pilot3_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+# Pilot 4 (5% downsampled)
+input.data <- bind_rows(input.data, data.frame(names = "pilot4_5pctDS", species = "Mm", multiple.species = F, pilot.n = 4, 
+                                               files = "scRNAseq_pilot4_DS5pct.RData", pcr.barcodes = "pilot4_pcr_barcodes.txt", 
+                                               rt.barcodes = "pilot4_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+# Pilot 4 (12.5% downsampled)
+input.data <- bind_rows(input.data, data.frame(names = "pilot4_12.5pctDS", species = "Mm", multiple.species = F, pilot.n = 4, 
+                                               files = "scRNAseq_pilot4_DS12_5pct.RData", pcr.barcodes = "pilot4_pcr_barcodes.txt", 
+                                               rt.barcodes = "pilot4_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+# Pilot 4 (25% downsampled)
+input.data <- bind_rows(input.data, data.frame(names = "pilot4_25pctDS", species = "Mm", multiple.species = F, pilot.n = 4, 
+                                               files = "scRNAseq_pilot4_DS25pct.RData", pcr.barcodes = "pilot4_pcr_barcodes.txt", 
+                                               rt.barcodes = "pilot4_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+# Pilot 4 (50% downsampled)
+input.data <- bind_rows(input.data, data.frame(names = "pilot4_50pctDS", species = "Mm", multiple.species = F, pilot.n = 4, 
+                                               files = "scRNAseq_pilot4_DS50pct.RData", pcr.barcodes = "pilot4_pcr_barcodes.txt", 
+                                               rt.barcodes = "pilot4_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+# Pilot 4 
+input.data <- bind_rows(input.data, data.frame(names = "pilot4", species = "Mm", multiple.species = F, pilot.n = 4, 
+                                               files = "scRNAseq_pilot4.RData", pcr.barcodes = "pilot4_pcr_barcodes.txt", 
+                                               rt.barcodes = "pilot4_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+# Pilot 5
+input.data <- bind_rows(input.data, data.frame(names = "pilot5", species = "Mm", multiple.species = F, pilot.n = 5, 
+                                               files = "scRNAseq_pilot5.RData", pcr.barcodes = "pilot5_pcr_barcodes.txt", 
+                                               rt.barcodes = "pilot5_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+# CIT.Lung
+input.data <- bind_rows(input.data, data.frame(names = "CIT.Lung", species = "Hs", multiple.species = F, pilot.n = NA, 
+                                               files = "5_EVLP_599_CIT_10x_filtered", pcr.barcodes = "", 
+                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
+# End.EVLP.Lung
+input.data <- bind_rows(input.data, data.frame(names = "End.EVLP.Lung", species = "Hs", multiple.species = F, pilot.n = NA, 
+                                               files = "6_EVLP_599_End_EVLP_10x_filtered", pcr.barcodes = "", 
+                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
+# Neftel.10x.GBM
+input.data <- bind_rows(input.data, data.frame(names = "Neftel.10x.GBM", species = "Hs", multiple.species = F, pilot.n = NA, 
+                                               files = "GSM3828673_10X_GBM_IDHwt_processed_TPM.tsv", pcr.barcodes = "", 
+                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Neftel_2019_GBM/", input.type = 3))
+# Neftel.ss2.GBM
+input.data <- bind_rows(input.data, data.frame(names = "Neftel.ss2.GBM", species = "Hs", multiple.species = F, pilot.n = NA, 
+                                               files = "GSM3828672_Smartseq2_GBM_IDHwt_processed_TPM.tsv", pcr.barcodes = "", 
+                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Neftel_2019_GBM/", input.type = 3))
+# UHN.GBM.0231_ACCVR9ANXX.10x.filtered.aggregate
+input.data <- bind_rows(input.data, data.frame(names = "UHN.GBM.0231_ACCVR9ANXX.filtered.agg", species = "Hs", multiple.species = F, pilot.n = NA, 
+                                               files = "7_UHN_GBM_0231_ACCVR9ANXX_10x_filtered_aggregate", pcr.barcodes = "", 
+                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
+# UHN.GBM.0238_ACD0E5ANXX.filtered.agg
+input.data <- bind_rows(input.data, data.frame(names = "UHN.GBM.0238_ACD0E5ANXX.filtered.agg", species = "Hs", multiple.species = F, pilot.n = NA, 
+                                               files = "8_UHN_GBM_0238_ACD0E5ANXX_10x_filtered_aggregate", pcr.barcodes = "", 
+                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
+
+# "09-CID003556-filtered"
+input.data <- bind_rows(input.data, data.frame(names = "09-CID003556-filtered", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "09-CID003556-filtered", pcr.barcodes = "", 
+                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
+
+# "10-CID003557-filtered"  
+input.data <- bind_rows(input.data, data.frame(names = "10-CID003557-filtered", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "10-CID003557-filtered", pcr.barcodes = "", 
+                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
+
+# "11-CID003558-filtered" 
+input.data <- bind_rows(input.data, data.frame(names = "11-CID003558-filtered", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "11-CID003558-filtered", pcr.barcodes = "", 
+                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
+
+# "12-CID003559-filtered"
+input.data <- bind_rows(input.data, data.frame(names = "12-CID003559-filtered", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "12-CID003559-filtered", pcr.barcodes = "", 
+                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
+
+# "13-CID003560-filtered"
+input.data <- bind_rows(input.data, data.frame(names = "13-CID003560-filtered", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "13-CID003560-filtered", pcr.barcodes = "", 
+                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
+
+# "14-CID003561-raw" 
+input.data <- bind_rows(input.data, data.frame(names = "14-CID003561-raw", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "14-CID003561-raw", pcr.barcodes = "", 
+                                               rt.barcodes = "", directory = "Raw_Datasets/cell ranger/", input.type = 2))
+
+# Celsius Renca sciRNAseq3
+input.data <- bind_rows(input.data, data.frame(names = "Celsuis_sci_Renca", species = "Mm, Hs", multiple.species = T, pilot.n = NA, 
+                                               files = "sci_summary_Celsius.RData", pcr.barcodes = "", 
+                                               rt.barcodes = "RencaTumor_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+
+# Pilot 6 (in vitro GL261/Ct2A + brain organoids)
+input.data <- bind_rows(input.data, data.frame(names = "pilot6", species = "Mm, Hs", multiple.species = T, pilot.n = 6, 
+                                               files = "sci_summary_Pilot6.RData", pcr.barcodes = "",
+                                               rt.barcodes = "Pilot6_rt_barcodes.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+
+
+# Hu 2018 mammalian heart: P6, sample1
+input.data <- bind_rows(input.data, data.frame(names = "hu.p6.s1", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "GSM3332251_Ctrl-P6-1_gene_exonic.intronic_tagged.dge.txt", pcr.barcodes = "",
+                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/", input.type = 3))
+
+# Hu 2018 mammalian heart: P6, sample2
+input.data <- bind_rows(input.data, data.frame(names = "hu.p6.s2", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "GSM3332252_Ctrl-P6-2_gene_exonic.intronic_tagged.dge.txt", pcr.barcodes = "",
+                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/", input.type = 3))
+
+# Hu 2018 mammalian heart: P6, sample3
+input.data <- bind_rows(input.data, data.frame(names = "hu.p6.s3", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "GSM3332253_Ctrl-P6-3_gene_exonic.intronic_tagged.dge.txt", pcr.barcodes = "",
+                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/", input.type = 3))
+
+# Hu 2018 mammalian heart: P10, sample1
+input.data <- bind_rows(input.data, data.frame(names = "hu.p10.s1", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "GSM3332254_Ctrl-P10-1_gene_exonic.intronic_tagged.dge.txt", pcr.barcodes = "",
+                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/", input.type = 3))
+
+# Hu 2018 mammalian heart: P10, sample2
+input.data <- bind_rows(input.data, data.frame(names = "hu.p10.s2", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "GSM3332255_Ctrl-P10-2_gene_exonic.intronic_tagged.dge.txt", pcr.barcodes = "",
+                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/", input.type = 3))
+
+# Hu 2018 mammalian heart: P10, sample3
+input.data <- bind_rows(input.data, data.frame(names = "hu.p10.s3", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "GSM3332256_Ctrl-P10-3_gene_exonic.intronic_tagged.dge.txt", pcr.barcodes = "",
+                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/", input.type = 3))
+
+# EMT6 in vivo screen
+input.data <- bind_rows(input.data, data.frame(names = "invivo.EMT6.screen", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "totalReads_v2_020420.txt", pcr.barcodes = "",
+                                               rt.barcodes = "", directory = "Raw_Datasets/Expression_matrix/EMT6_invivo_CTLscreen_240320/", input.type = 3))
+
+# Kumar 2019 - in vivo syngeneic scRNAseq
+input.data <- bind_rows(input.data, data.frame(names = "kumar.invivo", species = "Mm", multiple.species = F, pilot.n = NA, 
+                                               files = "GSE121861_syngeneic_expression.csv", pcr.barcodes = "GSE121861_syngeneic_column_data_NM_080420.csv",
+                                               rt.barcodes = "GSE121861_syngeneic_row_data.csv", directory = "Raw_Datasets/Expression_matrix/Kumar_2018_invivoEMT6/", input.type = 3))
+
+# Pilot 7 - human mapping
+input.data <- bind_rows(input.data, data.frame(names = "pilot7.Hs", species = "Hs", multiple.species = F, pilot.n = 7, 
+                                               files = "pilot7_humanMapped_sci_summary.RData", pcr.barcodes = "HH7_pcr_barcodes_20200609.txt", 
+                                               rt.barcodes = "HH7_rt_barcodes_20200609NewFormat.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+
+# Pilot 7 - mouse mapping
+input.data <- bind_rows(input.data, data.frame(names = "pilot7.Mm", species = "Mm", multiple.species = F, pilot.n = 7, 
+                                               files = "pilot7_mouseParallelMapped_sci_summary.RData", pcr.barcodes = "HH7_pcr_barcodes_20200609.txt", 
+                                               rt.barcodes = "HH7_rt_barcodes_20200609NewFormat.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+
+# Pilot 8 - mouse mapping
+input.data <- bind_rows(input.data, data.frame(names = "pilot8.Mm", species = "Mm", multiple.species = F, pilot.n = 8, 
+                                               files = "pilot8_mouseParallelMapped_sci_summary.RData", pcr.barcodes = "HH8_pcr_barcodes_20200616_94used.txt", 
+                                               rt.barcodes = "HH8_rt_barcodes_20200616NewFormat192.txt", directory = "Raw_Datasets/pilots/", input.type = 1))
+
+# Pilot 9 - human mapping
+input.data <- bind_rows(input.data, data.frame(names = "pilot9.Hs", species = "Hs", multiple.species = F, pilot.n = 9, 
+                                               files = "pilot9_humanParallelMapped_sci_summary.RData", 
+                                               pcr.barcodes = "HH9_pcr_barcodes_20200623_96used.txt", 
+                                               rt.barcodes = "HH9_rt_barcodes_20200625NewFormat168updated.txt", 
+                                               directory = "Raw_Datasets/pilots/", input.type = 1))
+
+# Pilot 9 - murine mapping
+input.data <- bind_rows(input.data, data.frame(names = "pilot9.Mm", species = "Mm", multiple.species = F, pilot.n = 9, 
+                                               files = "pilot9_mouseParallelMapped_sci_summary.RData", 
+                                               pcr.barcodes = "HH9_pcr_barcodes_20200623_96used.txt", 
+                                               rt.barcodes = "HH9_rt_barcodes_20200625NewFormat168updated.txt", 
+                                               directory = "Raw_Datasets/pilots/", input.type = 1))
+
+# -----------------------------------------------------
+# BARCODE FILTERS
+input.barcode.strata <- list(pilot1 = list(hap1_renca = c("1-HAP1&Renca"),
+                                           cgr8_293t = c("2-CGR8(WT parental)", "4-293T&CGR8(WT with GBC*)"),
+                                           mm = c("CGR8", "Renca"),
+                                           renca = c("Renca"),
+                                           hs = c("HAP1", "293T"),
+                                           hap1 = c("HAP1"),
+                                           cgr8 = c("CGR8")), 
+                             pilot2 = list(hap1_renca = c("R4-HAP1&Renca"),
+                                           mm = c("3T3", "N2A", "Renca"),
+                                           hap1 = c("HAP1"),
+                                           renca = c("Renca")), 
+                             pilot3 = list(renca.tumor = c("01_T1_in_cd", "02_T1_out_cd", "03_T3_in_TST", 
+                                                           "04_T3_out_TST", "05_T3_in_sci", "06_T3_out_sci"),
+                                           neural.dif1 = c("C1_CST", "C3_CST", "C5_CST", "C7_CST", 
+                                                           "DIVc9_CST", "C10_TST", "C1_TST"),
+                                           neural.dif2 = c("07_C1_CST", "08_C3_CST", "09_C5_CST", "10_C7_CST", 
+                                                           "11_DIVc9_CST", "12_C10_TST", "13_C1_TST"),
+                                           neural.dif3 = c("07_C1_CST", "12_C10_TST", "13_C1_TST")), 
+                             pilot4 = list(cst = c("01_G(GL261)_FR_CST", "02_C(CT2A)_FR_CST", 
+                                                   "03_H(GL261)_FR_CSTsi", "04.2_C1_EB8_CSTsi", 
+                                                   "04_C1_EB8_CSTsi","05.2_C1_DIV1_CSTsi", "06.2_C1_DIV7_CSTsi"),
+                                           neural.dif1 = c("EB8", "DIV1", "DIV7"),
+                                           neural.dif2 = c("C1_EB8_CSTsi", "C1_DIV1_CSTsi", "C1_DIV7_CSTsi"),
+                                           gbm = c("GL261", "CT2A"),
+                                           GL261 = c("GL261"),
+                                           p4.CT2A = c("CT2A")), 
+                             pilot4_5pctDS = list(gbm = c("GL261", "CT2A"),
+                                                  neural.dif1 = c("EB8", "DIV1", "DIV7")), 
+                             pilot4_12.5pctDS = list(gbm = c("GL261", "CT2A"),
+                                                     neural.dif1 = c("EB8", "DIV1", "DIV7")), 
+                             pilot4_25pctDS = list(gbm = c("GL261", "CT2A"),
+                                                   neural.dif1 = c("EB8", "DIV1", "DIV7")), 
+                             pilot4_50pctDS = list(gbm = c("GL261", "CT2A"),
+                                                   neural.dif1 = c("EB8", "DIV1", "DIV7")), 
+                             pilot5 = list(neural.dif1 = c("C1_CST", "C3_CST", "C7_CST", 
+                                                           "DIVc9_CST", "C10_TST", "C1_TST"),
+                                           neural.dif2 = c("07_C1_CST", "08_C3_CST", "10_C7_CST", 
+                                                           "11_DIVc9_CST", "12_C10_TST", "13_C1_TST"),
+                                           renca.tumor1 = c("T1", "T3"),
+                                           renca.tumor2 = c("01_T1_in_cd", "02_T1_out_cd", "03_T3_in_TST", 
+                                                            "04_T3_out_TST", "05_T3_in_sci", "06_T3_out_sci")),
+                             Celsuis_sci_Renca = list(tumor.only = c("Tumor1", "Tumor2", "Tumor3"),
+                                                      T1 = c("Tumor1"),
+                                                      T2 = c("Tumor2"),
+                                                      T3 = c( "Tumor3"),
+                                                      renca.invitro = c("04")),
+                             pilot6 = list(GBM = c("GL261", "CT2A"),
+                                           p6.CT2A = "CT2A"),
+                             pilot7.Hs = list(meso = "Meso"),
+                             pilot7.Mm = list(GBM = c("CT2A", "GL261"),
+                                              Renca = c("01_Renca_WT", "02_Renca_Jak1")),
+                             pilot8.Mm = list(GBM.noTumor = c("06_GBM_PBSctrl"),
+                                              CT2A = c("CT2A_R2", "02_CT2A_R3"),
+                                              GL261.tumor = c("GL261_R2", "GL261_R3"),
+                                              GL261.GFP = c("GL261GFP"),
+                                              GL261 = c("06_GBM_PBSctrl", "GL261_R2", "GL261_R3", "GL261GFP"),
+                                              GBM.ctrlvstumor = c("06_GBM_PBSctrl", "GL261_R2"),
+                                              GBM = c("CT2A_R2", "02_CT2A_R3", "GL261_R2", "GL261_R3"),
+                                              GBM.R2 = c("GL261_R2"),
+                                              GBM.R3 = c("GL261_R3")),
+                             pilot9.Hs = list(GBM.PR = c("01_GBM_63P", "02_GBM_173R", "03_GBM_190P", "04_GBM_225R", "05_GBM_162P", "06_GBM_265R")),
+                             pilot9.Mm = list(CT2A = "PR_CT2A")
+                             )     
+
+```
+
+
+```{r c2 - parameter_specification}
+
+# specify parameters
+analysis.parameters <- analysisParameters(
+  which.data = c("pilot9.Mm"),
+  which.strata = c("CT2A"),
+  organism.filter.flag = F,                             
+  organism.include = c("Mm"),
+  save.flag = F,                                                              # OPTIONAL; logical (default = T)  # save results
+  save.filename = "Module1_integration_Test.Rdata",
+  save.directory = "Preprocessed_Datasets/",
+  cluster.resolution = 1,
+  gene.upperlimit = 9000,
+  gene.lowerlimit = 200,
+  mt.upperlimit = 60,
+  vars2regress = c("percent.mt", "dataset"),
+  do.additional.reduction = F
+)
+
+
+n.workers <- list(
+  normScale = 2
+)
+max.memory <- 200 # numeric, in terms of Gb (set to 100 for cluster)
+
+```
+
+```{r c3 - additional specifications and assertions}
+
+# Specify input data files
+which.data <- analysis.parameters$which.data  # REQUIRED 
+which.strata <- analysis.parameters$which.strata # NA if no stratification
+
+# specify input 
+stopifnot(all(which.data %in% as.vector(input.data$names)))
+specified.input <- input.data[as.vector(input.data$names) %in% which.data, ]
+
+
+# get input data specifications
+input_data <- as.vector(specified.input$files)
+input_pcr_barcodes <- as.vector(specified.input$pcr.barcodes)
+input_rt_barcodes <- as.vector(specified.input$rt.barcodes)
+input_set <- c(input_data, input_pcr_barcodes, input_rt_barcodes)
+input.type <- as.vector(specified.input$input.type)
+all_input_organisms <- as.vector(specified.input$species)
+dir <- as.vector(specified.input$directory) 
+
+
+# get stratification details
+if (!is.na(which.strata)){
+  which.strata.specified <- which.strata
+  which.strata <- c()
+  for (i in 1:length(which.strata.specified)){
+   which.strata <- c(which.strata, input.barcode.strata[[which.data[i]]][[which.strata.specified[i]]])
+  }
+} 
+
+# ensure correct directory is specified
+stopifnot(exists("input.type")) 
+
+# ensure input data are specified
+stopifnot(exists("input_set")) 
+
+try({
+  stopifnot(exists("analysis.parameters$organism.include")) 
+  if (length(analysis.parameters$organism.include) ==  1) analysis.parameters$organism.include <- rep(analysis.parameters$organism.include, length(input_data))
+}, silent = T)
+
+# if set_names are not specified, set_names <-  ""
+if (exists("analysis.parameters$set_names")){
+  stopifnot(is.character(analysis.parameters$set_names))
+} else {analysis.parameters$set_names <- ""}
+
+# if pilot input are not specified, pilot_input <-  ""
+if (exists("pilot_input")){
+  stopifnot(length(pilot_input) == 1)
+} else {pilot_input <- ""}
+
+total_sets <- input_set
+
+```
+
+
+```{r c4 - analysis log}
+
+df.log <- initiateLog("1, Preprocessing & QC")
+
+if (input.type == 1){
+  df.log <- addLogEntry("Input Data (.Rdata)", input_data, df.log, "input_data")
+  df.log <- addLogEntry("Input RT Barcode (.txt)", input_rt_barcodes, df.log, "input_rt_barcodes")
+  df.log <- addLogEntry("Input PCR Barcode (.txt)", input_pcr_barcodes, df.log, "input_pcr_barcodes")
+} else if (input.type == 2){
+  df.log <- addLogEntry("Input Cell Ranger", input_data, df.log, "input_data")
+} else if (input.type == 3){
+  df.log <- addLogEntry("Input TPM Matrix", input_data, df.log, "input_data")
+}
+
+df.log <- addLogEntry("Output Results (.Rdata)", analysis.parameters$save.filename, df.log, "analysis.parameters$save.filename")
+df.log <- addLogEntry("Output Directory", analysis.parameters$save.directory, df.log, "analysis.parameters$save.directory")
+
+df.log <- addLogEntry("gene/cell Upper Limit (N/cell)", analysis.parameters$gene.upperlimit, df.log, "analysis.parameters$gene.upperlimit")
+df.log <- addLogEntry("gene/cell Lower Limit (N/cell)", analysis.parameters$gene.lowerlimit, df.log, "analysis.parameters$gene.lowerlimit")
+
+df.log <- addLogEntry("Filtered by unmatched reads", 
+                      analysis.parameters$unmatched.rate.filter.flag, df.log, "analysis.parameters$unmatched.rate.filter.flag")
+
+df.log <- addLogEntry("Mitochondrial Content Upper Limit (%/cell)", analysis.parameters$mt.upperlimit, df.log, "analysis.parameters$mt.upperlimit")
+
+if (analysis.parameters$subsample_factor == 1){subsampled <- FALSE} else {subsampled <- TRUE}
+df.log <- addLogEntry("Data Subsampled", subsampled, df.log, "subsampled")
+
+df.log <- addLogEntry("Cluster Resolution", analysis.parameters$cluster.resolution, df.log, "analysis.parameters$cluster.resolution")
+df.log <- addLogEntry("Filtered by organism", analysis.parameters$organism.filter.flag, df.log, "analysis.parameters$organism.filter.flag")
+
+if (analysis.parameters$organism.filter.flag) {
+  df.log <- addLogEntry("Species Included", analysis.parameters$organism.include, df.log, "analysis.parameters$organism.include")
+}
+
+df.log <- addLogEntry("Number of Workers", n.workers$normScale, df.log, "n.workers$normScale")
+df.log <- addLogEntry("Max Memory (Gb)", max.memory, df.log, "max.memory")
+
+if (!is.na(which.strata)) {
+  df.log[nrow(df.log)+1, 1] <- as.character("Barcode(s) Included")
+  df.log[nrow(df.log), 2] <- as.character("which.strata")
+  if (length(which.strata) > 1){
+    df.log[nrow(df.log), 3] <- paste(which.strata, collapse=", ")
+  } else {
+    df.log[nrow(df.log), 3] <- as.character(which.strata)
+  }
+}
+
+df.log <- addLogEntry("Variables regressed out", analysis.parameters$vars2regress, df.log, "analysis.parameters$vars2regress")
+df.log <- addLogEntry("Experiment Identifier", pilot_input, df.log, "pilot_input")
+df.log <- addLogEntry("Input Species", all_input_organisms, df.log, "all_input_organisms")
+
+```
+
+```{r c5}
+
+loadMatdev <- function(import_set, input_organisms, dir) {
+  
+  import_set_path <- paste(dir, import_set, sep ="")
+  
+  # import expression matrix data
+  
+  is.kumal <- F # specificy fixes made to accomodate Kumal 2018 EMT6 data
+  if (is.kumal){
+    expression_matrix<-read.csv(import_set_path[1],header=F)
+    expression_matrix <- as.data.frame(t(expression_matrix))
+  } else {
+    expression_matrix<-read.table(import_set_path[1],header=TRUE)
+  }
+  
+  
+  # sum(is.na(expression_matrix))
+  expression_matrix[is.na(expression_matrix)] <- 0
+  
+  # get gene and ensembl names
+  if (is.kumal){
+    features.df<-read.csv(import_set_path[3],header=T)
+    cell.df <-read.csv(import_set_path[2],header=T)
+    colnames(expression_matrix) <- cell.df$NM_ID
+    expression_matrix$GENE <- as.character(features.df$GeneSymbol)
+  } 
+  
+  feature.names <- as.vector(expression_matrix$GENE)
+  
+  
+  # average duplicate rows (i.e., duplicate genes)
+  if (length(unique(feature.names)) < length(feature.names)){
+    
+    success.attempt <- F
+    try({
+      
+      expression_matrix.col <- expression_matrix
+      expression_matrix.col <- dplyr::select(expression_matrix.col, -c("GENE"))
+      expression_matrix.col$rowID <- seq(1, nrow(expression_matrix.col))
+      expression_matrix.col.noDup <-  WGCNA::collapseRows(expression_matrix.col, rowGroup = expression_matrix$GENE, rowID = expression_matrix.col$rowID, method = "Average")
+      new.mat <- as.data.frame(expression_matrix.col.noDup[["datETcollapsed"]])
+      new.mat <- dplyr::select(new.mat, -c("rowID"))
+      new.mat$GENE <- rownames(new.mat)
+      expression_matrix2 <- new.mat
+      rm("new.mat")
+      success.attempt <- T
+      
+    }, silent = T)
+    
+    if (!success.attempt){
+      which.duplicate <- duplicated(feature.names)
+      expression_matrix2 <- expression_matrix[!(which.duplicate), ]
+    }
+  } else {
+    # assign to secondary matrix
+    expression_matrix2 <- expression_matrix
+  }
+  
+  
+  feature.names <- as.vector(expression_matrix2$GENE)
+  
+  expression_matrix2 <- dplyr::select(expression_matrix2, -c("GENE"))
+  rownames(expression_matrix2) <- feature.names
+  stopifnot(length(input_organisms) == 1)
+  g2eNames <- sym2ens(my.symbols =  feature.names, my.species = input_organisms)
+  gNames <- g2eNames$SYMBOL
+  names(gNames) <- g2eNames$ENSEMBL
+  gNames <- gNames[!is.na(gNames)]
+  names(gNames) <-gsub("\\..*","",as.vector( names(gNames)))
+  
+  # assign organism
+  orgs <- rep(input_organisms,ncol(expression_matrix2));
+  names(orgs) <- colnames(expression_matrix2);
+  
+  
+  # create seurat object
+  so = CreateSeuratObject(counts = expression_matrix2,project=import_set[1],min.cells=0,min.features=0)
+  # so = CreateSeuratObject(counts = expression_matrix2,project=import_set[1],min.cells=3,min.features=200)
+  
+  # add gene symbols as meta data in seurat object
+  mat_ens <- rownames(so@assays[["RNA"]])
+  match.id <- match(mat_ens, gNames)
+  gNames_filtered <- names(gNames)[match.id]
+  
+  # Add gene symbols as meta data that we can use later
+  so[["RNA"]] <- AddMetaData( object=so[["RNA"]],metadata=gNames_filtered,col.name="ENSEMBL");
+  so[["RNA"]] <- AddMetaData( object=so[["RNA"]],metadata=as.vector((gNames)[match.id]),col.name="SYMBOL");
+  
+  # Additional metadata
+  if (is.kumal){
+    kumal.id <- match( colnames(so), cell.df$NM_ID) 
+    so@meta.data[["Sample_ID"]] <- cell.df$Sample_ID[kumal.id]
+    so@meta.data[["Model"]] <- cell.df$Model[kumal.id]
+    so@meta.data[["Protocol"]] <- cell.df$Protocol[kumal.id]
+    so@meta.data[["Experiment"]] <- cell.df$Experiment[kumal.id]
+    
+    
+    which.emt6 <- grepl("B16F10",  so@meta.data[["Model"]])
+    
+    so <- so[ ,which.emt6]
+  }
+  
+  # Add in inferred organism
+  so$Organism <- orgs;
+  
+  # Specify barcodes
+  so$Barcode <- "unspecified";
+  
+  output <- list(so, gNames)
+  
+  return(output)
+}
+
+```
+
+```{r c6 - load_data}
+
+# Run import function
+so.list <- list()
+gNames.list.list <- list()
+
+# sequence indices
+idx.seq <- c(1, 1+length(input_data), 1+(2*length(input_data)))
+
+# assertions
+stopifnot(length(dir) == length(input_data))
+stopifnot(length(all_input_organisms) == length(input_data))
+
+for (i in 1:length(input_data)){
+  
+  
+  cur.total_sets <- total_sets[idx.seq + (i-1)]
+
+  if (input.type[i] == 1) {
+    output.list <- loadMoffat(import_set = cur.total_sets, 
+                                     analysis.parameters$subsample_factor, 
+                                     input_organisms = trimws(unlist(strsplit(all_input_organisms[i], ","))) , 
+                                     analysis.parameters$organism.include[i], 
+                                     dir[i])
+  } else if (input.type[i] == 2){
+    output.list <- loadCellRanger(import_set = cur.total_sets, 
+                                  trimws(unlist(strsplit(all_input_organisms[i], ","))), 
+                                  dir[i])
+  } else if (input.type[i] == 3){
+    # output.list <- loadMat(import_set = cur.total_sets, subsample_factor, all_input_organisms, dir[i])
+    output.list <- loadMat.dev(import_set = cur.total_sets, 
+                               trimws(unlist(strsplit(all_input_organisms[i], ","))), 
+                               dir[i])
+    
+  }
+  
+  # unlist outputs
+  so.list[[i]] <- output.list[[1]]
+  gNames.list.list[[i]] <- output.list[[2]]
+  
+  if ((unique(so.list[[i]]@meta.data[["Barcode"]]) == "unspecified") ){
+    so.list[[i]]@meta.data[["Barcode"]] <- paste("T", i, sep = "")
+  } else if (is.na(unique(so.list[[i]]@meta.data[["Barcode"]]))){
+    stop("Barcodes incorrectly specified") #140620
+  }
+  
+}
+
+# assign set labels and merge seurat objects if multiple present
+for (i in 1:length(so.list)){
+  if (length(which.data) == length(which.strata)){
+    set.label <- paste0(which.data[i],"_", which.strata[i])
+  } else {
+    set.label <- which.data[i]
+  }
+  so.list[[i]][["dataset"]] <- set.label
+}
+
+so <- mergeSeuratList(so.list)
+rm(so.list)
+
+# Assumed that all gene lists are identical
+gNames.list <- gNames.list.list[[1]]
+
+
+```
+
+```{r c7, include = FALSE}
+gc()
+```
+
+
+```{r c8 - filter_data_by_subset}
+
+# define subset parameters
+subset.df <- data.frame(field = "Organism", subgroups = analysis.parameters$organism.include)
+
+# subset data
+so <- subsetSeurat(so, subset.df)
+
+```
+
+
+```{r c9 - subset barcodes}
+
+so <- barcodeLabels(so, which.strata)
+
+```
+
+
+```{r c10 - get_mt_content}
+
+# MITOCHONDRIAL CONTENT
+so <- getMitoContent(so, gNames.list)
+
+```
+
+
+```{r c11 - barcode rankings, fig.width= 15, fig.height=5}
+
+# get metadata
+df.meta.qc <- so@meta.data
+
+# rank QC metrics
+df.meta.qc$rank.umi <- rank(-df.meta.qc$nCount_RNA)
+df.meta.qc$rank.gene <- rank(-df.meta.qc$nFeature_RNA)
+df.meta.qc$rank.mt <- rank(-df.meta.qc$percent.mt)
+
+df.meta.qc$mitoOmit <- df.meta.qc$percent.mt > analysis.parameters$mt.upperlimit
+df.meta.qc$mitoColor <- "black"
+df.meta.qc$mitoColor[df.meta.qc$mitoOmit] <- "tomato"
+
+plt.gene.umi.mito <- df.meta.qc %>%
+  ggplot(aes(x = nCount_RNA, y = (nFeature_RNA))) + 
+  geom_point(color = df.meta.qc$mitoColor) + 
+  scale_y_continuous(trans='log10') + 
+  scale_x_continuous(trans='log10') + 
+  geom_hline(yintercept = analysis.parameters$gene.upperlimit , color = "red", linetype = "dashed") + 
+  geom_hline(yintercept = analysis.parameters$gene.lowerlimit, color = "red", linetype = "dashed") + 
+  xlab("UMI counts (/cell)") + ylab("Gene counts (/cell)") + 
+  theme_classic() + ggtitle("UMI vs Gene Counts\nred: high mT content")
+
+# generate ranking plots
+plt.umi.rank.mito <- df.meta.qc %>%
+  ggplot(aes(x = rank.umi, y = (nCount_RNA))) + 
+  geom_point(color = df.meta.qc$mitoColor) + 
+  scale_y_continuous(trans='log10') + 
+  xlab("Barcodes") + ylab("UMI counts (/cell)") + 
+  theme_classic() + ggtitle("UMI ranking\nred: high mT content")
+
+plt.gene.rank.mito <- df.meta.qc %>%
+  ggplot(aes(x = rank.gene, y = (nFeature_RNA))) + 
+  geom_point(color = df.meta.qc$mitoColor) + scale_y_continuous(trans='log10') + 
+  geom_hline(yintercept = analysis.parameters$gene.upperlimit , color = "red", linetype = "dashed") + 
+  geom_hline(yintercept = analysis.parameters$gene.lowerlimit, color = "red", linetype = "dashed") + 
+  xlab("Barcodes") + ylab("Gene counts (/cell)") + 
+  theme_classic() + ggtitle("Gene ranking\nred: high mT content")
+
+plt.mt.rank.mito <- df.meta.qc %>%
+  ggplot(aes(x = rank.mt, y = (percent.mt))) + 
+  geom_point(color = df.meta.qc$mitoColor) + scale_y_continuous(trans='log10') + 
+  geom_hline(yintercept = analysis.parameters$mt.upperlimit, color = "red", linetype = "dashed")  + 
+  xlab("Barcodes") + ylab("Mitochondrial Content (/cell)") + 
+  theme_classic() + ggtitle("Mt ranking\nred: high mT content")
+
+
+if (input.type == 1){
+  
+  unmatch.median <- median(df.meta.qc$unmatched.rate)
+  unmatch.mad <- mad(df.meta.qc$unmatched.rate, unmatch.median)
+  
+  if (analysis.parameters$unmatched.rate.filter.flag){
+    unmatch.high <- unmatch.median + (1.96*unmatch.mad)
+    unmatch.low <- unmatch.median - (1.96*unmatch.mad)
+  } else {
+    unmatch.high <- 1
+    unmatch.low <- 0
+  }
+
+  df.meta.qc$matchOmit <- (df.meta.qc$unmatched.rate > unmatch.high) | (df.meta.qc$unmatched.rate < unmatch.low)
+  df.meta.qc$matchColor <- "black"
+  df.meta.qc$matchColor[df.meta.qc$matchOmit] <- "skyblue"
+  
+  plt.unmatch.umi <- df.meta.qc %>%
+    ggplot(aes(x = nCount_RNA, y = (unmatched.rate))) + 
+    geom_point(color = df.meta.qc$matchColor)  + 
+    xlab("genes") + ylab("unmatched rate") + 
+    geom_hline(yintercept = unmatch.high, color = "red", linetype = "dashed")  + 
+    geom_hline(yintercept = unmatch.low, color = "red", linetype = "dashed")  + 
+    theme_classic() + ggtitle("Mt ranking\nblue: unmatched rate outliers")
+  
+  df.meta.qc$unmatch.rank <- rank(-df.meta.qc$unmatched.rate)
+  plt.umatch.rank <- df.meta.qc %>%
+    ggplot(aes(x = unmatch.rank, y = (unmatched.rate))) + 
+    geom_point(color = df.meta.qc$matchColor) + 
+    scale_y_continuous(trans='log10') + 
+    geom_hline(yintercept = unmatch.high, color = "red", linetype = "dashed")  + 
+    geom_hline(yintercept = unmatch.low, color = "red", linetype = "dashed")  + 
+    xlab("Barcodes") + ylab("Unmatched Rate") + 
+    theme_classic() + ggtitle("Unmatched rate ranking\nblue: unmatched rate outliers")
+  
+  
+  plt.gene.umi.match <- df.meta.qc %>%
+    ggplot(aes(x = nCount_RNA, y = (nFeature_RNA))) + 
+    geom_point(color = df.meta.qc$matchColor) + 
+    scale_y_continuous(trans='log10') + 
+    scale_x_continuous(trans='log10') + 
+    geom_hline(yintercept = analysis.parameters$gene.upperlimit , color = "red", linetype = "dashed") + 
+    geom_hline(yintercept = analysis.parameters$gene.lowerlimit, color = "red", linetype = "dashed") + 
+    xlab("UMI counts (/cell)") + ylab("Gene counts (/cell)") + 
+    theme_classic() + ggtitle("UMI vs Gene Counts\nblue: unmatched rate outliers")
+  
+  # generate ranking plots
+  plt.umi.rank.match <- df.meta.qc %>%
+    ggplot(aes(x = rank.umi, y = (nCount_RNA))) + 
+    geom_point(color = df.meta.qc$matchColor) + 
+    scale_y_continuous(trans='log10') + 
+    xlab("Barcodes") + ylab("UMI counts (/cell)") + 
+    theme_classic() + ggtitle("UMI ranking\nblue: unmatched rate outliers")
+  
+  plt.gene.rank.match <- df.meta.qc %>%
+    ggplot(aes(x = rank.gene, y = (nFeature_RNA))) + 
+    geom_point(color = df.meta.qc$matchColor) + scale_y_continuous(trans='log10') + 
+    geom_hline(yintercept = analysis.parameters$gene.upperlimit , color = "red", linetype = "dashed") + 
+    geom_hline(yintercept = analysis.parameters$gene.lowerlimit, color = "red", linetype = "dashed") + 
+    xlab("Barcodes") + ylab("Gene counts (/cell)") + 
+    theme_classic() + ggtitle("Gene ranking\nblue: unmatched rate outliers")
+  
+  plt.mt.rank.match <- df.meta.qc %>%
+    ggplot(aes(x = rank.mt, y = (percent.mt))) + 
+    geom_point(color = df.meta.qc$matchColor) + scale_y_continuous(trans='log10') + 
+    geom_hline(yintercept = analysis.parameters$mt.upperlimit, color = "red", linetype = "dashed")  + 
+    xlab("Barcodes") + ylab("Mitochondrial Content (/cell)") + 
+    theme_classic() + ggtitle("Mt ranking\nblue: unmatched rate outliers")
+  
+} else {
+  plt.umatch.rank <- NULL
+  plt.unmatch.umi <- NULL
+  unmatch.high <- 1
+  unmatch.low <- 0
+}
+
+if (analysis.parameters$print.inline) {
+  ggpubr::ggarrange(plt.gene.umi.mito, plt.umi.rank.mito, plt.gene.rank.mito, plt.mt.rank.mito, ncol = 4) 
+  
+  if (input.type == 1){
+    ggpubr::ggarrange(plt.umi.rank.match, plt.gene.rank.match, plt.mt.rank.match,
+                      plt.unmatch.umi, plt.gene.umi.match, plt.umatch.rank,ncol = 3, nrow = 2) 
+  }
+}
+
+
+
+```
+
+
+```{r c12 - Density plot of % mitochondrial genes, warning = FALSE}
+
+# MITOCHONDRIAL CONTENT DISTRIBUTIONS
+
+calc_mito_content_by_bc <- function(so, set_name, bc_info_flag, input.type = 1){
+  
+  
+  if (bc_info_flag == TRUE & input.type != 2){   
+    # Compute mitochrondrial content for each cell type
+    
+    # get unique cell types
+    barcodes <-unique(so@meta.data[["Barcode"]])
+    
+    # create dataframe to store mitochondrial content, stratified by cell type
+    df_by_bc <- data.frame()
+    
+    # for each cell type
+    for (i in 1:length(barcodes)) {
+      percent.mt_by_bc <- as.vector(so$percent.mt[so$Barcode == barcodes[i]])
+      count.feature_by_bc <- as.vector(so$nFeature_RNA[so$Barcode == barcodes[i]])
+      count.rna_by_bc <- as.vector(so$nCount_RNA[so$Barcode == barcodes[i]])
+      n_cells <- length(percent.mt_by_bc)
+      cur_length <- dim(df_by_bc)[1]
+      # get QC parameters for each cell sample
+      for (j in 1:n_cells) {
+        df_by_bc[cur_length + j, "barcode"] <- barcodes[i]
+        df_by_bc[cur_length + j, "percent.mt"] <- percent.mt_by_bc[j]
+        df_by_bc[cur_length + j, "count.feature"] <- count.feature_by_bc[j]
+        df_by_bc[cur_length + j, "count.rna"] <- count.rna_by_bc[j]
+      }
+    }
+  } else { # if no cell type information provided, pool everything together
+    df_by_bc <- data.frame()
+    percent.mt_by_bc <- as.vector(so$percent.mt)
+    count.feature_by_bc <- as.vector(so$nFeature_RNA)
+    count.rna_by_bc <- as.vector(so$nCount_RNA)
+    df_by_bc <- data.frame(percent.mt_by_bc, count.feature_by_bc, count.rna_by_bc)
+    colnames(df_by_bc) <- c("percent.mt", "count.feature", "count.rna")
+    df_by_bc["barcode"] <-"unspecified"
+    barcodes <- "unspecified"
+    so@meta.data[["Barcode"]] <-  "unspecified"
+  }
+  
+  # Create summary graphs 
+  # plot density plot
+  plt.handle <- ggplot(df_by_bc, aes(percent.mt, color=barcode)) + 
+    geom_density(size = 1) + 
+    ggtitle(paste(set_name)) + 
+    xlab("Mitochrondrial Content (%)")
+  
+  output <- list(so, plt.handle)
+  return(output)
+}
+
+# calculate mitochondrial content, stratified by barcode (if available)
+output_by_bc <- calc_mito_content_by_bc(so, analysis.parameters$set_names, (length(total_sets)>1), input.type)
+
+# retrive results
+so <- output_by_bc[[1]]
+plt.mito_by_bc <- output_by_bc[[2]] 
+
+if (analysis.parameters$print.inline){
+  print(plt.mito_by_bc)
+}
+
+
+
+```
+
+
+```{r c13 - qc_violin_plots, fig.height= 5, fig.width = 12}
+
+if (length(unique(so@meta.data[["subset_group"]]))> 1){
+  df.qc <- data.frame(so@meta.data[["subset_group"]],  
+                      so@meta.data[["nFeature_RNA"]], 
+                      so@meta.data[["nCount_RNA"]], 
+                      so@meta.data[["percent.mt"]]) 
+  colnames(df.qc) <- c("group", "nFeature_RNA", "nCount_RNA", "percent.mt")
+  
+  df.qc_sum <- df.qc %>%
+    group_by(group) %>%
+    summarize(nFeature_mean = round(mean(nFeature_RNA),2),
+              nCount_mean = round(mean(nCount_RNA),2),
+              percent.mt_mean = round(mean(percent.mt),2), 
+              nFeature_median = round(median(nFeature_RNA),2),
+              nCount_median = round(median(nCount_RNA),2),
+              percent.mt_median = round(median(percent.mt),2))
+  
+  nFeat_aov <- summary(aov(nFeature_RNA ~ group, data = df.qc))
+  nCount_aov <- summary(aov(nCount_RNA ~ group, data = df.qc))
+  mT_aov <- summary(aov(percent.mt ~ group, data = df.qc))
+} else {
+  df.qc <- data.frame()
+  df.qc_sum <- data.frame()
+  nFeat_aov <- c()
+  nCount_aov <- c()
+  mT_aov <- c()
+}
+
+violin.list <- QC.violinPlot(so, analysis.parameters$plt.log.flag )
+plt.QC_violin <- violin.list[[1]]
+plt.violin_by_subgroup <- violin.list[[2]]
+
+if (analysis.parameters$print.inline){
+  print(plt.QC_violin)
+  print(plt.violin_by_subgroup)
+}
+
+
+```
+
+
+```{r c14 - QC scatterplots, fig.height= 5, fig.width = 12}
+
+# Generate QC scatterplots
+plt.QC_scatter <- QC.scatterPlot(so)
+if (analysis.parameters$print.inline)  print(plt.QC_scatter)
+
+```
+
+
+```{r c15 - filter_QC, fig.width = 5, fig.height = 5}
+
+if (length(analysis.parameters$set_names) == 2) {
+  set.n <- NULL
+} else {
+  set.n <- analysis.parameters$set_names
+}
+filter_output_list <- filterSeurat(so = so, 
+                                   RNA.upperlimit = analysis.parameters$gene.upperlimit, 
+                                   RNA.lowerlimit = analysis.parameters$gene.lowerlimit, 
+                                   mt.upperlimit = analysis.parameters$mt.upperlimit, 
+                                   unmatch.low = unmatch.low, 
+                                   unmatch.high = unmatch.high,
+                                   set_names = set.n)
+so <- filter_output_list[["seurat"]]
+plt.filter_pre_post <- filter_output_list[["plot"]]
+filter.breakdown.list <- filter_output_list[["filter.breakdown"]]
+
+
+plt.filter.venn <- NULL
+try({
+  plt.filter.venn <- gplots::venn(filter.breakdown.list, show.plot = F, col = gplots::rich.colors(palette="temperature", 3))
+}, silent = T)
+
+
+if (analysis.parameters$print.inline){
+  plot(plt.filter.venn)
+  print(plt.filter_pre_post)
+}
+
+
+```
+
+
+```{r c16 - normalize_data, warning = FALSE}
+
+# Run data normalization
+# normalization_method_ps <- "SCT" # "NFS" or "SCT"
+normalization_method_ps <- "SCT"
+
+enable.parallelization <- T
+if (n.workers$normScale == 1) enable.parallelization <- F
+
+so<- scNormScale(so, gNames.list, normalization_method_ps, vars2regress = analysis.parameters$vars2regress,
+                 n.workers = n.workers$normScale,  max.memory = (max.memory*20480/20 * 1024^2), enable.parallelization = enable.parallelization)
+
+# plot variable genes
+plt.variable_genes <- variableGenes.Plot(so, gNames.list, analysis.parameters$set_names)
+if (analysis.parameters$print.inline) print(plt.variable_genes)
+
+```
+
+
+```{r c17 - per cell statistics}
+
+# ptm <- proc.time()
+df_nCount <- data.frame(so@meta.data[["nCount_RNA"]], so@meta.data[["nCount_SCT"]])
+colnames(df_nCount) <- c("UMI/cell (raw)",  "UMI/cell (normalized)")
+df_nCount_m <- melt(df_nCount)
+
+df_nFeat <- data.frame(so@meta.data[["nFeature_RNA"]], so@meta.data[["nFeature_SCT"]])
+colnames(df_nFeat) <- c("genes/cell (raw)","genes/cell (normalized)")
+df_nFeat_m <- melt(df_nFeat)
+
+plt.UMI_per_cell <- ggplot(df_nCount_m, aes(x = value, fill = variable)) + 
+  geom_density(alpha = 0.3) + scale_x_log10()+  xlab("UMI/cell")
+plt.genes_per_cell <- ggplot(df_nFeat_m, aes(x = value, fill = variable)) + 
+  geom_density(alpha = 0.3) + scale_x_log10()+   xlab("genes/cell")
+
+plt.pre_post_1 <- FeatureScatter(so, feature1 = "nCount_RNA", feature2 = "nCount_SCT") + 
+  xlab("UMI/cell (raw)") + ylab("UMI/cell (normalized)")
+plt.pre_post_2 <- FeatureScatter(so, feature1 = "nFeature_RNA", feature2 = "nFeature_SCT") + 
+  xlab("Genes/cell (raw)") + ylab("Genes/cell (normalized)")
+
+plt.pre_post_norm <- CombinePlots(plots = list(plt.pre_post_1, plt.pre_post_2), ncol = 2, legend = 'none')
+# print(paste("Post-normalization statistics (sec): " , round((proc.time() - ptm)[[3]],2)))
+
+
+if (analysis.parameters$print.inline){
+  print(plt.UMI_per_cell)
+  print(plt.genes_per_cell)
+  print(plt.pre_post_norm)
+}
+
+```
+
+
+```{r c18 - preliminary umap}
+
+
+nDim <- 30
+cluster_resolution <- analysis.parameters$cluster.resolution
+
+# ptm <- proc.time()
+so <- RunPCA(so, verbose = FALSE)
+so <- FindNeighbors(object = so, reduction = "pca", dims = 1:nDim)
+so <- FindClusters(object = so, resolution = cluster_resolution, verbose = 0, algorithm = 1, modularity.fxn = 1)
+so <- RunUMAP(so, dims = 1:nDim)
+
+plt.umap_by_cluster <- DimPlot(so, reduction = "umap", label = TRUE)  + ggtitle(label = "UMAP") +
+  xlab("UMAP 1") + ylab("UMAP 2")
+
+plt.umap <- DimPlot(so, reduction = "umap",group.by = "Barcode")  + ggtitle(label = "UMAP") +
+  xlab("UMAP 1") + ylab("UMAP 2")
+
+# combine plots
+plt.umap.combo <- cowplot::plot_grid(plt.umap_by_cluster, plt.umap, ncol = 2)
+
+
+so <- schex::make_hexbin(so, nbins = 80, dimension_reduction = "UMAP")
+plt.umap_umi <- schex::plot_hexbin_meta(so, col="nCount_RNA", 
+                           action="mean", xlab="UMAP1", ylab="UMAP2") + 
+  labs(title = "UMI/Cell", subtitle = "Post-Filtering")
+plt.umap_features <- schex::plot_hexbin_meta(so, col="nFeature_RNA", 
+                           action="mean", xlab="UMAP1", ylab="UMAP2") + 
+  labs(title = "Genes/Cell", subtitle = "Post-Filtering")
+plt.umap_mito <- schex::plot_hexbin_meta(so, col="percent.mt", 
+                           action="mean", xlab="UMAP1", ylab="UMAP2") + 
+  labs(title = "Mitochondrial Content (%)", subtitle = "Post-Filtering")
+
+
+if ("unmatched.rate" %in% names(so@meta.data)){
+plt.umap_umr <- schex::plot_hexbin_meta(so, col="unmatched.rate", 
+                           action="mean", xlab="UMAP1", ylab="UMAP2") + 
+  labs(title ="Unmatched Rate", subtitle = "Post-Filtering")  
+} else {
+ plt.umap_umr <- NULL 
+}
+
+if (is.null(plt.umap_umr)){
+  plt.umap.qc <- cowplot::plot_grid((plt.umap_by_cluster + theme_miko()), 
+                                    plt.umap_umi, plt.umap_features, plt.umap_mito, ncol = 2, align = "hv")
+} else {
+  plt.umap.qc.right <- cowplot::plot_grid(plt.umap_umi, plt.umap_features, plt.umap_mito, plt.umap_umr, ncol = 2)
+  plt.umap.qc <- cowplot::plot_grid((plt.umap_by_cluster + theme_miko()), 
+                                    plt.umap.qc.right, 
+                                    ncol = 2, rel_widths = c(1,2))
+}
+
+if (analysis.parameters$print.inline){
+  print(plt.umap_by_cluster)
+  print(plt.umap)
+  print(plt.umap_umi)
+  print(plt.umap_features)
+  print(plt.umap_mito)
+}
+
+
+```
+
+```{r c19 - PCA}
+
+pc.elbow_min_difference_ps <- 0.001
+pc.cum_var_explained_threshold_ps <- 0.8
+PC_number_method_ps <- 2
+
+# calculate proportion of variance explained by each PC ---------------------
+pc.std <- so@reductions[["pca"]]@stdev
+pc.var <- pc.std^2
+pc.prop_var <- pc.var/sum(pc.var)
+pc.cum_sum <- cumsum(pc.prop_var)
+pc.id <- c(1:50)
+scree.var <- data.frame(pc.id, pc.prop_var, pc.cum_sum)
+
+# determine number of PCs included ------------------------------------------
+pc.nPC_method_1 <- sum(abs(diff(pc.prop_var))>pc.elbow_min_difference_ps) +1 
+pc.nPC_method_2 <- sum(pc.cum_sum<pc.cum_var_explained_threshold_ps) + 1
+
+if (PC_number_method_ps == 1){
+  pc.n_relevant_components <- pc.nPC_method_1
+} else if (PC_number_method_ps == 2){
+  pc.n_relevant_components <- pc.nPC_method_2
+}
+
+# generate Scree Plot -------------------------------------------------------
+plt.scree1 <- ggplot(scree.var, aes(x = pc.id, y = pc.prop_var)) + 
+  geom_point() +  
+  theme(legend.position="right") +
+  geom_vline(xintercept = pc.n_relevant_components+0.5, color = 'red') + 
+  ggtitle("Scree Plot") + xlab("Principal Components") + ylab("Variance Explained (proportion)")  + theme_miko()
+
+plt.scree2 <- ggplot(scree.var, aes(x = pc.id, y = pc.cum_sum)) + 
+  geom_point() +  
+  theme(legend.position="right") +
+  geom_vline(xintercept = pc.n_relevant_components+0.5, color = 'red') + 
+  ylim(0, 1) + 
+  ggtitle(paste0(pc.n_relevant_components, " PCs (", round(100*pc.cum_sum[pc.n_relevant_components],2), "%) of variance")) + xlab("Principal     Components") + ylab("Cumulative Variance Explained (proportion)") + theme_miko()
+
+
+if (analysis.parameters$print.inline){
+  print(plt.scree1)
+  print(plt.scree2)
+}
+
+```
+
+
+```{r c20 - cell cycle scoring, fig.width=14, fig.height = 4}
+
+# get cell cycle genes
+s.genes <- cc.genes$s.genes
+g2m.genes <- cc.genes$g2m.genes
+
+if (length(unique(analysis.parameters$organism.include)) > 1){
+  s.genes <-  toupper(s.genes)
+  g2m.genes <-  toupper(g2m.genes)
+} else if (unique(analysis.parameters$organism.include) == "Mm"){
+  s.genes <-  firstup(s.genes)
+  g2m.genes <-  firstup(g2m.genes)
+} else if (unique(analysis.parameters$organism.include) == "Hs"){
+  s.genes <-  toupper(s.genes)
+  g2m.genes <-  toupper(g2m.genes)
+}
+
+so <- ens2sym.so(so, gNames.list)
+
+# cell cycle scoring and umap
+plt.cc.umap <- tryCatch({
+  
+  so <- CellCycleScoring(so, s.features = s.genes, g2m.features = g2m.genes, set.ident = F)
+  
+  plt.cc.umap <- cluster.UMAP(
+    so,
+    group.by = "Phase",
+    x.label = "UMAP 1",
+    y.label = "UMAP 2",
+    plot.name = "Cell Cycle Classifications",
+    include.labels = F)
+  
+}, error = function(e){
+  plt.cc.umap <- NULL
+  return(plt.cc.umap)
+})
+
+# cluster-level composition
+plt.cc <- NULL
+if ("Phase" %in% names(so@meta.data)){
+  df.cc <- data.frame(clusters =  so@meta.data[["seurat_clusters"]], phase =  so@meta.data[["Phase"]])
+  
+  df.cc.tally <- df.cc %>%
+    group_by(clusters, phase) %>%
+    tally()
+  
+  plt.cc.compo <- df.cc.tally %>%
+    ggplot(aes(x = clusters, y = n, fill = phase)) + 
+    geom_bar(position="fill", stat="identity") + 
+    theme_miko(legend = T) + 
+    labs(title = "Cluster Composition by Cell Cycle") + 
+    xlab("Cluster ID") + ylab("Relative Frequency")
+  
+  plt.cc <- cowplot::plot_grid(plt.umap_by_cluster, plt.cc.umap, plt.cc.compo, ncol = 3)
+} 
+
+
+if (analysis.parameters$print.inline) {
+  print(plt.cc)
+}
+
+```
+```{r c21 - variable gene list}
+
+if (normalization_method_ps == "SCT"){
+  df.var.meta <- so@assays[["SCT"]]@meta.features
+  df.var.meta <- df.var.meta[df.var.meta$sct.variable == T, ]
+  df.var.meta <- bind_cols(data.frame(genes = rownames(df.var.meta)), df.var.meta)
+  df.var.meta <- df.var.meta %>% dplyr::arrange(-sct.residual_variance)
+  
+  which.round <- colnames(df.var.meta)[ !(colnames(df.var.meta) %in% c("genes", "sct.variable"))]
+  try({df.var.meta[which.round] <- signif(df.var.meta[which.round], 3)}, silent = T)
+} else {
+  df.var.meta <- NULL
+}
+
+```
+
+```{r c22 - run additional dimensional reductions}
+
+
+
+if (analysis.parameters$do.additional.reduction){
+  
+  # tsne #####################
+  
+  plt.tsne.combo <- tryCatch({
+    so <-RunTSNE(so, dims = 1:nDim)
+    
+    # generate plots
+    plt.tsne_by_cluster <- DimPlot(so, reduction = "tsne", label = TRUE)  + ggtitle(label = "TSNE") +
+      xlab("TSNE 1") + ylab("TSNE 2")
+    
+    plt.tsne <- DimPlot(so, reduction = "tsne",group.by = "Barcode")  + ggtitle(label = "TSNE") +
+      xlab("TSNE 1") + ylab("TSNE 2")
+    
+    # combine plots
+    plt.tsne.combo <- cowplot::plot_grid(plt.tsne_by_cluster, plt.tsne, ncol = 2)
+  }, error = function(e){
+    plt.tsne.combo <- NULL
+    return(plt.tsne.combo)
+  })
+  
+  
+  # PCA ########################
+  
+  # generate plots
+  plt.pca_by_cluster <- DimPlot(so, reduction = "pca", label = TRUE)  + ggtitle(label = "PCA") +
+    xlab("PCA 1") + ylab("PCA 2")
+  
+  plt.pca <- DimPlot(so, reduction = "pca",group.by = "Barcode")  + ggtitle(label = "PCA") +
+    xlab("PCA 1") + ylab("PCA 2")
+  
+  # combine plots
+  plt.pca.combo <- cowplot::plot_grid(plt.pca_by_cluster, plt.pca, ncol = 2)
+  
+  # ICA ########################
+  so <- RunICA(so, verbose = F)
+  
+  # generate plots
+  plt.ica_by_cluster <- DimPlot(so, reduction = "ica", label = TRUE)  + ggtitle(label = "ICA") +
+    xlab("ICA 1") + ylab("ICA 2")
+  
+  plt.ica <- DimPlot(so, reduction = "ica",group.by = "Barcode")  + ggtitle(label = "ICA") +
+    xlab("ICA 1") + ylab("ICA 2")
+  
+  # combine plots
+  plt.ica.combo <- cowplot::plot_grid(plt.ica_by_cluster, plt.ica, ncol = 2)
+  
+} else {
+  plt.tsne.combo <- NULL
+  plt.ica.combo <- NULL
+  plt.pca.combo <- NULL
+}
+
+
+if (analysis.parameters$print.inline){
+  print(plt.tsne.combo)
+  print(plt.pca.combo)
+  print(plt.ica.combo)
+}
+```
+
+
+```{r c23 - summary statistics }
+
+meta.data <- names(so@meta.data)
+
+# get subgroup names
+quantifier.stem <- c("Count", "Feature", "percent.mt")
+which.quant <- grepl(paste(quantifier.stem, collapse = "|"), meta.data)
+quant.names <- meta.data[which.quant]
+meta.names <- meta.data[!which.quant]
+
+df.meta <- so@meta.data
+
+summary.list <- list()
+
+for (i in 1:length(meta.names)){
+  
+  current.meta.name <- meta.names[i]
+  if (current.meta.name %in% c("unmatched.rate", "S.Score", "G2M.Score")) next
+  
+  df.meta.summary <- NULL
+  
+  df.meta.summary <- df.meta %>%
+    group_by(get(meta.names[i])) %>%
+    dplyr::summarise(n.nuclei =n(),
+              UMI.mean = round(mean(nCount_RNA)),
+              UMI.median =  round(median(nCount_RNA)),
+              UMI.min = min(nCount_RNA),
+              UMI.max = max(nCount_RNA),
+              genes.mean =  round(mean(nFeature_RNA)),
+              genes.median =  round(median(nFeature_RNA)),
+              genes.min = min(nFeature_RNA),
+              genes.max = max(nFeature_RNA),
+              mito.mean =  signif(mean(percent.mt),3) ,
+              mito.median =  signif(median(percent.mt),3) ,
+              mito.min =  signif(min(percent.mt),3) ,
+              mito.max =  signif(max(percent.mt),3))
+  
+  colnames(df.meta.summary)[1] <- meta.names[i]
+  
+  if (dim(df.meta.summary)[1] == 1){
+    df.meta.summary <- data.frame(t(df.meta.summary)[2:dim(df.meta.summary)[2], ])
+    colnames(df.meta.summary)[1] <- meta.names[i]
+  } else {
+    df.meta.summary <- as.data.frame(t(df.meta.summary))
+    new.col.name <- as.matrix(df.meta.summary[1,])
+    df.meta.summary <- as.data.frame(df.meta.summary[2:nrow(df.meta.summary),])
+    colnames(df.meta.summary) <- new.col.name
+  }
+  
+  try({
+    summary.list[[meta.names[i]]] <- df.meta.summary
+  }, silent = T)
+  
+}
+
+```
+
+
+
+```{r analysis log and save results}
+
+# Normalization Method #
+if (normalization_method_ps == "NFS"){
+  norm_method <- "normalize, find features, scale"
+} else if (normalization_method_ps == "SCT"){
+  norm_method <- "SCT"
+}
+
+df.log <- addLogEntry("Normalization Method", norm_method, df.log, "norm_method")
+df.log <- addLogEntry("Principal Components Included", nDim, df.log, "nDim")
+df.log <- addLogEntry("Unmatched rate upper limit", unmatch.high, df.log, "unmatch.high")
+df.log <- addLogEntry("Unmatched rate lower limit", unmatch.low, df.log, "unmatch.low")
+
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+
+df.log_Module_1 <- df.log
+
+save.filename <- paste(analysis.parameters$save.directory , analysis.parameters$save.filename, sep = "")
+
+if ((analysis.parameters$save.flag == TRUE) ){
+  save(so, gNames.list, df.log_Module_1, file = save.filename)
+}
+
+```
+
+
+QC Overview
+===================================== 
+
+Row 
+-----------------------------------------------------------------------
+
+### QC Measures: Distributions (pre-filtering)
+
+```{r plt.QC_violin, fig.height= 5, fig.width = 10}
+print(plt.QC_violin)
+```
+
+### QC Measures: Pairwise Scatterplots (pre-filtering)
+
+```{r plt.QC_scatter, fig.height= 5, fig.width = 12}
+print(plt.QC_scatter)
+```
+
+### Mitochondrial %: Distribution (pre-filtering)
+
+```{r mt.mito_by_bc}
+print(plt.mito_by_bc + theme_miko(legend = T))
+```
+
+### Cells Recovered: Pre- and Post-Filtering
+
+```{r plt.filter_pre_post}
+print(plt.filter_pre_post + theme_miko(legend = T))
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Pre- vs Post-Normalization Statistics
+
+```{r plt.pre_post_norm}
+print(plt.pre_post_norm)
+```
+
+### UMI per cell
+
+```{r plt.UMI_per_cell}
+print(plt.UMI_per_cell + theme_miko(legend = T))
+```
+
+### Genes per cell
+
+```{r plt.genes_per_cell}
+print(plt.genes_per_cell + theme_miko(legend = T))
+```
+
+
+### Normalized Gene Expression
+
+```{r plt.variable_genes}
+print(plt.variable_genes)
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Cells Recovered
+```{r valuebox1}
+valueBox(ncol(so))
+```
+
+### Genes per Cell (Median)
+```{r valuebox2}
+valueBox(median(so$nFeature_RNA))
+```
+
+### UMI per Cell (Median)
+```{r valuebox3}
+valueBox(median(so$nCount_RNA))
+```
+
+QC ranks
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### QC (mT)
+
+```{r plt QC ranks mT, fig.width = 15, fig.height = 5}
+ggpubr::ggarrange(plt.gene.umi.mito, plt.umi.rank.mito, plt.gene.rank.mito, plt.mt.rank.mito, ncol = 4) 
+```
+
+### QC (unmatched rate)
+
+```{r plt QC ranks uR, fig.width=17, fig.height = 10}
+
+try({
+  ggpubr::ggarrange(plt.umi.rank.match, plt.gene.rank.match, plt.mt.rank.match,
+                    plt.unmatch.umi, plt.gene.umi.match, plt.umatch.rank,ncol = 3, nrow = 2) 
+}, silent = T)
+
+```
+
+### Filter Venn Diagram
+
+```{r QC venn, fig.width=5, fig.height = 5}
+try({
+ plot(plt.filter.venn) 
+}, silent = T)
+```
+
+
+Population Maps
+===================================== 
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### UMAP
+
+```{r, fig.width=12, fig.height=5}
+print(plt.umap.combo)
+```
+
+### TSNE
+
+```{r, fig.width=12, fig.height=5}
+print(plt.tsne.combo)
+```
+
+### PCA
+
+```{r, fig.width=12, fig.height=5}
+print(plt.pca.combo)
+```
+
+### ICA
+
+```{r, fig.width=12, fig.height=5}
+print(plt.ica.combo)
+```
+
+PCA 
+===================================== 
+
+Row
+-----------------------------------------------------------------------
+
+### PCA
+
+```{r plt.PCA}
+grid.arrange(plt.scree1, plt.scree2, ncol=2)
+```
+
+QC UMAPs
+===================================== 
+
+```{r UMAP QC plots, fig.width=12, fig.height=6}
+plt.umap.qc
+```
+
+QC by subgroups (pre-filtering)
+===================================== 
+
+Row {data-height=700}
+-----------------------------------------------------------------------
+
+```{r plt.violin_by_subgroup, fig.height= 5, fig.width = 12}
+print(plt.violin_by_subgroup)
+```
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### QC summary
+
+```{r df.qc_sum}
+knitr::kable(df.qc_sum)
+```
+
+### nFeature_RNA ANOVA
+
+```{r nFeat_aov}
+knitr::kable(nFeat_aov[[1]])
+```
+
+### nCount_RNA ANOVA
+
+```{r nCount_aov}
+knitr::kable(nCount_aov[[1]])
+```
+
+### percent.mt ANOVA
+
+```{r mT_aov}
+knitr::kable(mT_aov[[1]])
+```
+
+Cell Cycle
+===================================== 
+
+```{r plot cc plot, fig.width=14, fig.height=4}
+
+try({
+  print(plt.cc)
+}, silent = T)
+
+```
+
+
+Summary Statistics
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+
+```{r summary statistis,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out <- flex.multiTabTables(summary.list, "summary.list")
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+Variable Genes
+===================================== 
+```{r var table list}
+
+if (!is.null(df.var.meta)){
+  flex.asDT(df.var.meta)
+}
+```
+
+
+Log
+===================================== 
+
+```{r}
+knitr::kable(df.log_Module_1)
+
+```
+
+
+

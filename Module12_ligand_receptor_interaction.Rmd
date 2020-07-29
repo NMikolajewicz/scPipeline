@@ -1,0 +1,991 @@
+---
+title: "Module12_ligand_receptor_interactions"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+packages2load <- c("Seurat", 
+                   "plyr", "dplyr", "tidyr", "reshape2", "arrangements", "RColorBrewer", "ggplot2", "gridExtra", 
+                   "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", "cowplot", "iTALK")
+
+# load packages
+lapply(packages2load, library, character.only = TRUE)
+```
+
+
+```{r check available input files}
+
+show.available.files <- FALSE
+if (show.available.files){
+  list.files("Preprocessed Datasets/")
+}
+
+```
+
+
+```{r specify parameters}
+
+# TODO
+# mean for ligand, median for receptor (rationale is that ligands do not depend on cell type, receptors do)
+
+# query input
+# input.file <- "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata"
+input.file <- "Module2_Renca_cell_nuc_sci_T12_4000ds_Celsius_integrated_240220.Rdata"
+# input.file <- "Module1_pilot4_GL261_CT2A.Rdata"
+# input.file <- "Module1_Suva2019.Rdata"
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed Datasets/"
+
+cluster.resolution = 0.4
+
+print.inline <- F
+
+data.type  <- "mean count" # options: mean count, DEG
+
+top.N.genes <- 50 # Nth percentile expression
+
+# compare cell types
+pairwise.comparison.flag <- F
+cell_type_a <- "c12"
+cell_type_b <- "c4"
+
+# subset data
+cell_barcode.filter.flag <- F
+# cell_barcode.filter.list <- list(adult = c("MGH1","MGH66"),
+                                 # pediatric = c("BT", "MGH85"))# subset according to cell names 
+#Suva2019: 
+# adult GBM: MGH1* & MGH66
+# pedaetric GBM: BT & MGH85
+
+group_barcode.filter.flag <- F
+# group_barcode.filter.list <- list(GL261 = c("GL261"),
+                                  # CT2A = c("CT2A"))
+
+# communication type
+communication.type <- c("growth factor", "other", 'cytokine','checkpoint')
+# communication.type <-  "checkpoint" # options: cytokine, checkpoint, growth factor, other
+
+aggregation.method <- "mean" # options: mean, median
+n.LRpairs <- 20
+```
+
+
+```{r}
+if (pairwise.comparison.flag){
+  stopifnot(exists("cell_type_a") & exists("cell_type_b"))
+}
+```
+
+
+
+```{r analysis log}
+
+# Module
+df.log <- data.frame()
+df.log[nrow(df.log)+1, 1] <- as.character("Module")
+df.log[nrow(df.log), 2] <- as.character("")
+df.log[nrow(df.log), 3] <- as.character("12, Ligand-Receptor Interactions")
+colnames(df.log) <- c("Description", "Variable Name", "Value")
+
+# User 
+df.log[nrow(df.log)+1, 1] <- as.character("User")
+df.log[nrow(df.log), 2] <- as.character("Sys.getenv('USERDOMAIN')")
+df.log[nrow(df.log), 3] <- as.character(Sys.getenv("USERDOMAIN"))
+
+# Date
+df.log[nrow(df.log)+1, 1] <- as.character("Date")
+df.log[nrow(df.log), 2] <- as.character("Sys.time()")
+df.log[nrow(df.log), 3] <- as.character(Sys.time())
+
+# Query
+df.log[nrow(df.log)+1, 1] <- as.character("Input File (.Rdata)")
+df.log[nrow(df.log), 2] <- as.character("input.file")
+df.log[nrow(df.log), 3] <- as.character(paste(dir.preprocessed, input.file, sep = ""))
+
+
+# Cluster Resolution
+df.log[nrow(df.log)+1, 1] <- as.character("Queried Cluster Resolution(s)")
+df.log[nrow(df.log), 2] <- as.character("cluster.resolution")
+if (length(cluster.resolution) > 1){
+  df.log[nrow(df.log), 3] <- paste(cluster.resolution, collapse=", ")
+} else {
+  df.log[nrow(df.log), 3] <- as.character(cluster.resolution)
+}
+
+
+# data.type
+df.log[nrow(df.log)+1, 1] <- as.character("Data Type")
+df.log[nrow(df.log), 2] <-  as.character("data.type")
+df.log[nrow(df.log), 3] <-  as.character(data.type)
+
+# communication.type
+df.log[nrow(df.log)+1, 1] <- as.character("Communication Type")
+df.log[nrow(df.log), 2] <-  as.character("communication.type")
+if (length(communication.type) > 1){
+  df.log[nrow(df.log), 3] <- paste(communication.type, collapse=", ")
+} else {
+  df.log[nrow(df.log), 3] <- as.character(communication.type)
+}
+
+# Top N Pairs Shown
+df.log[nrow(df.log)+1, 1] <- as.character("Top N pairs shown")
+df.log[nrow(df.log), 2] <-  as.character("n.LRpairs")
+df.log[nrow(df.log), 3] <-  as.character(n.LRpairs)
+
+
+# aggregation.method
+df.log[nrow(df.log)+1, 1] <- as.character("Aggregation Method")
+df.log[nrow(df.log), 2] <-  as.character("aggregation.method")
+df.log[nrow(df.log), 3] <-  as.character(aggregation.method)
+
+# cell to cell comparison flag
+df.log[nrow(df.log)+1, 1] <- as.character("cell-cell comparison flag")
+df.log[nrow(df.log), 2] <-  as.character("pairwise.comparison.flag")
+df.log[nrow(df.log), 3] <-  as.character(pairwise.comparison.flag)
+
+if (pairwise.comparison.flag){
+  # cell type A
+  df.log[nrow(df.log)+1, 1] <- as.character("Cell Type A")
+  df.log[nrow(df.log), 2] <-  as.character("cell_type_a")
+  df.log[nrow(df.log), 3] <-  as.character(cell_type_a)
+  
+  # cell type B
+  df.log[nrow(df.log)+1, 1] <- as.character("Cell Type B")
+  df.log[nrow(df.log), 2] <-  as.character("cell_type_b")
+  df.log[nrow(df.log), 3] <-  as.character(cell_type_b)
+}
+
+
+```
+
+
+```{r function to rename CellTypes to Barcode (fix artefact of earlier analysis pipeline) PACKAGE}
+
+fix.barcode.label <- function (so){
+  # merge CellType and Barcode, if necessary
+  meta.data.names <- names(so@meta.data)
+  
+  if (("CellType" %in% meta.data.names) & ("Barcode" %in% meta.data.names)){
+    if (DefaultAssay(so) == "integrated"){
+      barcode <- so@meta.data[["Barcode"]]
+      celltype <- so@meta.data[["CellType"]]
+      barcode[is.na(barcode)] <- celltype[is.na(barcode)] 
+    } else {
+      barcode <- so@meta.data[["CellType"]]
+    }
+  } else if (!("CellType" %in% meta.data.names) & ("Barcode" %in% meta.data.names)) {
+    barcode <- so@meta.data[["Barcode"]]
+  } else if (("CellType" %in% meta.data.names) & !("Barcode" %in% meta.data.names)) {
+    barcode <- so@meta.data[["CellType"]]
+    
+  } else {stop("Problem with CellType/Barcode metadata detected. Troubleshooting required")}
+  
+  so@meta.data[["Barcode"]] <- barcode
+  
+  return(so)
+}
+
+```
+
+
+```{r load data}
+
+if (!exists("dir.preprocessed")){dir.preprocessed <- ""}
+load(paste(dir.preprocessed, input.file, sep = ""))
+so <- fix.barcode.label(so)
+so <- UpdateSeuratObject(so) # required after Seurat 3.1.2 update
+
+
+```
+
+
+
+
+```{r prep gene list}
+
+if (exists("gNames.list_master")){
+  gNames.list <- NULL
+  for (i in 1:length(gNames.list_master)){
+    gNames.list <- c(gNames.list, gNames.list_master[[i]] )
+  }
+  
+  # gNames.df <-  data.frame(n = as.vector(names(gNames.list)), g = as.vector(gNames.list))
+  gNames.df <-  data.frame(n = gsub("\\..*","",as.vector(names(gNames.list))), g = as.vector(gNames.list))
+  gNames.df <- unique(gNames.df)
+  gNames.list <- as.vector(gNames.df$g)
+  names(gNames.list) <- as.vector(gNames.df$n)
+} 
+
+# ensure gene list is available
+stopifnot(exists("gNames.list"))
+```
+
+```{r get prior module logs}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+```{r ensure clusters are calculated}
+
+for (i in 1:length(cluster.resolution)) {
+  so <- FindClusters(object = so, resolution = cluster.resolution[i], verbose = 0, algorithm = 1, modularity.fxn = 1)
+}
+```
+
+
+```{r normalized and scale}
+
+DefaultAssay(so) <- "RNA"
+
+so <-NormalizeData(so, verbose = FALSE)
+so <- ScaleData(so, verbose = FALSE)
+
+current.assay <- DefaultAssay(so)
+```
+
+```{r subset data}
+# get Seurat subset for cells of interest
+so.list_1 <- list()
+if (cell_barcode.filter.flag == TRUE){
+  for (i  in 1:length(cell_barcode.filter.list)){
+    grp.name <- names(cell_barcode.filter.list)[i]
+    pattern <- paste(cell_barcode.filter.list[[i]], collapse="|")
+    so.list_1[[grp.name]] <- SubsetData(object = so, cells = (grepl(pattern, colnames(so@assays[[current.assay]]@scale.data)))) 
+  }
+} else {so.list_1 <- NULL}
+
+
+# get Seurat subset for groups of interest
+so.list_2 <- list()
+if (group_barcode.filter.flag == TRUE){
+  for (i  in 1:length(group_barcode.filter.list)){
+    grp.name_2 <- names(group_barcode.filter.list)[i]
+    if (!is.null(so.list_1)){
+      for (j in 1:length(so.list_1)){
+        grp.name_1 <- names(so.list_1)[j]
+        grp.name <- paste(grp.name_1, "_", grp.name_2, sep = "")
+        pattern <- paste(group_barcode.filter.list[[i]], collapse="|")
+        so.list_2[[grp.name]] <- SubsetData(object = so.list_1[[j]], 
+                                            cells = (grepl(pattern, so.list_1[[j]]@meta.data[["Barcode"]])))  
+      }
+    } else {
+      grp.name <- grp.name_2
+        pattern <- paste(group_barcode.filter.list[[i]], collapse="|")
+      so.list_2[[grp.name]] <- SubsetData(object = so, cells = (grepl(pattern, so@meta.data[["Barcode"]])))  
+    }
+  }
+} else {so.list_2 <- NULL}
+
+# assign so subsets to correct list
+if (is.null(so.list_1) & is.null(so.list_2)){
+  so.list <- list(so)
+  names(so.list) <- input.file
+} else if (is.null(so.list_1) & !is.null(so.list_2)){
+  so.list <- so.list_2
+} else if (!is.null(so.list_1) & is.null(so.list_2)){
+  so.list <- so.list_1
+} else if (!is.null(so.list_1) & !is.null(so.list_2)){
+  so.list <- so.list_2
+}
+
+```
+
+
+```{r uMAP}
+
+plt.umap.list <- list()
+
+for (i in 1:length(so.list)){
+  grp.name <- names(so.list)[i]
+  # cluster.field <- paste(DefaultAssay(so.list[[grp.name]]), "_snn_res.", cluster.resolution, sep = "")
+  cluster.field <- "seurat_clusters"
+  
+  plt.umap.list[[grp.name]] <- DimPlot(so.list[[grp.name]], reduction = "umap", 
+                                       label = T, 
+                                       group.by = cluster.field)  + 
+    xlab("UMAP 1") + ylab("UMAP 2") + 
+    ggtitle(grp.name)
+  if (print.inline){print(plt.umap.list[[grp.name]])}
+}
+
+
+```
+
+
+```{r  function to specify signature gene sets}
+# convert human symbols to mouse symbols
+
+gene2species <- function(x, expected_species){
+  if (expected_species == "Hs"){
+    x <- toupper(x)
+  } else if (expected_species == "Mm"){
+    x <- tolower(x)
+    substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+    
+  }
+  return(x)
+}
+```
+
+
+```{r check gene representation}
+
+
+# check what format genes are represented in (ensembl or symbol)
+check.gene_rep <- function(cur_gene.list, cur_rep){
+  
+  
+  ensembl_rep <- sum(as.vector(names(cur_gene.list)) %in% cur_rep)
+  symbol_rep <- sum(as.vector(cur_gene.list) %in% cur_rep)
+  if (ensembl_rep > symbol_rep){
+    gene.rep <- "ensembl"
+  } else if (symbol_rep > ensembl_rep){
+    gene.rep <- "symbol"
+  } else {
+    gene.rep <- NA
+  }
+  
+  return(gene.rep)
+  
+}
+
+```
+
+
+
+
+```{r define prep data function}
+
+
+prep.data <- function(so, cluster.field, gNames.list){
+  
+  
+  # initiate dataframe
+  # df.mean_exp <- data.frame()
+  
+  # get unique clusters
+  u.clusters <- as.numeric(as.character(unique(so@meta.data[[cluster.field]])))
+  u.clusters <- u.clusters[order(u.clusters)]
+  
+  # get normalizated expression matrix
+  exp.mat <- so@assays[[current.assay]]@scale.data 
+  exp.df_t <- as.data.frame(t(exp.mat))
+  
+  # prepare data
+  cur.genes <- colnames(exp.df_t)
+  gene.rep <- check.gene_rep(cur_gene.list = gNames.list, cur_rep = cur.genes)
+  if (gene.rep == "ensembl"){
+    cur.genes <-  as.vector(gNames.list[cur.genes])
+  }
+  stopifnot(check.gene_rep(cur_gene.list = gNames.list, cur_rep = cur.genes) == "symbol")
+  
+  # exp.df_t <- as.data.frame(t(exp.mat))
+  colnames(exp.df_t) <- gene2species(cur.genes, expected_species = "Hs")
+  exp.df_t$cell_type <- paste("c", as.vector(so@meta.data[[cluster.field]]), sep = "")
+  
+  
+  
+  output <- list(u.clusters, exp.mat, exp.df_t)
+  return(output)
+  
+}
+
+# initiate lists
+u.clusters.list <- list()
+exp.mat.list <- list()
+exp.df_t.list <- list()
+
+for (i in 1:length(so.list)){
+  grp.name <- names(so.list)[i]
+  
+  # cluster.field <- paste(DefaultAssay(so.list[[grp.name]]), "_snn_res.", cluster.resolution, sep = "")
+  cluster.field <- "seurat_clusters"
+  prep.output <- prep.data(so.list[[grp.name]], cluster.field, gNames.list)
+  
+  u.clusters.list[[grp.name]] <- prep.output[[1]]
+  exp.mat.list[[grp.name]] <- prep.output[[2]]
+  exp.df_t.list[[grp.name]] <- prep.output[[3]]
+}
+
+
+```
+
+
+```{r analysis function}
+
+analyze_LG.pairs <- function(u.clusters, exp.df_t, communication.type, high.exp_genes = NULL, aggregation.method = "mean", top.N.genes = 50, n.LRpairs = 20){
+
+  
+  # get top nth percentile 
+  if (is.null(high.exp_genes)){
+    high.exp_genes <-rawParse(exp.df_t,top_genes=top.N.genes,stats=aggregation.method)
+  }
+  
+  res_cat<-FindLR(high.exp_genes, datatype='mean count', comm_type=communication.type)
+  
+  # sort by product of ligand*receptor expression
+  res_cat<-res_cat[order(res_cat$cell_from_mean_exprs*res_cat$cell_to_mean_exprs,decreasing=T),]
+  
+  
+  # output <- list(high.exp_genes, res_cat)
+  return(res_cat)
+}
+
+```
+
+
+
+```{r ligand-receptor pairs from highly expressed genes, fig.height= 10, fig.width= 10}
+
+# initiate lists
+res.LR.list <- list()
+res.LR.list2 <- list()
+
+
+for (i in 1:length(so.list)){
+  
+  # initiate lists
+  res.comm.list <- list()
+  res.comm.list2 <- list()
+  
+  # get data name
+  grp.name <- names(so.list)[i]
+  
+  # get data
+  so <- so.list[[grp.name]]
+  exp.df_t <- exp.df_t.list[[grp.name]]
+  u.clusters <- u.clusters.list[[grp.name]]
+  
+  # get highly expressed genes
+  top.N.genes <- 100
+  high.exp_genes <-rawParse(exp.df_t,top_genes=top.N.genes,stats=aggregation.method)
+  
+  # inititate data.frames
+  res.by_comm <- NULL
+  res.by_comm2 <- NULL
+  for (j in 1:length(communication.type)){
+    comm.type <- communication.type[j]
+    
+    # run ligand receptor interaction analysis 
+    res.comm.list[[comm.type]] <- analyze_LG.pairs(u.clusters = u.clusters, 
+                                                   exp.df_t = exp.df_t, 
+                                                   communication.type = comm.type,
+                                                   high.exp_genes = high.exp_genes, 
+                                                   aggregation.method = aggregation.method, 
+                                                   top.N.genes = 100, 
+                                                   n.LRpairs = n.LRpairs)
+    
+    
+    res.comm.list[[comm.type]]$cell_from_mean_exprs <- signif(res.comm.list[[comm.type]]$cell_from_mean_exprs, 3)
+    res.comm.list[[comm.type]]$cell_to_mean_exprs <- signif(res.comm.list[[comm.type]]$cell_to_mean_exprs, 3)
+    
+    # a <- res.comm.list[[comm.type]]
+    res.by_comm<-rbind(res.by_comm,res.comm.list[[comm.type]])
+    
+    # subset data to include top n.LRpairs
+      top.data <- res.comm.list[[comm.type]][1:n.LRpairs,]
+      top.data <- top.data[complete.cases(top.data), ]
+      res.comm.list2[[comm.type]] <- top.data
+      res.by_comm2 <- rbind(res.by_comm2, res.comm.list2[[comm.type]] ) # for output plots
+    
+    if (print.inline){
+      # specify cell colors
+      my.cols <-colorRampPalette(brewer.pal(8, paste("Set", set_color = 2, sep = "")))(length(u.clusters))
+      cell_col<-structure(my.cols,names=unique(exp.df_t$cell_type ))
+      
+      # LR interaction plot
+      LRPlot( top.data,
+              datatype='mean count',
+              cell_col=cell_col,
+              link.arr.lwd= top.data$cell_from_mean_exprs,
+              link.arr.width= top.data$cell_to_mean_exprs)
+      title(paste(grp.name, ": ", comm.type, sep = ""))
+      
+      # NetView(res.comm.list[[comm.type]][1:n.LRpairs,],col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
+    }
+  }
+  
+  # store results
+  res.comm.list[["pooled"]] <- res.by_comm
+  res.comm.list2[["pooled"]] <- res.by_comm2
+  
+  res.LR.list[[grp.name]] <- res.comm.list
+  res.LR.list2[[grp.name]] <- res.comm.list2
+}
+
+
+# # show top N LR pairs (overall; for each communication type)
+# resA.overall<-resA.by_comm[order(resA.by_comm$cell_from_mean_exprs*resA.by_comm$cell_to_mean_exprs,decreasing=T),][1:n.LRpairs,]
+# 
+# if (print.inline){
+#   # network plot
+#   a <- NetView(resA.overall,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
+#   
+#   # LR pairs
+#   b <- LRPlot(resA.overall[1:n.LRpairs,],
+#          datatype='mean count',
+#          cell_col=cell_col,
+#          link.arr.lwd=resA.overall$cell_from_mean_exprs[1:n.LRpairs],
+#          link.arr.width=resA.overall$cell_to_mean_exprs[1:n.LRpairs])
+#   title("Top Interactions")
+# }
+
+```
+```{r}
+
+
+work.in.progress <- F
+
+if (work.in.progress){
+  
+
+# find and filter queries
+query.interaction <- "tnf"
+query.match <- grepl(toupper(query.interaction), res.by_comm$ligand) |  grepl(toupper(query.interaction), res.by_comm$receptor)
+res.query <- res.by_comm[query.match, ]
+
+res.query <- res.by_comm
+
+# res.query <- res.query[res.query$cell_from_mean_exprs > 0 | res.query$cell_to_mean_exprs > 0, ]
+
+res.query$pair <- paste(res.query$ligand, "-", res.query$receptor, sep = "")
+
+# res.query.tally <- res.query %>%
+#   dplyr::group_by(comm_type, pair) %>%
+#   tally()
+# 
+# 
+# res.query.ligand <- res.query %>%
+#   dplyr::group_by(comm_type, ligand) %>%
+#   tally()
+# 
+# res.query.receptor <- res.query %>%
+#   dplyr::group_by(comm_type, receptor) %>%
+#   tally()
+
+
+res.query.ligand <- res.query %>%
+  dplyr::group_by(ligand) %>%
+  tally()
+
+df.exp <- high.exp_genes
+
+
+all.cluster.id <- paste("c", as.character(so@active.ident), sep = "")
+df.c <- data.frame(cell_type = all.cluster.id) %>%
+  dplyr::group_by(cell_type) %>%
+  tally()
+
+df.exp.merge <- merge(df.exp, df.c, by = "cell_type")
+df.exp.merge$cluster.gene <- paste(df.exp.merge$cell_type, "-", df.exp.merge$gene, sep = "")
+
+df.interaction <- res.by_comm
+df.interaction$cluster.gene<- paste(df.interaction$cell_from, "-", df.interaction$ligand, sep = "")
+df.interaction <- df.interaction[ , c("cell_from_mean_exprs", "cluster.gene", "comm_type")]
+
+df.exp.merge.int <- merge(df.exp.merge, df.interaction, by = "cluster.gene")
+
+df.exp.merge.int.u <- unique(df.exp.merge.int)
+
+df.exp.merge.int.u$ligand.sum <- df.exp.merge.int.u$n * df.exp.merge.int.u$cell_from_mean_exprs
+
+df.ligand.pool <- df.exp.merge.int.u %>%
+  dplyr::group_by(gene) %>%
+  dplyr::summarize(ligand.pool = sum(ligand.sum),
+            comm = list(comm.type))
+
+
+hist(df.ligand.pool$ligand.pool)
+# hist(res.query$cell_from_mean_exprs)
+# res.query <- res.query[res.query$receptor %in% query.receptor, ]
+
+}
+
+```
+
+
+```{r significant ligand-receptor pairs between compare groups}
+
+# exp.df_t$cell_type 
+
+# 
+# valid_column_names <- make.names(names=names(exp.df_t), unique=TRUE, allow_ = TRUE)
+# names(exp.df_t) <- valid_column_names
+# 
+# exp.df_t.pooled <- NULL
+# for (i in 1:length(exp.df_t.list)){
+#   grp.name <- names(so.list)[i]
+#   exp.df_t <- exp.df_t.list[[grp.name]]
+#   exp.df_t$cell_type = i # last change
+#   exp.df_t.pooled <- rbind(exp.df_t.pooled, exp.df_t)
+# }
+# 
+# 
+# 
+# u.groups <- as.vector(unique(exp.df_t.pooled$compare_group))
+# deg.pooled.list <- list()
+# 
+# 
+# for (i in u.groups){
+#   exp.df_t.pooled_comp<- exp.df_t.pooled %>% mutate(compare_group =  sample(2,nrow(exp.df_t.pooled),replace=TRUE))
+#   deg.pooled.list[[i]] <- DEG(exp.df_t.pooled_comp %>% dplyr::filter(cell_type==i), method='Wilcox')
+#   
+# }
+
+
+
+
+
+
+# deg.pooled <- DEG(exp.df_t.pooled, 
+#              method='Wilcox')
+# 
+# # randomly assign the compare group to each sample
+# # compare_grps <- sample(2,nrow(exp.df_t),replace=TRUE)
+# exp.df_t_comp<- exp.df_t %>% mutate(compare_group =  sample(2,nrow(exp.df_t),replace=TRUE))
+# exp.df_t_comp <- exp.df_t_comp[complete.cases(exp.df_t_comp), ]
+# 
+# 
+# # find DEGenes of regulatory T cells and NK cells between these 2 groups
+# sub_a <- exp.df_t_comp %>% dplyr::filter(cell_type==cell_type_a)
+# compare_grps <- sample(2,nrow(sub_a),replace=TRUE)
+# sub_a<- sub_a %>% mutate(compare_group = compare_grps)
+# sub_a <- sub_a[complete.cases(sub_a), ]
+# deg_a <- DEG(sub_a, 
+#              method='Wilcox',
+#              contrast=c(2,1))
+# 
+# 
+# sub_b <- exp.df_t_comp %>% dplyr::filter(cell_type==cell_type_b)
+# compare_grps <- sample(2,nrow(sub_b),replace=TRUE)
+# sub_b<- sub_b %>% mutate(compare_group = compare_grps)
+# sub_b <- sub_b[complete.cases(sub_b), ]
+# deg_b <- DEG(sub_b,
+#              method='Wilcox',
+#              contrast=c(2,1))
+
+# find significant ligand-receptor pairs and do the plotting
+# resB.by_comm<-NULL
+# 
+# for(comm_type in communication.type){
+#   res_cat<-FindLR(deg_a,deg_b,datatype='DEG',comm_type=comm_type)
+#   res_cat<-res_cat[order(res_cat$cell_from_logFC*res_cat$cell_to_logFC,decreasing=T),]
+#   
+#   #plot by ligand category
+#   if(nrow(res_cat)==0){
+#     next
+#   }else if(nrow(res_cat>=n.LRpairs)){
+#     LRPlot(res_cat[1:n.LRpairs,],
+#            datatype='DEG',cell_col=cell_col,
+#            link.arr.lwd=res_cat$cell_from_logFC[1:n.LRpairs],
+#            link.arr.width=res_cat$cell_to_logFC[1:n.LRpairs])
+#   }else{
+#     LRPlot(res_cat,datatype='DEG',
+#            cell_col=cell_col,
+#            link.arr.lwd=res_cat$cell_from_logFC,
+#            link.arr.width=res_cat$cell_to_logFC)
+#   }
+#   
+#   # network plot
+#   NetView(res_cat,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
+#   title(comm_type)
+#   
+#   # store results
+#   resB.by_comm<-rbind(resB.by_comm,res_cat)
+# }
+# 
+# # pool results for all communication types
+# if(is.null(resB.by_comm)){
+#   print('No significant pairs found')
+#   
+# } else if(nrow(resB.by_comm)>=n.LRpairs){
+#   # pool results
+#   resB.overall <- resB.by_comm[order(resB.by_comm$cell_from_logFC*resB.by_comm$cell_to_logFC,decreasing=T),][1:n.LRpairs,]
+#   
+#   # network plot
+#   NetView(resB.overall,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
+#   
+#   # LR plot
+#   LRPlot(resB.overall[1:n.LRpairs,],
+#          datatype='DEG',
+#          cell_col=cell_col,
+#          link.arr.lwd=resB.overall$cell_from_logFC[1:n.LRpairs],
+#          link.arr.width=resB.overall$cell_to_logFC[1:n.LRpairs])
+#   
+# } else{
+#   
+#   # network plot
+#   NetView(resB.by_comm,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
+#   
+#   # LR plot
+#   LRPlot(resB.by_comm,datatype='DEG',
+#          cell_col=cell_col,link.arr.lwd=resB.by_comm$cell_from_logFC,
+#          link.arr.width=resB.by_comm$cell_to_logFC)
+# }
+
+```
+
+
+
+```{r, fig.height= 10, fig.width= 10}
+# 
+# library(iTALK)
+# 
+# 
+# 
+# ## highly expressed ligand-receptor pairs
+# 
+# # find top 50 percent highly expressed genes
+# highly_exprs_genes<-rawParse(my_data,top_genes=50,stats='mean')
+# # find the ligand-receptor pairs from highly expressed genes
+# comm_list<-c('growth factor','other','cytokine','checkpoint')
+# cell_col<-structure(c('#4a84ad','#4a1dc6','#e874bf','#b79eed', '#ff636b', '#52c63b','#9ef49a'),names=unique(my_data$cell_type))
+# par(mfrow=c(1,2))
+# res<-NULL
+# for(comm_type in comm_list){
+#   res_cat<-FindLR(highly_exprs_genes,datatype='mean count',comm_type=comm_type)
+#   res_cat<-res_cat[order(res_cat$cell_from_mean_exprs*res_cat$cell_to_mean_exprs,decreasing=T),]
+#   #plot by ligand category
+#   #overall network plot
+#   NetView(res_cat,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
+#   #top 20 ligand-receptor pairs
+#   LRPlot(res_cat[1:20,],datatype='mean count',cell_col=cell_col,link.arr.lwd=res_cat$cell_from_mean_exprs[1:20],link.arr.width=res_cat$cell_to_mean_exprs[1:20])
+#   title(comm_type)
+#   res<-rbind(res,res_cat)
+# }
+# res<-res[order(res$cell_from_mean_exprs*res$cell_to_mean_exprs,decreasing=T),][1:20,]
+# NetView(res,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
+# LRPlot(res[1:20,],datatype='mean count',cell_col=cell_col,link.arr.lwd=res$cell_from_mean_exprs[1:20],link.arr.width=res$cell_to_mean_exprs[1:20])
+# 
+# ## significant ligand-receptor pairs between compare groups
+# 
+# # randomly assign the compare group to each sample
+# my_data<-my_data %>% mutate(compare_group=sample(2,nrow(my_data),replace=TRUE))
+# # find DEGenes of regulatory T cells and NK cells between these 2 groups
+# deg_t<-DEG(my_data %>% filter(cell_type=='regulatory_t'),method='Wilcox',contrast=c(2,1))
+# deg_nk<-DEG(my_data %>% filter(cell_type=='cd56_nk'),method='Wilcox',contrast=c(2,1))
+# # find significant ligand-receptor pairs and do the plotting
+# par(mfrow=c(1,2))
+# res<-NULL
+# for(comm_type in comm_list){
+#   res_cat<-FindLR(deg_t,deg_nk,datatype='DEG',comm_type=comm_type)
+#   res_cat<-res_cat[order(res_cat$cell_from_logFC*res_cat$cell_to_logFC,decreasing=T),]
+#   #plot by ligand category
+#   if(nrow(res_cat)==0){
+#     next
+#   }else if(nrow(res_cat>=20)){
+#     LRPlot(res_cat[1:20,],datatype='DEG',cell_col=cell_col,link.arr.lwd=res_cat$cell_from_logFC[1:20],link.arr.width=res_cat$cell_to_logFC[1:20])
+#   }else{
+#     LRPlot(res_cat,datatype='DEG',cell_col=cell_col,link.arr.lwd=res_cat$cell_from_logFC,link.arr.width=res_cat$cell_to_logFC)
+#   }
+#   NetView(res_cat,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
+#   title(comm_type)
+#   res<-rbind(res,res_cat)
+# }
+# if(is.null(res)){
+#   print('No significant pairs found')
+# }else if(nrow(res)>=20){
+#   res<-res[order(res$cell_from_logFC*res$cell_to_logFC,decreasing=T),][1:20,]
+#   NetView(res,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
+#   LRPlot(res[1:20,],datatype='DEG',cell_col=cell_col,link.arr.lwd=res$cell_from_logFC[1:20],link.arr.width=res$cell_to_logFC[1:20])
+# }else{
+#   NetView(res,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
+#   LRPlot(res,datatype='DEG',cell_col=cell_col,link.arr.lwd=res$cell_from_logFC,link.arr.width=res$cell_to_logFC)
+# }
+# I just randomly assigned the compare group to samples which has no biological difference for showing how to use the package.
+# So there should be no significant genes to be expected. 
+
+```
+
+
+
+UMAP
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r ph1,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out <- lapply(seq_along(plt.umap.list), function(i) {
+  
+  s1 <- paste("UMAP | ", names(plt.umap.list)[i], sep = "")
+
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1)) # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("plt", i, sep = ""))) # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\nprint(plt.umap.list[[%d]])", i)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+```{r ph4,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out1 <- lapply(seq_along(res.LR.list2), function(i) {
+  
+  cur.name <- names(res.LR.list2)[i]
+  
+  a1 <- knitr::knit_expand(text = sprintf("\nLR interactions | %s", paste(cur.name)))
+  a2 <- knitr::knit_expand(text = "\n=====================================")
+  a3 <- knitr::knit_expand(text = "\nRow {.tabset}")
+  a4 <- knitr::knit_expand(text = "\n-------------------------------------\n")
+  
+  
+  out2 <- lapply(seq_along(res.LR.list2[[i]]), function(j) {
+    
+    
+    n.LRpairs <- 20 # changed 
+    
+    clust_a <- as.vector(res.LR.list2[[i]][[j]][["cell_from"]])
+    clust_b <- as.vector(res.LR.list2[[i]][[j]][["cell_to"]])
+    clust_all <- as.vector(unique(c(clust_a, clust_b)))
+    
+    # specify cell colors
+    
+    grp.name <- names(res.LR.list2)[i]
+    comm.type <- names(res.LR.list2[[i]])[j]
+    my.cols <-colorRampPalette(brewer.pal(8, paste("Set", set_color = 2, sep = "")))(length(clust_all))
+    cell_col <-my.cols
+    # cell_col<-structure(my.cols,names=unique(exp.df_t$cell_type ))
+    
+    # LR plot
+    s1 <- sprintf("LRPlot( res.LR.list2[[%d]][[%d]], 
+    datatype='mean count', 
+    link.arr.lwd= res.LR.list2[[%d]][[%d]]$cell_from_mean_exprs, 
+    link.arr.width= res.LR.list2[[%d]][[%d]]$cell_to_mean_exprs)",i, j, i, j, i, j)
+    
+    
+    # s1 <- sprintf("LRPlot( res.LR.list2[[%d]][[%d]][1:%d,], 
+    # datatype='mean count', 
+    # link.arr.lwd= res.LR.list2[[%d]][[%d]]$cell_from_mean_exprs[1:%d], 
+    # link.arr.width= res.LR.list2[[%d]][[%d]]$cell_to_mean_exprs[1:%d])",i, j,  n.LRpairs, i, j,  n.LRpairs, i, j, n.LRpairs)
+    
+    s2 <- paste(grp.name, ': ',comm.type, sep = '')
+    # s2 <- sprintf("title(paste(%s)", s2)
+    
+    
+    b1 <- knitr::knit_expand(text = sprintf("\n### %s\n", comm.type)) # tab header
+    b2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=10, fig.height=10, message=FALSE, warning=FALSE}", 
+                                            paste("chunk", i, j, sep = ""))) 
+    b3 <- knitr::knit_expand(text = sprintf("\n %s",s1)) 
+    # b4 <- knitr::knit_expand(text = sprintf("\n title(%s)", s2))
+    b5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+    
+    out2 <- paste(b1, b2, b3, b5, collapse = '\n')
+    return(out2) # collapse together all lines with newline separator
+    
+  })
+  
+  a5 <- paste(knitr::knit(text = paste(out2, collapse = '\n')))
+  
+  out1 <- paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+  return(out1)
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+
+
+LR Interaction Tables
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r detailed table output,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out_heat <- lapply(seq_along(res.LR.list), function(i) {
+  
+  # res.LR.list[["GL261"]][["pooled"]]
+  
+  s1 <- paste("res.LR.list[[", i, "]][['pooled']]", sep = "")
+  
+  table.name <- names(res.LR.list)[i]
+  
+  s4 <- paste("datatable(", s1, ", filter = 'top', options = list(pageLength = 50))", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("detailed_tab", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s",s4)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out_heat, collapse = '\n')))`
+
+
+
+```{r analysis log final}
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
+df.log[nrow(df.log), 2] <- as.character("elapsed.time")
+df.log[nrow(df.log), 3] <- as.character(elapsed.time)
+
+df.log_Module_12 <- df.log
+
+```
+
+
+```{r ph10,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out1 <- lapply(seq_along(module.logs), function(i) {
+  
+  module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
+  
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (Module %s)", paste(module.n)))
+  a2 <- knitr::knit_expand(text = "\n=====================================")
+  a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
+  a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
+  a5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+Log (Module 12)
+===================================== 
+
+```{r table.log_current, message=FALSE, warning=FALSE}
+
+knitr::kable(df.log_Module_12)
+
+```
+

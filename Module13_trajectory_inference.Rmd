@@ -1,0 +1,4339 @@
+---
+title: "Module13_trajectory_inference"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r setup, include=FALSE}
+
+knitr::knit_meta(class=NULL, clean = TRUE)
+# clear global enviroment
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+library(scMiko)
+library(reticulate)
+library(destiny)
+library(foreach)
+library(doParallel)
+library(dtw)
+library(clusterExperiment)
+library(diffusr)
+library(markovchain)
+
+# py_install("fa2", pip = TRUE)
+# py_install("Cython", pip = TRUE)
+
+packages2load <- c("Seurat", "scater", 
+                   "plyr", "dplyr", "tidyr", "reshape2", "tidyverse", "RColorBrewer", "ggplot2", "gridExtra", 
+                   "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", "ggrepel", "scales", "ggformula",
+                   "slingshot", "tidymodels", "viridis", "future")
+
+# load packages
+lapply(packages2load, library, character.only = TRUE)
+
+```
+
+
+
+```{r check available input files}
+
+show.available.files <- FALSE
+if (show.available.files){
+  list.files("Preprocessed Datasets/")
+}
+
+```
+
+```{r parameter specification}
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed Datasets/"
+
+# Query input
+# input.file <- "Module2_integrated_p3_p5_differentiation_090120.Rdata"
+# input.file <- "Module16_pilot4_G261_CT2A_tumorOnly_180120.Rdata"
+input.file <- "Module1_p7_mesoderm_110620.Rdata"
+# input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+
+# Data subsampling
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+
+# specify cluster resolution
+cluster.resolution <- 0.3
+
+# print inline
+print.inline <-F
+
+gene.grouping <- "correlation" #options: 'modular', 'correlation'
+
+# N genes for pseudotime analysis (200-300 )
+n.hvg <- 500
+
+# N genes for time Varying Analysus (only used if less than n.hvg)
+n.top.genes.timeVaryingAnalysis <- n.hvg
+
+
+# filtering parameters ############################################
+# cluster ids to include/omit
+
+# Mesoderm
+filter.parameters <- list(
+  include = NULL,
+  omit = c(8)
+)
+
+
+# UHN
+# filter.parameters <- list(
+#   include = c(2, 0, 11, 9, 4, 15, 14, 12),
+#   omit = NULL
+# )
+
+
+# SLINGSHOT PARAMETERS #####################################
+slingshot.parameters <- list(
+  
+  # cluster id (ensure it coincided with correct cluster.resolution). Set to NULL if unspecified. 
+  start.cluster = NULL,                
+  end.cluster = NULL,
+  
+  # Which reduction to use for sling shot (multiple can be chosen as character vector
+  # options: UMAP-PCA | UMAP, UMAP-ICA, TSNE-PCA | TSNE, TSNE-ICA, PCA, ICA, DM
+  which.reduction = "PCA",
+  
+  # specfiy whether to compute reduction based off differential genes
+  use.deg.reduction = F
+  
+)
+
+# scPEDIGREE PARAMETERS ##################################
+# supervised method - custom build for scMiko
+
+
+# Mesoderm
+scPedigree.parameters <- list(
+  source = c(0,3),           # cluster ids ordered by pseudotime trajectory. upstream trajectory for all branches
+  branch = list(                 # cluster ids ordered by pseudotime trajectores, lineage specific trajectories.
+    branch.1 = c(1),
+    branch.2 = c(7,2,6)
+  )
+  # twig = list(
+  #   twig.1 = c(5, 0, 4),
+  #   twig.2 = c(4,3),
+  #   twig.3 = c(0,3),
+  #   twig.4 = c(3, 1),
+  #   twig.5 = c(3, 2,6)
+  # )
+)
+
+# scPedigree.parameters <- list(
+#   twig = list(
+#     twig.1 = c(5, 0, 4),
+#     twig.2 = c(4,3),
+#     twig.3 = c(0,3),
+#     twig.4 = c(3, 1),
+#     twig.5 = c(3, 2,6)
+#   )
+# )
+
+# UHN
+# scPedigree.parameters <- list(
+#   source = c(2,0),           # cluster ids ordered by pseudotime trajectory. upstream trajectory for all branches
+#   branch = list(                 # cluster ids ordered by pseudotime trajectores, lineage specific trajectories. 
+#     branch.1 = c(12),
+#     branch.2 = c(11),
+#     branch.3 = c(9),
+#     branch.4 = c(4),
+#     branch.5 = 15,
+#     branch.6 = 14
+#   )
+# )
+
+# TEMPORA PARAMETERS ####################################
+
+library(Tempora)
+
+tempora.timepoints <- list(
+  field = "Barcode",
+  order = c("07_Meso_D0_6", "05_Meso_D123_1", "06_Meso_D45_1", "08_Meso_D6_6"),
+  new.label = c("D0", "D123", "D45", "D6")
+)
+
+
+
+
+
+```
+
+
+```{r load data, message=FALSE, warning=FALSE}
+
+# load query dataset
+load(paste(dir.preprocessed, input.file, sep = ""))
+so <- prepSeurat(so)
+so.query <- so; so.input <- so.query; rm(so)
+
+current.assay <- DefaultAssay(so.query)
+
+# subsample (for dev purposes)
+n.subset <- round(subsample_factor *ncol(so.input))
+cell.ind <- sample(x = seq(1, ncol(so.input)), size = n.subset, replace = FALSE, prob = NULL)
+so.query <- SubsetData(so.query , cells = cell.ind)
+
+rm(so.input)
+
+```
+
+
+```{r unpack analysis parameters }
+
+
+# Slingshot parameters #############################
+start.cluster <- slingshot.parameters$start.cluster 
+end.cluster <- slingshot.parameters$end.cluster
+which.reduction <- slingshot.parameters$which.reduction
+use.deg.reduction <- slingshot.parameters$use.deg.reduction 
+
+```
+
+
+```{r analysis log}
+
+# Module
+df.log <- initiateLog("13, Trajectory Inference")
+df.log <- addLogEntry("Query File (.Rdata)", (input.file), df.log, "input.file")
+df.log <- addLogEntry("Default Assay", (current.assay), df.log, "current.assay")
+df.log <- addLogEntry("Cluster Resolution", (cluster.resolution), df.log, "cluster.resolution")
+df.log <- addLogEntry("Dimensional Reduction", (which.reduction), df.log, "which.reduction")
+df.log <- addLogEntry("Dimensional Reduction using DEG", (use.deg.reduction), df.log, "use.deg.reduction")
+df.log <- addLogEntry("Subsample Factor", (subsample_factor), df.log, "subsample_factor")
+df.log <- addLogEntry("Start Cluster", (start.cluster), df.log, "start.cluster")
+df.log <- addLogEntry("End Cluster", (end.cluster), df.log, "end.cluster")
+
+
+# initiate result lists
+paga.list <- list()
+dpt.list <- list()
+slingshot.list <- list()
+scorpius.list <- list()
+scPedigree.list <- list()
+```
+
+
+```{r}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+```{r color pallette function}
+
+cell_pal <- function(cell_vars, pal_fun,...) {
+  if (is.numeric(cell_vars)) {
+    pal <- pal_fun(100, ...)
+    return(pal[cut(cell_vars, breaks = 100)])
+  } else {
+    categories <- sort(unique(cell_vars))
+    pal <- setNames(pal_fun(length(categories), ...), categories)
+    return(pal[cell_vars])
+  }
+}
+
+```
+
+
+```{r prep gene list}
+
+# prep gene list
+gNames.list <- prepGeneList( so.query, objects())
+
+# ensure gene list is available
+stopifnot(exists("gNames.list"))
+```
+
+
+```{r convert to symbol}
+
+gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+
+if (gene.rep == "ensembl"){
+  so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list, convert.RNA = TRUE)
+  gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+}
+
+
+```
+
+
+
+```{r get clusters}
+
+
+# compute clusters
+so.query <- FindClusters(object = so.query, 
+                         resolution = cluster.resolution, 
+                         verbose = 0, algorithm = 1, modularity.fxn = 1)
+
+
+# prep query parameters with assertions
+cur.cluster.field <- paste(DefaultAssay(so.query), "_snn_res.", cluster.resolution, sep = "")
+stopifnot(cur.cluster.field %in% names(so.query@meta.data))
+which.reduction <- tolower(which.reduction)
+
+
+```
+
+
+```{r filter clusters}
+
+if (exists("filter.parameters")){
+  so.query <- clusterFilter(so.query, include = filter.parameters$include, omit = filter.parameters$omit)
+  
+  # TODO ensure that refactorization does not renumber values
+  so.query@meta.data[["seurat_clusters"]] <- factor(as.character(so.query@meta.data[["seurat_clusters"]]))
+  Idents(object = so.query) <- 'seurat_clusters'
+}
+
+```
+
+
+```{r PAGA}
+
+do.paga <- T
+
+if (do.paga){
+  
+  library(s2a);
+  library(glue)
+  library(sceasy)
+  library(reticulate)
+  py.path <- py_config()
+  use_python(py.path[["python"]])
+  sc <- import("scanpy", convert = FALSE)
+  
+  # # randomly assign start node
+  u.clust <- as.numeric(unique(as.character(so.query@active.ident)))
+  
+  
+  # run PAGA analysis
+  pr <- PAGA(so.query,assay = "RNA", seurat_grouping = "seurat_clusters", 
+             edge_filter_weight = 0.1, dpt_root_cluster = sample(u.clust, 1),
+             paga_root = sample(u.clust, 1))
+  
+  # get pseudotimes
+  alpha <- pr@misc[["paga"]][["AnnData"]]
+  root_cell <- pr@misc[["paga"]][["root.cell"]]
+  py_run_string(paste0("r.alpha.uns['iroot'] = ", as.integer(root_cell)))
+  sc$tl$dpt(adata = alpha)
+  
+  df.meta.py <- alpha$obs
+  df.meta.r <- py_to_r(df.meta.py)
+  pseudotime <- df.meta.r$dpt_pseudotime
+  
+  
+  plt.paga.pt.umap <- pseudotime.UMAP(x = so.query@reductions[["umap"]]@cell.embeddings[ ,1], 
+                                      y = so.query@reductions[["umap"]]@cell.embeddings[ ,2], 
+                                      pseudotime = pseudotime) + 
+    labs(title = "Pseudotime UMAP", subtitle = "PAGA")
+  
+  # get PAGA results
+  pr.list <- pr@misc[["paga"]]
+  
+  # align trajectories with cluster centers
+  which.center <- "mean"
+  df.umap <- data.frame(so.query@reductions[["umap"]]@cell.embeddings)
+  df.umap$cluster <- so.query@meta.data[["seurat_clusters"]]
+  
+  colnames(df.umap) <- c("x","y", "cluster")
+  df.umap.centers <- getClusterCenters(df.umap, which.center)
+  
+  # reassing trajectory centers
+  df.edges <- pr.list[["edges"]]
+  df.positions <- pr.list[["position"]]
+  u.clusters <- unique(df.umap.centers$cluster)
+  
+  for (i in 1:length(u.clusters)){
+    df.edges$x1[df.edges$group1 %in% u.clusters[i]] <- df.umap.centers$x.center[df.umap.centers$cluster %in% u.clusters[i]]
+    df.edges$y1[df.edges$group1 %in% u.clusters[i]] <- df.umap.centers$y.center[df.umap.centers$cluster %in% u.clusters[i]]
+    df.edges$x2[df.edges$group2 %in% u.clusters[i]] <- df.umap.centers$x.center[df.umap.centers$cluster %in% u.clusters[i]]
+    df.edges$y2[df.edges$group2 %in% u.clusters[i]] <- df.umap.centers$y.center[df.umap.centers$cluster %in% u.clusters[i]]
+    df.positions$x[df.positions$group %in% u.clusters[i]] <- df.umap.centers$x.center[df.umap.centers$cluster %in% u.clusters[i]]
+    df.positions$y[df.positions$group %in% u.clusters[i]] <- df.umap.centers$y.center[df.umap.centers$cluster %in% u.clusters[i]]
+  }
+  
+  
+  paga.plot <- ggplot() +   
+    geom_point(data = df.umap, 
+               aes(x, y, color = cluster),
+               size = 1) +
+    geom_segment(
+      data = df.edges,
+      aes(x = x1, y = y1, xend = x2, yend = y2),
+      size = rescaleValues(df.edges$weight, 0.05, 0.25)*7,
+      colour = "black",
+      show.legend = FALSE
+    ) +
+    geom_point(data = df.positions, aes(x, y, fill = group), size = 7, alpha = 1 , color = "black", pch=21, show.legend = FALSE) +
+    geom_text(data = df.positions, aes(x, y, label = group), color = "black", fontface = "bold") +
+    labs(x = "UMAP 1", y = "UMAP 2", title = "UMAP", subtitle = "PAGA Trajectories") +
+    theme_bw() +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    ) 
+  
+  
+  if (print.inline){
+    print(paga.plot)
+    print(plt.paga.pt.umap + theme_miko(legend = T))
+  }
+  
+}
+
+
+paga.list$trajectory.plot <- paga.plot
+paga.list$umap.x <- df.umap$x
+paga.list$umap.y <- df.umap$y
+paga.list$clusters <- df.umap$cluster
+paga.list$global.pseudotime <- df.meta.r$dpt_pseudotime
+
+# get paga global principal curve
+df.paga.pt.order <- data.frame(x = paga.list$umap.x,
+                               y = paga.list$umap.y,
+                               cluster = paga.list$clusters,
+                               pseudotime = paga.list$global.pseudotime)
+
+df.paga.pt.order.sum <- df.paga.pt.order %>%
+  group_by(cluster) %>%
+  summarize(x.center = mean(x, na.rm = T),
+            y.center = mean(y, na.rm = T),
+            pt = mean(pseudotime, na.rm = T))
+
+df.paga.pt.order.sum <- df.paga.pt.order.sum %>%  arrange(pt)
+o.clusters <- as.character(df.paga.pt.order.sum$cluster)
+
+lineage.name <- "PAGA"
+
+dimSubset <- subsetDimRed(so.query, which.features = o.clusters, reduction = "umap")
+
+start.clust <- dimSubset[["centers"]]
+start.clust <- start.clust[match(o.clusters, start.clust$cluster), ]
+# start.traj <- inferInitialTrajectory(as.matrix(dimSubset[["reduction"]]), k = length(unique(dimSubset[["features"]])))
+
+LT.results <- lineageTrajectory(space = as.matrix(dimSubset[["reduction"]][ ,c(1,2)]),
+                                start = as.matrix(start.clust[ ,c(2,3)]),
+                                group.labels = dimSubset[["features"]],
+                                pseudotimes =paga.list$global.pseudotime)
+
+LT.results$plt.trajectory <- LT.results$plt.trajectory + labs(title = "UMAP", subtitle = "PAGA Lineages")
+
+paga.list$global.pseudotime.plot <- LT.results$plt.trajectory + 
+  labs(title = "UMAP", subtitle = "PAGA Lineages") + 
+  theme_miko(legend = T) + 
+  xlab("UMAP 1") + 
+  ylab("UMAP 2")
+
+
+```
+
+```{r Diffusion Maps}
+
+# get PCA embedding
+so.pca <- so.query@reductions[["pca"]]@cell.embeddings
+
+cell.names <- rownames(so.pca)
+rownames(so.pca) <- so.query@meta.data[["Barcode"]]
+
+# compute diffusion map
+dm <- DiffusionMap(so.pca, n_eigs = 50)
+
+# generate diffusion map representation
+df.tmp <- data.frame(DC1 = eigenvectors(dm)[, 1],
+                     DC2 = eigenvectors(dm)[, 2],
+                     barcode = rownames(so.pca),
+                     cluster = so.query@meta.data[["seurat_clusters"]])
+
+# generate diffusion map based pseudotimes
+df.dm <- data.frame(
+  pseudotime_diffusionmap = rank(eigenvectors(dm)[,1]),
+  barcode = rownames(so.pca),
+  cluster = so.query@meta.data[["seurat_clusters"]]
+)
+
+
+
+if (!is.null(start.cluster)){
+  tip.cluster <- getClusterRoot(x = so.query@reductions[["umap"]]@cell.embeddings[ ,1],
+                                y = so.query@reductions[["umap"]]@cell.embeddings[ ,2],
+                                cluster.membership = so.query@meta.data[["seurat_clusters"]],
+                                which.cluster = start.cluster)
+  # tip.cluster <- start.cluster
+} else {
+  # tip.cluster <- as.numeric(as.character(df.dm$cluster)[which.min(df.dm$pseudotime_diffusionmap)])
+  tip.cluster <- as.numeric(which.min(df.dm$pseudotime_diffusionmap))
+}
+
+# tip cell defined by min DC 1 or start.cluster
+dpt <- DPT(dm, tips =tip.cluster)
+
+
+# tip.cluster <- as.character(df.dm$cluster)[which.min(df.dm$pseudotime_diffusionmap)] 
+
+df.dpt <- data.frame(DC1 = eigenvectors(dm)[, 1], DC2 = eigenvectors(dm)[, 2], 
+                     dptval = dpt$dpt, barcode = rownames(so.pca), cluster = so.query@meta.data[["seurat_clusters"]])
+plt.dmap.peudotime <- ggplot(df.dpt) + geom_point(aes(x = DC1, y = DC2, color = dptval)) + scale_color_viridis(name = "Pseudotime")
+
+df.pt <- data.frame(
+  pseudotime_dpt.rank =  rank(dpt$dpt) ,
+  pseudotime_dpt =  (dpt$dpt) ,
+  barcode = rownames(so.pca),
+  cluster = so.query@meta.data[["seurat_clusters"]]
+  
+)
+
+# GENERATE PLOTS #########################################
+
+plt.dmap.bc <- ggplot(df.tmp, aes(x = DC1, y = DC2, colour = barcode)) +
+  geom_point() + 
+  ggbeeswarm::geom_quasirandom(groupOnX = FALSE) +
+  xlab("Diffusion component 1") + 
+  ylab("Diffusion component 2") +
+  theme_classic()
+
+plt.dmap.cl <- ggplot(df.tmp, aes(x = DC1, y = DC2, colour = cluster)) +
+  geom_point() + 
+  ggbeeswarm::geom_quasirandom(groupOnX = FALSE) +
+  xlab("Diffusion component 1") + 
+  ylab("Diffusion component 2") +
+  theme_classic()
+
+
+
+plt.dm.pseudotime.bc <- ggplot(df.dm, 
+                               aes(x = pseudotime_diffusionmap, 
+                                   y = reorder(barcode, pseudotime_diffusionmap), colour = barcode)) +
+  ggbeeswarm::geom_quasirandom(groupOnX = FALSE) +
+  ggthemes::scale_color_tableau() + theme_classic() +
+  xlab("Diffusion component 1 (DC1)") + ylab("Barcode") +
+  ggtitle("Cells ordered by DC1")
+
+
+
+# deng_SCE$pseudotime_dpt <- rank(dpt$dpt) 
+plt.dt.pseudotime.bc <- ggplot(df.pt, 
+                               aes(x = pseudotime_dpt, 
+                                   y = reorder(barcode, pseudotime_dpt), colour = barcode)) +
+  ggbeeswarm::geom_quasirandom(groupOnX = FALSE) +
+  theme_classic() +
+  xlab("Diffusion map pseudotime (dpt)") +
+  ylab("Barcode") +
+  ggtitle("Cells ordered by diffusion map pseudotime") + theme(legend.position = "none")
+
+plt.dt.pseudotime.cl <- ggplot(df.pt, 
+                               aes(x = pseudotime_dpt, 
+                                   y = reorder(cluster, pseudotime_dpt), colour = cluster)) +
+  ggbeeswarm::geom_quasirandom(groupOnX = FALSE) +
+  theme_classic() +
+  xlab("Diffusion map pseudotime (dpt)") +
+  ylab("Cluster") +
+  ggtitle("Cells ordered by diffusion map pseudotime") + theme(legend.position = "none")
+
+plt.so.cl <- cluster.UMAP(
+  so.query,
+  group.by = "seurat_clusters",
+  x.label = "UMAP 1",
+  y.label = "UMAP 2",
+  plot.name = "UMAP",
+  include.labels = T
+) 
+
+
+# store diffusion map in Seurat object
+dm.emb <- dm@eigenvectors
+rownames(dm.emb) <- cell.names 
+
+so.query[["dm"]] <- CreateDimReducObject(embeddings = dm.emb, 
+                                         key = "DM_", 
+                                         assay = DefaultAssay(so.query),
+                                         misc = list(
+                                           dt.pseudotimes = df.pt,
+                                           dm.pseudotimes = df.dm,
+                                           dm.object = dm
+                                         ))
+
+
+# generate pseudotime UMAP
+plt.dm.pt.umap <- pseudotime.UMAP(x = so.query@reductions[["umap"]]@cell.embeddings[ ,1], 
+                                  y = so.query@reductions[["umap"]]@cell.embeddings[ ,2], 
+                                  pseudotime = df.pt$pseudotime_dpt) + 
+  labs(title = "Global Pseudotime", subtitle = "Diffusion Map")
+
+
+if (print.inline){
+  plt.dm.pt.umap + theme_miko(legend = T)
+}
+
+
+
+dpt.list$umap.x <- so.query@reductions[["umap"]]@cell.embeddings[ ,1]
+dpt.list$umap.y <- so.query@reductions[["umap"]]@cell.embeddings[ ,2]
+dpt.list$embedding.x <- eigenvectors(dm)[, 1]
+dpt.list$embedding.y <- eigenvectors(dm)[, 2]
+dpt.list$embedding.name <- "DM"
+dpt.list$clusters <- df.dpt$cluster
+dpt.list$barcode <- df.dpt$barcode
+dpt.list$global.pseudotime <- df.dpt$dptval
+dpt.list$root.cluster <-  tip.cluster
+
+
+```
+
+```{r Diffusion Maps v2, fig.width=12, fig.height=4}
+
+if (print.inline){
+  cowplot::plot_grid(plt.dmap.peudotime,  plt.dmap.cl, plt.dmap.bc,ncol = 3)
+  cowplot::plot_grid(plt.so.cl, plt.dt.pseudotime.cl, plt.dt.pseudotime.bc, ncol = 3)
+}
+
+```
+
+
+```{r Diffusion Maps - project diffusion map onto UMAP}
+
+
+df.pt <- data.frame(
+  pseudotime_dpt.rank =  rank(dpt$dpt) ,
+  pseudotime_dpt =  (dpt$dpt) ,
+  barcode = rownames(so.pca),
+  cluster = so.query@meta.data[["seurat_clusters"]]
+  
+)
+
+u.clusters <- as.numeric(as.character(unique(df.pt$cluster)))
+u.clusters <- u.clusters[order(u.clusters)]
+
+
+df.pt.sum <- df.pt %>%
+  group_by(cluster) %>%
+  summarize(pt = mean(pseudotime_dpt))
+
+c.mat <- matrix(nrow = length(u.clusters), ncol = length(u.clusters))
+for (i in 1:length(u.clusters)){
+  for (j in 1:length(u.clusters)){
+    c.mat[i,j] <- abs(df.pt.sum$pt[df.pt.sum$cluster == u.clusters[i]] - df.pt.sum$pt[df.pt.sum$cluster == u.clusters[j]])^2
+  }
+}
+colnames(c.mat) <- u.clusters
+rownames(c.mat) <- u.clusters
+
+c.mat.norm <- c.mat/max(c.mat)
+s.mat <- 1-c.mat.norm
+
+# pheatmap::pheatmap(s.mat)
+
+
+df.dm.edge <- NULL
+for (i in 1:length(u.clusters)){
+  for (j in 1:length(u.clusters)){
+    df.dm.edge <- bind_rows(
+      df.dm.edge,
+      data.frame(
+        group1 = u.clusters[i],
+        group2 = u.clusters[j],
+        weight = s.mat[i,j]
+      )
+    )
+  }
+}
+df.dm.edge$x1 <- NA; df.dm.edge$y1<- NA
+df.dm.edge$x2<- NA; df.dm.edge$y2<- NA
+
+for (i in 1:length(u.clusters)){
+  df.dm.edge$x1[df.dm.edge$group1 %in% u.clusters[i]] <- df.umap.centers$x.center[df.umap.centers$cluster %in% u.clusters[i]]
+  df.dm.edge$y1[df.dm.edge$group1 %in% u.clusters[i]] <- df.umap.centers$y.center[df.umap.centers$cluster %in% u.clusters[i]]
+  df.dm.edge$x2[df.dm.edge$group2 %in% u.clusters[i]] <- df.umap.centers$x.center[df.umap.centers$cluster %in% u.clusters[i]]
+  df.dm.edge$y2[df.dm.edge$group2 %in% u.clusters[i]] <- df.umap.centers$y.center[df.umap.centers$cluster %in% u.clusters[i]]
+}
+
+
+df.dm.edge.sub <- df.dm.edge[df.dm.edge$weight > 0.90, ]
+df.dm.edge.sub$weight <- rescaleValues(df.dm.edge.sub$weight, 0.05, 0.25)
+
+
+dm.plot <- ggplot() +   
+  geom_point(data = df.umap, 
+             aes(x, y, color = cluster),
+             size = 1) +
+  geom_segment(
+    data = df.dm.edge.sub,
+    aes(x = x1, y = y1, xend = x2, yend = y2),
+    size = df.dm.edge.sub$weight*7,
+    colour = "black",
+    show.legend = FALSE
+  ) +
+  geom_point(data = df.positions, aes(x, y, fill = group), size = 7, alpha = 1 , color = "black", pch=21, show.legend = FALSE) +
+  geom_text(data = df.positions, aes(x, y, label = group), color = "black", fontface = "bold") +
+  labs(x = "UMAP 1", y = "UMAP 2", title = "UMAP", subtitle = "Diffusion Map Trajectories") +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) 
+
+
+```
+
+```{r Diffusion Maps - lineage-specific PT}
+# dpt_flat <- branch_divide(dpt, divide = 1)
+
+div <-1
+dpt_flat <- branch_divide(dpt, div)
+u.branch <- unique(dpt_flat@branch[, div])
+u.branch <- u.branch[!is.na(u.branch)]
+
+# dpt_flat <- branch_divide(dpt, div)
+# u.branch <- unique(dpt_flat@branch[, 1])
+# u.branch <- u.branch[!is.na(u.branch)]
+# root <- random_root(dpt_flat)
+root <- tip.cluster
+# root <- 4L
+
+
+
+
+df.umap.sub.m <- NULL
+df.umap.all.m <- NULL
+df.tp.m <- NULL
+
+
+for (i in 1:length(u.branch)){
+  
+  # lineage 
+  paths_to <- u.branch[i]
+  branch.name <- paste0("Branch ", u.branch[i])
+  
+  # lineage-specific pseudotime
+  pt_vec <- dpt_for_branch(dpt_flat, branch_id = paths_to)
+  
+  # ensure root and path do not collide
+  if (paths_to == root) next
+  
+  # get indices
+  idx <- dpt_flat@branch[, div] %in% c(root, paths_to)
+  
+  is.success <- tryCatch({
+    # get initial trajectory path
+    umap.path <- inferInitialTrajectory.v2(pt_vec[idx], so.query@reductions[["umap"]]@cell.embeddings[idx, ], w_width = 0.15)
+    
+    # get umap coordinates
+    df.umap.all <- data.frame(x = so.query@reductions[["umap"]]@cell.embeddings[ ,1], 
+                              y = so.query@reductions[["umap"]]@cell.embeddings[ ,2])
+    df.umap.all$col <- "grey"
+    
+    df.umap.sub <- df.umap.all[idx, ]
+    df.umap.sub$pt <- pt_vec[idx]
+    
+    # compute prinicpal curves
+    
+    pc.fit <- princurve::principal_curve(as.matrix(df.umap.sub[,c("x", "y")]), start = as.matrix(umap.path[ ,c(1,2)]), 
+                                         thresh = 0.001, maxit = 10, stretch = 2, smoother = "smooth_spline", 
+                                         approx_points = 100, trace = FALSE, plot_iterations = FALSE)
+    
+    is.success <- T
+    
+  }, error = function(e){
+    is.success <- F
+    return(is.success)
+  })
+  
+  if (!is.success) next
+  
+  traj.path <- pc.fit$s[pc.fit$ord, , drop = FALSE]
+  df.tp <- data.frame(traj.path)
+  
+  # assign lineage names to trajectory data
+  df.umap.sub$branch <- branch.name
+  df.umap.all$branch <- branch.name
+  df.tp$branch <- branch.name
+  
+  # store results
+  df.umap.sub.m <- bind_rows(df.umap.sub.m, df.umap.sub)
+  df.umap.all.m <- bind_rows(df.umap.all.m, df.umap.all)
+  df.tp.m <- bind_rows(df.tp.m, df.tp)
+}
+
+# normalize pseudotime
+df.umap.sub.m <-  df.umap.sub.m %>%
+  group_by(branch) %>%
+  mutate(pt.norm = 1-rescaleValues(pt))
+
+# generate plot
+df.umap.all <- df.umap.all %>% dplyr::select(-c("branch"))
+plt.remap <-  ggplot() +
+  geom_point(data = df.umap.all,aes(x, y), color = "grey") +
+  geom_point(data = df.umap.sub.m,aes(x, y, color = pt.norm)) + 
+  geom_path(data = df.tp.m, aes(x = x, y = y), color = "black", size = 1) + 
+  facet_wrap(~branch) + scale_color_viridis("pseudotime") + 
+  labs(title = "Lineage-Specific Pseudotimes", subtitle = "Diffusion Map") + 
+  xlab("UMAP 1") + ylab("UMAP 2")  + theme_miko(legend = T)
+
+# print
+if (print.inline){
+  print(plt.remap)
+}
+
+dpt.list$lineage.pseudotime.plot <- plt.remap
+dpt.list$lineage.principal.curves <- df.tp.m
+dpt.list$lineage.umap <- df.umap.sub.m
+
+```
+
+
+
+
+
+```{r Diffusion Maps - globals, fig.height=5, fig.width=10}
+# order clusters by pseudotime
+df.pt.sum <- df.pt.sum %>%  arrange(pt)
+o.clusters <- as.character(df.pt.sum$cluster)
+
+lineage.name <- "diffusionMap"
+
+dimSubset <- subsetDimRed(so.query, which.features = o.clusters, reduction = "umap")
+
+start.clust <- dimSubset[["centers"]]
+start.clust <- start.clust[match(o.clusters, start.clust$cluster), ]
+# start.traj <- inferInitialTrajectory(as.matrix(dimSubset[["reduction"]]), k = length(unique(dimSubset[["features"]])))
+
+LT.results <- lineageTrajectory(space = as.matrix(dimSubset[["reduction"]][ ,c(1,2)]),
+                                start = as.matrix(start.clust[ ,c(2,3)]),
+                                group.labels = dimSubset[["features"]],
+                                pseudotimes = dpt.list$global.pseudotime)
+
+LT.results$plt.trajectory <- LT.results$plt.trajectory + labs(title = "UMAP", subtitle = "Diffusion Map Lineages")
+
+plt.dmap.overview <- cowplot::plot_grid(dm.plot, LT.results$plt.trajectory)
+
+if (print.inline){
+  # plt.ss.overview
+  plt.dmap.overview
+}
+
+
+dpt.list$trajectory.plot <- dm.plot
+dpt.list$global.pseudotime.plot <- LT.results$plt.trajectory 
+
+```
+
+
+
+
+```{r Slingshot - prep data}
+
+
+if (use.deg.reduction){
+  deg.gene <- FindAllMarkers(so.query, 
+                             assay = DefaultAssay(so.query),
+                             slot = "data",
+                             only.pos = T, 
+                             min.pct = 0.25,
+                             test.use = "MAST",
+                             logfc.threshold = 0.25, 
+                             max.cells.per.ident = 200,
+                             return.thresh = 1, #1 ensures all genes are returned
+                             verbose = F)
+  
+  deg.gene$genes <- rownames(deg.gene)
+  deg.features <- deg.gene$genes[deg.gene$p_val_adj < 0.05]
+  
+  so.query <- RunPCA(so.query, verbose = FALSE, approx = F, features = deg.features)
+  so.query <- FindNeighbors(object = so.query, reduction = "pca", dims = 1:30)
+  so.query <- RunUMAP(so.query, dims = 1:30)
+  
+  # so.query <- FindClusters(object = so.query, resolution = cluster.resolution, verbose = 0, algorithm = 1)
+}
+
+# dimension reduction (UMAP-PCA, UMAP-ICA, TSNE-PCA, TSNE-ICA, PCA, ICA, DM)
+# specify number of dimensions
+if ((tolower(which.reduction) == "umap-pca") | (tolower(which.reduction) == "umap")){
+  stopifnot(which.reduction %in% names(so.query@reductions))
+  n.dim <- 2
+  # Seurat::DimPlot(so.query, reduction = "umap")
+} else if (tolower(which.reduction) == "umap-ica"){
+  so.query <- RunICA(so.query, verbose = F)
+  so.query <- RunUMAP(so.query, reduction = "ica", dims = 1:50)
+  n.dim <- 2
+  # Seurat::DimPlot(so.query, reduction = "umap")
+} else if ((tolower(which.reduction) == "tsne-pca") | (tolower(which.reduction) == "tsne")){
+  so.query <-RunTSNE(so.query)
+  n.dim <- 2
+  # Seurat::DimPlot(so.query, reduction = "tsne")
+} else if (tolower(which.reduction) == "tsne-ica"){
+  so.query <- RunICA(so.query, verbose = F)
+  so.query <- RunTSNE(so.query, reduction = "ica", dims = 1:50)
+  n.dim <- 2
+  # Seurat::DimPlot(so.query, reduction = "tsne")
+} else if (tolower(which.reduction) == "pca"){
+  stopifnot(which.reduction %in% names(so.query@reductions))
+  n.dim <- 30
+  # Seurat::DimPlot(so.query, reduction = "pca")
+} else if (tolower(which.reduction) == "ica"){
+  so.query <- RunICA(so.query, verbose = F)
+  n.dim <- 10
+  # Seurat::DimPlot(so.query, reduction = "ica", dims = c(1,2))
+} else if (tolower(which.reduction) == "dm"){
+  n.dim <- 2
+  
+  start.cluster <- as.numeric(tip.cluster)
+  end.cluster <- NULL
+}
+
+```
+
+```{r Slingshot algorithm, message=FALSE, warning=FALSE}
+
+# https://bioconductor.org/packages/release/bioc/vignettes/slingshot/inst/doc/vignette.html
+# https://bioconductor.org/packages/release/bioc/vignettes/slingshot/inst/doc/vignette.html#detailed-slingshot-functionality
+# https://bustools.github.io/BUS_notebooks_R/slingshot.html
+
+# Perform lineage inference with Slingshot
+sling <- slingshot(Embeddings(so.query, which.reduction)[ ,c(1:n.dim)], 
+                   clusterLabels = as.vector(so.query@meta.data[[cur.cluster.field]]), 
+                   start.clus = start.cluster, 
+                   end.clus = end.cluster, 
+                   stretch = 2,
+                   approx_points = 100)
+
+df.red <- as.data.frame(reducedDim(sling)[ ,c(1,2)])
+colnames(df.red) <- c("x", "y")
+df.red$cluster <- as.vector(so.query@meta.data[[cur.cluster.field]])
+df.red$barcode <- so.query@meta.data[["Barcode"]]
+
+df.red$bc.color <- cell_pal(df.red$barcode, brewer_pal("qual", "Set2"))
+df.red$clust.color <- cell_pal(df.red$cluster, hue_pal())
+
+```
+
+```{r Slingshot - alternative reduction}
+
+# get data for alternative reduction
+if (tolower(which.reduction) == "umap") {
+  alt.reduction <- "pca"
+} else { 
+  alt.reduction <- "umap"
+}
+df.alt.red <- as.data.frame(Embeddings(so.query, alt.reduction)[ ,c(1,2)])
+colnames(df.alt.red) <- c("x", "y")
+df.alt.red$cluster <- as.vector(so.query@meta.data[[cur.cluster.field]])
+df.alt.red$barcode <- so.query@meta.data[["Barcode"]]
+df.alt.red$bc.color <- cell_pal(df.red$barcode, brewer_pal("qual", "Set2"))
+df.alt.red$clust.color <- cell_pal(df.red$cluster, hue_pal())
+
+```
+
+
+```{r Slingshot - function to compute cluster linkages}
+
+get.linkage.coordinates <- function(df.center, df.adjacency, sling){
+  
+  # compute linkage coordinates
+  df.adjacency$x.origin <- df.center$x.center[match(df.adjacency$origin, df.center$cluster)]
+  df.adjacency$y.origin <- df.center$y.center[match(df.adjacency$origin, df.center$cluster)]
+  df.adjacency$x.destination <- df.center$x.center[match(df.adjacency$destination, df.center$cluster)]
+  df.adjacency$y.destination <- df.center$y.center[match(df.adjacency$destination, df.center$cluster)]
+  
+  # cluster labels
+  start.c <- sling@slingParams[["start.clus"]]
+  end.c <- sling@slingParams[["end.clus"]]
+  # u.cluster <- unique(df.center$cluster)
+  df.center$node.type <- "link"
+  df.center$node.type[df.center$cluster %in% start.c] <- "start"
+  df.center$node.type[df.center$cluster %in% end.c] <- "end"
+  
+  output <- list(df.adjacency, df.center)
+  return(output)
+}
+
+```
+
+
+```{r Slingshot - PCA variance explained }
+# calculate proportion of variance explained by each PC ---------------------
+df.pca <- propVarPCA(so.query)
+
+pc1.var.explained <- signif(df.pca$pc.prop_var[1] * 100, 3)
+pc2.var.explained <-  signif(df.pca$pc.prop_var[2] * 100, 3)
+```
+
+
+```{r Slingshot trajectories - ggplot plots, message=FALSE, warning=FALSE, fig.width=8, fig.height=5}
+
+# get adjacency matrix
+adjacency.mat  <- sling@adjacency
+df.adjacency <- NULL
+row.cluster <- rownames(adjacency.mat)
+col.cluster <- colnames(adjacency.mat)
+
+# reformat to map pairs
+for (i in 1:nrow(adjacency.mat)){
+  origin.node <- row.cluster[i]
+  destination.node <- col.cluster[as.logical(adjacency.mat[i, ])]
+  
+  df.add <- data.frame(origin = rep(origin.node,length(destination.node)),
+                       destination = destination.node)
+  
+  df.adjacency <- bind_rows(df.adjacency, df.add)
+}
+
+# get unique pairs
+for (i in 1:nrow(df.adjacency)){
+  if (df.adjacency[i,1] > df.adjacency[i,2]){
+    temp <- df.adjacency[i,1]
+    df.adjacency[i,1] <- df.adjacency[i,2]
+    df.adjacency[i,2] <- temp
+  }
+}
+
+df.u.adjacency <- unique(df.adjacency)
+
+
+
+# compute cluster centers
+which.center <- "mean"
+df.red.centers <- getClusterCenters(df.red, which.center)
+df.alt.red.centers <- getClusterCenters(df.alt.red, which.center)
+
+# compute linkage coordinates and label clusters
+df.u.adjacency.alt <- df.u.adjacency
+output1 <- get.linkage.coordinates(df.red.centers, df.u.adjacency, sling)
+df.u.adjacency <- output1[[1]]
+df.red.centers <- output1[[2]]
+output2 <- get.linkage.coordinates(df.alt.red.centers, df.u.adjacency.alt, sling)
+df.u.adjacency.alt <- output2[[1]]
+df.alt.red.centers <- output2[[2]]
+
+if (which.reduction == "umap"){
+  xlab.lineage <- paste(toupper(which.reduction), " 1" , sep = "")
+  ylab.lineage <- paste(toupper(which.reduction), " 2" , sep = "")
+  xlab.lineage.alt <- paste(toupper(alt.reduction), " 1 (" , pc1.var.explained, "%)", sep = "")
+  ylab.lineage.alt <- paste(toupper(alt.reduction), " 2 (" , pc2.var.explained, "%)", sep = "")
+} else if (which.reduction == "pca"){
+  xlab.lineage <- paste(toupper(which.reduction), " 1 (" , pc1.var.explained, "%)", sep = "")
+  ylab.lineage <- paste(toupper(which.reduction), " 2 (" , pc2.var.explained, "%)", sep = "")
+  xlab.lineage.alt <-paste(toupper(alt.reduction), " 1" , sep = "")
+  ylab.lineage.alt <- paste(toupper(alt.reduction), " 2" , sep = "") 
+} else {
+  xlab.lineage <- paste(toupper(which.reduction), " 1" , sep = "")
+  ylab.lineage <- paste(toupper(which.reduction), " 2" , sep = "")
+  xlab.lineage.alt <- "Alternative Reduction 1"
+  ylab.lineage.alt <- "Alternative Reduction 2"
+}
+
+
+# create plots
+plt.lineage <- ggplot() +
+  geom_point(data = df.red, aes(x= x, y= y, color = cluster)) +
+  theme_classic() +
+  xlab(xlab.lineage) +
+  ylab(ylab.lineage)  +
+  geom_segment(data = df.u.adjacency, aes(x = x.origin, y = y.origin, xend = x.destination, yend = y.destination), size = 1) +
+  geom_point(data = df.red.centers, aes(x = x.center, y = y.center, fill = node.type), color = "black", pch = 21, size = 4) +
+  ggtitle(paste("Lineages (", toupper(which.reduction), ")", sep = ""))
+
+plt.lineage.alt <- ggplot() +
+  geom_point(data = df.alt.red, aes(x= x, y= y, color = cluster)) +
+  theme_classic() +
+  xlab(xlab.lineage.alt) +
+  ylab(ylab.lineage.alt)  +
+  geom_segment(data = df.u.adjacency.alt, aes(x = x.origin, y = y.origin, xend = x.destination, yend = y.destination), size = 1) +
+  geom_point(data = df.alt.red.centers, aes(x = x.center, y = y.center, fill = node.type), color = "black", pch = 21, size = 4) +
+  ggtitle(paste("Lineages (", toupper(alt.reduction), ")", sep = ""))
+
+if (print.inline){
+  grid.arrange(plt.lineage, plt.lineage.alt, ncol = 2)
+}
+
+slingshot.list$trajectory.plot <- plt.lineage.alt
+slingshot.list$umap.x <- df.alt.red$x
+slingshot.list$umap.y <- df.alt.red$y
+slingshot.list$embedding.x <- df.red$x
+slingshot.list$embedding.y <- df.red$y
+slingshot.list$embedding.name <- toupper(which.reduction)
+
+```
+
+
+
+```{r Slingshot umap lineage, fig.width=12, fig.height=5}
+
+
+ss.lineages <- sling@lineages
+
+# which.reduction <- "umap"
+
+LT.ss.list <- list()
+pc.coord.merge <- NULL
+
+lineage.dimred <- NULL
+for (i in 1:length(ss.lineages)){
+  lineage.name <- names(ss.lineages)[i]
+  
+  dimSubset <- subsetDimRed(so.query, which.features = ss.lineages[[lineage.name]], reduction = "umap")
+  
+  start.clust <- dimSubset[["centers"]]
+  start.clust <- start.clust[match(ss.lineages[[lineage.name]], start.clust$cluster), ]
+  # start.traj <- inferInitialTrajectory(as.matrix(dimSubset[["reduction"]]), k = length(unique(dimSubset[["features"]])))
+  
+  LT.results <- lineageTrajectory(space = as.matrix(dimSubset[["reduction"]][ ,c(1,2)]),
+                                  start = as.matrix(start.clust[ ,c(2,3)]),
+                                  group.labels = dimSubset[["features"]],
+                                  pseudotimes = T
+  )
+  
+  pc.coord <- LT.results[["principal.curve.coordinates"]]
+  pc.coord$lineage <- lineage.name
+  pc.coord.merge <- bind_rows(pc.coord.merge, pc.coord)
+  
+  LT.ss.list[[lineage.name]] <- LT.results
+  
+  cur.dimset <- dimSubset[["reduction"]]
+  colnames(cur.dimset) <- c("x", "y")
+  cur.dimset$lineage <- lineage.name
+  cur.dimset$pseudotime <- LT.results[["pseudotime"]]
+  cur.dimset$cell <- rownames(dimSubset[["reduction"]])
+  
+  lineage.dimred <- bind_rows(lineage.dimred, cur.dimset)
+  
+}
+
+df.ss.umap <- data.frame(
+  x = so.query@reductions[["umap"]]@cell.embeddings[ ,1],
+  y = so.query@reductions[["umap"]]@cell.embeddings[ ,2],
+  cluster = so.query@meta.data[["seurat_clusters"]]
+)
+
+plot.lineage.umap.ss <- ggplot() + 
+  geom_point(data = df.ss.umap, aes(x, y), color = "grey") + 
+  geom_point(data = lineage.dimred, aes(x, y, color = pseudotime)) + 
+  scale_color_viridis() + 
+  geom_path(data = pc.coord.merge, aes(x, y, group = lineage), size = 1) + 
+  facet_wrap(~lineage) + 
+  theme_miko() + 
+  xlab("UMAP 1") + 
+  ylab("UMAP 2") + 
+  labs(title = "Lineage-Specific Pseudotimes", subtitle = "Slingshot")
+
+plt.ss.overview <- cowplot::plot_grid(plt.lineage.alt, plot.lineage.umap.ss, rel_widths = c(2,3))
+if (print.inline) {
+  plt.ss.overview
+}
+
+
+slingshot.list$lineage.pseudotime.plot <- plot.lineage.umap.ss
+slingshot.list$lineage.umap <- lineage.dimred
+slingshot.list$root.cluster <- as.character(start.clust$cluster[1])
+
+
+
+
+```
+
+
+
+```{r SCORPIUS algorithm}
+
+library(SCORPIUS)
+
+e.mat <- t(as.matrix(so.query@assays$SCT@data))
+pc.mat <- (as.matrix(so.query@reductions[["pca"]]@cell.embeddings))
+# e.mat <- t(as.matrix(so.query@assays[["SCT"]]@scale.data))
+
+df.meta <- so.query@meta.data
+
+# get dimensional reduction
+space <- reduce_dimensionality(pc.mat, dist = "pearson", ndim = 3)
+
+# infer initial trajectory
+init.traj <- tryCatch({
+  init.traj <- inferInitialTrajectory(space, k = 4)
+}, error = function(e){
+  init.traj <- NULL
+}
+)
+
+pc.fit <- princurve::principal_curve(as.matrix(space), start = init.traj, 
+                                     thresh = 0.001, maxit = 10, stretch = 2, smoother = "smooth_spline", 
+                                     approx_points = 100, trace = FALSE, plot_iterations = FALSE)
+traj.path <- pc.fit$s[pc.fit$ord, , drop = FALSE]
+df.tp <- data.frame(traj.path)
+
+# compute pseudotime from trajectory
+scorp.ps <- dynutils::scale_minmax(pc.fit$lambda)
+
+traj <- SCORPIUS::infer_trajectory(space, stretch = 2, smoother = "smooth_spline")
+
+# draw_trajectory_plot(
+#   space,
+#   progression_group =  factor(df.meta$Barcode),
+#   path = traj$path,
+#   contour = TRUE) +
+#   theme_miko()
+
+```
+
+
+```{r SCORPIUS to UMAP projections}
+
+# get paga global principal curve
+df.scorp.pt.order <- data.frame(x = so.query@reductions[["umap"]]@cell.embeddings[ ,1],
+                                y = so.query@reductions[["umap"]]@cell.embeddings[ ,2],
+                                cluster = so.query@meta.data[["seurat_clusters"]],
+                                pseudotime = traj[["time"]])
+
+df.scorp.pt.order.sum <- df.scorp.pt.order %>%
+  group_by(cluster) %>%
+  summarize(x.center = mean(x, na.rm = T),
+            y.center = mean(y, na.rm = T),
+            pt = mean(pseudotime, na.rm = T))
+
+df.scorp.pt.order.sum <- df.scorp.pt.order.sum %>%  arrange(pt)
+o.clusters <- as.character(df.scorp.pt.order.sum$cluster)
+
+lineage.name <- "SCORPIUS"
+
+dimSubset <- subsetDimRed(so.query, which.features = o.clusters, reduction = "umap")
+
+start.clust <- dimSubset[["centers"]]
+start.clust <- start.clust[match(o.clusters, start.clust$cluster), ]
+# start.traj <- inferInitialTrajectory(as.matrix(dimSubset[["reduction"]]), k = length(unique(dimSubset[["features"]])))
+
+LT.results <- lineageTrajectory(space = as.matrix(dimSubset[["reduction"]][ ,c(1,2)]),
+                                start = as.matrix(start.clust[ ,c(2,3)]),
+                                group.labels = dimSubset[["features"]],
+                                pseudotimes =traj[["time"]])
+
+LT.results$plt.trajectory <- LT.results$plt.trajectory + labs(title = "UMAP", subtitle = "SCORPIUS Lineages")
+
+scorpius.list$global.pseudotime.plot <- LT.results$plt.trajectory + 
+  labs(title = "UMAP", subtitle = "SCORPIUS Lineages") + 
+  theme_miko(legend = T) + 
+  xlab("UMAP 1") + 
+  ylab("UMAP 2")
+
+scorpius.list$global.pseudotime <- traj[["time"]]
+scorpius.list$umap.x <- so.query@reductions[["umap"]]@cell.embeddings[ ,1]
+scorpius.list$umap.y <- so.query@reductions[["umap"]]@cell.embeddings[ ,2]
+scorpius.list$embedding.x <- space[ ,1]
+scorpius.list$embedding.y <- space[ ,2]
+scorpius.list$embedding.name <- 'scorpius.dim.red'
+
+```
+
+```{r}
+
+prepPedigreeLineages <- function(source= NULL, branch = NULL, twig = NULL){
+  
+  lineages <- list()
+  
+  if (!is.null(source)){
+    for (i in 1:length(source)){
+      if (class(source) == "numeric"){
+        source.name <- "source"
+        lineages[[source.name]] <-  source
+      } else if (class(source) == "list"){
+        source.name <- names(source)[i]
+        lineages[[source.name]] <-  source[[source.name]]
+      }
+      
+      if (!is.null(branch)){
+        for (j in 1:length(branch)){
+          branch.name <- names(branch)[j]
+          source.branch.name <- paste0(source.name, "-", branch.name)
+          lineages[[source.branch.name]] <- c( lineages[[source.name]], branch[[branch.name]])
+        }
+      }  
+    }
+  } else {
+    if (!is.null(branch)){
+      for (j in 1:length(branch)){
+        branch.name <- names(branch)[j]
+        lineages[[branch.name]] <- branch[[branch.name]]
+      }
+    }    
+  }
+  
+  if (!is.null(twig)){
+    for (i in 1:length(twig)){
+      twig.name <- names(twig)[i]
+      lineages[[twig.name]] <- twig[[twig.name]]
+    }
+  }
+  
+  return(lineages)
+  
+}
+
+
+```
+
+```{r prep scPedigree input}
+
+
+# get scPedigree lineages
+sp.lineages <- prepPedigreeLineages(source= scPedigree.parameters$source, 
+                                    branch =  scPedigree.parameters$branch, 
+                                    twig = scPedigree.parameters$twig)
+
+# get scPedigree umap and label nodes of interest
+df.sp.umap <- data.frame(
+  x = so.query@reductions[["umap"]]@cell.embeddings[ ,1],
+  y = so.query@reductions[["umap"]]@cell.embeddings[ ,2],
+  cluster = so.query@meta.data[["seurat_clusters"]]
+)
+
+df.sp.umap.centers <- getClusterCenters(df.sp.umap, which.center = "mean")
+df.sp.umap.centers <- df.sp.umap.centers[df.sp.umap.centers$cluster %in% unique(unlist(sp.lineages)), ]
+
+df.sp.umap.centers$node.type <- "link"
+df.sp.umap.centers$node.type[df.sp.umap.centers$cluster %in% scPedigree.parameters$source[1]] <- "start"
+df.sp.umap.centers$node.type[df.sp.umap.centers$cluster %in% scPedigree.parameters$source[length(scPedigree.parameters$source)]] <- "fork"
+
+for (i in 1:length(scPedigree.parameters$branch)){
+  branch.name <- (names(scPedigree.parameters$branch))[i]
+  df.sp.umap.centers$node.type[df.sp.umap.centers$cluster %in% scPedigree.parameters$branch[[i]][length(scPedigree.parameters$branch[[i]])]] <- "end"
+}
+
+# assign colors to each node type. 
+df.sp.umap.centers$node.color <- "#00BA38"
+df.sp.umap.centers$node.color[df.sp.umap.centers$node.type %in% "start"] <- "#619CFF"
+df.sp.umap.centers$node.color[df.sp.umap.centers$node.type %in% "end"] <- "#F8766D"
+df.sp.umap.centers$node.color[df.sp.umap.centers$node.type %in% "fork"] <- "#C77CFF"
+
+# get node adjaceny mapping
+df.sp.adj <- NULL
+for (i in 1:length(sp.lineages)){
+  lineage.name <- names(sp.lineages)[i]
+  lineage.cluster <- sp.lineages[[lineage.name]]
+  n.clust <- length(lineage.cluster)
+  df.sp.adj.lin <- data.frame(origin = lineage.cluster[1:(n.clust-1)],
+                              destination = lineage.cluster[2:(n.clust)])
+  df.sp.adj <- bind_rows(df.sp.adj, df.sp.adj.lin)
+}
+df.sp.adj <- unique(df.sp.adj)
+
+df.sp.coord <- NULL
+for (i in 1:nrow(df.sp.adj)){
+  x.origin <- df.sp.umap.centers$x.center[df.sp.umap.centers$cluster == df.sp.adj$origin[i]]
+  y.origin <- df.sp.umap.centers$y.center[df.sp.umap.centers$cluster == df.sp.adj$origin[i]]
+  x.destination <- df.sp.umap.centers$x.center[df.sp.umap.centers$cluster == df.sp.adj$destination[i]]
+  y.destination <- df.sp.umap.centers$y.center[df.sp.umap.centers$cluster == df.sp.adj$destination[i]]
+  df.sp.coord <- bind_rows(df.sp.coord, data.frame(x.origin, y.origin, x.destination, y.destination))
+}
+
+df.sp.adj <- bind_cols(df.sp.adj, df.sp.coord)
+
+
+
+```
+
+```{r scPedigree}
+
+
+
+LT.sp.list <- list()
+pc.sp.coord.merge <- NULL
+
+lineage.dimred <- NULL
+for (i in 1:length(sp.lineages)){
+  lineage.name <- names(sp.lineages)[i]
+  
+  dimSubset <- subsetDimRed(so.query, which.features = sp.lineages[[lineage.name]], reduction = "umap")
+  
+  start.clust <- dimSubset[["centers"]]
+  start.clust <- start.clust[match(sp.lineages[[lineage.name]], start.clust$cluster), ]
+  # start.traj <- inferInitialTrajectory(as.matrix(dimSubset[["reduction"]]), k = length(unique(dimSubset[["features"]])))
+  
+  LT.sp.results <- lineageTrajectory(space = as.matrix(dimSubset[["reduction"]][ ,c(1,2)]),
+                                     start = as.matrix(start.clust[ ,c(2,3)]),
+                                     group.labels = dimSubset[["features"]],
+                                     pseudotimes = T
+  )
+  
+  pc.coord <- LT.sp.results[["principal.curve.coordinates"]]
+  pc.coord$lineage <- lineage.name
+  pc.sp.coord.merge <- bind_rows(pc.sp.coord.merge, pc.coord)
+  
+  LT.sp.list[[lineage.name]] <- LT.sp.results
+  
+  cur.dimset <- dimSubset[["reduction"]]
+  colnames(cur.dimset) <- c("x", "y")
+  cur.dimset$lineage <- lineage.name
+  cur.dimset$pseudotime <- LT.sp.results[["pseudotime"]]
+  cur.dimset$cell <- rownames(dimSubset[["reduction"]])
+  
+  lineage.dimred <- bind_rows(lineage.dimred, cur.dimset)
+  
+}
+
+if ("fork" %in% df.sp.umap.centers$node.type){
+  df.sp.umap.centers$node.type <- factor(df.sp.umap.centers$node.type, levels = c("end", "link", "start", "fork"))
+}
+
+plt.trajectory.sp <- ggplot() +
+  geom_point(data = df.sp.umap, aes(x= x, y= y, color = cluster)) +
+  theme_classic() +
+  xlab("UMAP 1") +
+  ylab("UMAP 2")  +
+  geom_segment(data = df.sp.adj, aes(x = x.origin, y = y.origin, xend = x.destination, yend = y.destination), size = 1) +
+  geom_point(data = df.sp.umap.centers, aes(x = x.center, y = y.center, fill = node.type ), pch = 21, size = 4) +
+  ggtitle(paste("Lineages (", toupper(alt.reduction), ")", sep = "")) 
+
+
+lineage.dimred$lineage <- factor(lineage.dimred$lineage , levels = names(sp.lineages))
+pc.sp.coord.merge$lineage <- factor(pc.sp.coord.merge$lineage , levels = names(sp.lineages))
+plot.lineage.umap.sp <- ggplot() + 
+  geom_point(data = df.sp.umap, aes(x, y), color = "grey") + 
+  geom_point(data = lineage.dimred, aes(x, y, color = pseudotime)) + 
+  scale_color_viridis() + 
+  geom_path(data = pc.sp.coord.merge, aes(x, y, group = lineage), size = 1) + 
+  facet_wrap(~lineage) + 
+  theme_miko() + 
+  xlab("UMAP 1") + 
+  ylab("UMAP 2") + 
+  labs(title = "Lineage-Specific Pseudotimes", subtitle = "scPedigree")
+
+plt.sp.overview <- cowplot::plot_grid(plt.trajectory.sp, plot.lineage.umap.sp, rel_widths = c(2,3))
+if (print.inline) {
+  plt.sp.overview
+}
+
+scPedigree.list$trajectory.plot <- plt.trajectory.sp
+scPedigree.list$lineage.pseudotime.plot <- plot.lineage.umap.sp
+scPedigree.list$lineage.umap <- lineage.dimred
+scPedigree.list$root.cluster <- as.character(scPedigree.parameters$source[1])
+
+
+
+```
+
+
+```{r Tempora Algorithm, warning = FALSE, message=FALSE, include = FALSE}
+
+
+so.query$timepoint <- so.query[[tempora.timepoints$field]]
+
+if (length(tempora.timepoints$order) == length(tempora.timepoints$new.label)){
+  for (i in 1:length(tempora.timepoints$order)){
+    so.query$timepoint[so.query$timepoint %in% tempora.timepoints$order[i]] <- tempora.timepoints$new.label[i]
+  }
+} else {
+  tempora.timepoints$new.label <- tempora.timepoints$order
+}
+
+# input data
+so.tempora <- ImportSeuratObject(so.query, 
+                                 assayType = "SCT", 
+                                 assaySlot = "data", 
+                                 clusters = "seurat_clusters", 
+                                 timepoints = "timepoint",
+                                 timepoint_order = tempora.timepoints$new.label)
+
+
+# specify pathway source
+
+which.species <- unique(so.query@meta.data[["Organism"]])
+if (length(which.species) > 1) {
+  which.species <- "Hs"
+}
+
+if (which.species == "Hs"){
+  gmt.path <- "http://download.baderlab.org/EM_Genesets/current_release/Human/symbol/Human_GOBP_AllPathways_no_GO_iea_July_01_2020_symbol.gmt"
+} else if (which.species == "Mm"){
+  gmt.path <- "http://download.baderlab.org/EM_Genesets/current_release/Mouse/symbol/Mouse_GOBP_AllPathways_no_GO_iea_June_01_2020_symbol.gmt"
+}
+
+#Estimate pathway enrichment profiles of clusters
+so.tempora <- pathActivity.Tempora(so.tempora, 
+                                   gmt_path = gmt.path,
+                                   method="zscore")
+
+#Build trajectory
+n.elbow <-  pcaElbow(so.tempora@cluster.pathways.dr[["sdev"]]^2, low = 0.05, max.pc = 0.8) # get elbow
+if (n.elbow < 2) n.elbow <- 2
+
+so.tempora <- BuildTrajectory(so.tempora, 
+                              n_pcs = n.elbow, 
+                              difference_threshold = 0.01)
+
+# correct cluster labels
+clust.labels <- so.tempora@cluster.metadata[["label"]]
+so.tempora@cluster.metadata[["label"]] <- paste0("c", as.numeric(gsub(" ", "",gsub("Cluster ", "", clust.labels))) - 1)
+
+
+
+```
+
+```{r, fig.width=10}
+if (print.inline){
+  so.tempora <- PlotTrajectory(so.tempora)
+}
+```
+
+
+```{r Tempora timeseries, warning = FALSE, fig.width=7, fig.height=5}
+
+#Fit GAMs on pathway enrichment profile
+tempora.varyingPaths <- varyingPaths.Tempora(so.tempora, pval_threshold = 0.01, adjust.p = F, pathway.filter = 3)
+
+
+if (print.inline){
+  tempora.varyingPaths$plots
+}
+
+```
+
+
+```{r helper function to ensure directional origin-destination}
+
+enforceOrderedDirection <- function(df.od){
+  for (i in 1:nrow(df.od)){
+    temp1 <- NULL; temp2 <- NULL
+    if (as.numeric(df.od$origin[i]) > as.numeric(df.od$destination[i])){
+      temp1 <- df.od$origin[i]
+      temp2 <- df.od$destination[i]
+      df.od$origin[i] <- temp2
+      df.od$destination[i] <- temp1
+      
+      if (all(c("x.origin", "y.origin", "x.destination", "y.destination") %in% colnames(df.od))){
+        temp1 <- df.od$x.origin[i]
+        temp2 <- df.od$y.origin[i] 
+        temp3 <- df.od$x.destination[i]
+        temp4 <- df.od$y.destination[i]
+        
+        df.od$x.origin[i] <- temp3
+        df.od$y.origin[i] <- temp4
+        df.od$x.destination[i] <- temp1
+        df.od$y.destination[i] <- temp4
+        
+      }
+    }
+  }
+  
+  return(df.od)
+}
+
+fillNodeCoordinates <- function(adj.input, umap.input, u.clusters){
+  for (i in 1:length(u.clusters)){
+    adj.input$x.origin[as.character(adj.input$origin) %in% as.character(u.clusters[i])] <- umap.input$x.center[as.character(umap.input$cluster) %in% as.character(u.clusters[i])]
+    
+    adj.input$y.origin[as.character(adj.input$origin) %in% as.character(u.clusters[i])] <- umap.input$y.center[as.character(umap.input$cluster) %in% as.character(u.clusters[i])]
+    
+    adj.input$x.destination[as.character(adj.input$destination) %in% as.character(u.clusters[i])] <- umap.input$x.center[as.character(umap.input$cluster) %in% as.character(u.clusters[i])]
+    
+    adj.input$y.destination[as.character(adj.input$destination) %in% as.character(u.clusters[i])] <- umap.input$y.center[as.character(umap.input$cluster) %in% as.character(u.clusters[i])]
+  }
+  
+  return(adj.input)
+}
+
+```
+
+
+```{r}
+
+
+trajectory.Plot <- function(umap.x, umap.y, umap.cluster, edge.x1, edge.y1, edge.x2, edge.y2, edge.weights, node.x, node.y, node.cluster){
+  df.umap <- data.frame(x = umap.x, y = umap.y, cluster = umap.cluster)
+  df.edge <- data.frame(x.origin = edge.x1, y.origin = edge.y1, x.destination = edge.x2, y.destination = edge.y2, weights = edge.weights)
+  df.centers <- data.frame(x.center = node.x, y.center = node.y, cluster = node.cluster)
+  
+  plot.trajectory <- ggplot() +   
+    geom_point(data = df.umap, 
+               aes(x, y, color = cluster),
+               size = 1) +
+    geom_segment(
+      data = df.edge,
+      aes(x = x.origin, y = y.origin, xend = x.destination, yend = y.destination,  alpha = weights),
+      size = rescaleValues(df.edge$weights, 0.01, 0.25)*7,
+      color = "black",
+      show.legend = FALSE
+    ) +
+    geom_point(data = df.centers, aes(x.center, y.center, fill = cluster), size = 7, alpha = 1 , color = "black", pch=21, show.legend = FALSE) +
+    geom_text(data = df.centers, aes(x.center, y.center, label = cluster), color = "black", fontface = "bold") +
+    labs(x = "UMAP 1", y = "UMAP 2", title = "UMAP") +
+    theme_bw() +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )  + scale_alpha(range = c(0, 1))
+  
+  return(plot.trajectory)
+}
+
+
+
+```
+
+```{r ensemble trajectories, fig.width=12,fig.height=4}
+
+# prep inputs
+
+# PAGA ####################################
+df.edges.all <- pr.list[["edges.all"]]
+u.clusters <- unique(df.umap.centers$cluster)
+df.adj.paga <- data.frame(origin = df.edges.all$group1,
+                          destination = df.edges.all$group2,
+                          x.origin = df.edges.all$x1,
+                          y.origin = df.edges.all$y1,
+                          x.destination = df.edges.all$x2,
+                          y.destination = df.edges.all$y2,
+                          weights = df.edges.all$weight)
+df.adj.paga <- fillNodeCoordinates(df.adj.paga, df.umap.centers, u.clusters)
+df.adj.paga$weights <- rescaleValues(df.adj.paga$weights)
+
+
+df.adj.paga <- enforceOrderedDirection(df.adj.paga)
+df.adj.all <-df.adj.paga[ ,c("origin", "destination")]
+
+# scPedigree ####################################
+
+bias.ensemble <- T
+
+if (bias.ensemble){
+  df.sp.adj.traj <- df.sp.adj
+  df.adj.av <-df.sp.adj.traj[ ,c("origin", "destination")]
+  df.adj.av <- enforceOrderedDirection(df.adj.av)
+  s1 <- paste0(df.adj.av$origin, "-", df.adj.av$destination)
+  s2.f <- paste0(df.adj.all$origin, "-", df.adj.all$destination)
+  # s2.r <- paste0(df.adj.all$destination, "-", df.adj.all$origin)
+  
+  df.adj.missing <- df.adj.all[!(s2.f %in% s1), ]
+  df.complete.missing <- data.frame(origin = as.numeric(df.adj.missing$origin),
+                                    destination = as.numeric(df.adj.missing$destination),
+                                    x.origin = NA,
+                                    y.origin = NA,
+                                    x.destination = NA,
+                                    y.destination = NA,
+                                    weights = 0)
+  
+  df.sp.adj.traj$weights <- 1
+  df.sp.adj.traj <- bind_rows(df.sp.adj.traj, df.complete.missing)
+  df.sp.adj.traj <- fillNodeCoordinates(df.sp.adj.traj, df.umap.centers, u.clusters)
+  df.sp.adj.traj <- enforceOrderedDirection(df.sp.adj.traj)  
+}
+
+
+# Slingshot ####################################
+df.ss.adj.traj <- df.u.adjacency.alt
+df.adj.av <-df.ss.adj.traj[ ,c("origin", "destination")]
+df.adj.av <- enforceOrderedDirection(df.adj.av)
+s1 <- paste0(df.adj.av$origin, "-", df.adj.av$destination)
+s2.f <- paste0(df.adj.all$origin, "-", df.adj.all$destination)
+# s2.r <- paste0(df.adj.all$destination, "-", df.adj.all$origin)
+
+df.adj.missing <- df.adj.all[!(s2.f %in% s1), ]
+df.complete.missing <- data.frame(origin = as.numeric(df.adj.missing$origin),
+                                  destination = as.numeric(df.adj.missing$destination),
+                                  x.origin = NA,
+                                  y.origin = NA,
+                                  x.destination = NA,
+                                  y.destination = NA,
+                                  weights = 0)
+
+df.ss.adj.traj$weights <- 1
+df.ss.adj.traj$origin <- as.numeric(df.ss.adj.traj$origin)
+df.ss.adj.traj$destination <- as.numeric(df.ss.adj.traj$destination)
+df.ss.adj.traj <- bind_rows(df.ss.adj.traj, df.complete.missing)
+df.ss.adj.traj <- fillNodeCoordinates(df.ss.adj.traj, df.umap.centers, u.clusters)
+df.ss.adj.traj <- enforceOrderedDirection(df.ss.adj.traj)
+
+# tempora ####################################
+
+df.tempora.adj.traj <- data.frame(origin = so.tempora@trajectory$from,
+                                  destination = so.tempora@trajectory$to)
+
+  # df.sp.adj.traj <- df.sp.adj
+  df.adj.av <-df.tempora.adj.traj[ ,c("origin", "destination")]
+  df.adj.av <- enforceOrderedDirection(df.adj.av)
+  s1 <- paste0(df.adj.av$origin, "-", df.adj.av$destination)
+  s2.f <- paste0(df.adj.all$origin, "-", df.adj.all$destination)
+  # s2.r <- paste0(df.adj.all$destination, "-", df.adj.all$origin)
+  
+  df.adj.missing <- df.adj.all[!(s2.f %in% s1), ]
+  df.complete.missing <- data.frame(origin = as.numeric(df.adj.missing$origin),
+                                    destination = as.numeric(df.adj.missing$destination),
+                                    x.origin = NA,
+                                    y.origin = NA,
+                                    x.destination = NA,
+                                    y.destination = NA,
+                                    weights = 0)
+  
+  df.tempora.adj.traj$weights <- 1
+  df.tempora.adj.traj <- bind_rows(df.tempora.adj.traj, df.complete.missing)
+  df.tempora.adj.traj <- fillNodeCoordinates(df.tempora.adj.traj, df.umap.centers, u.clusters)
+  df.tempora.adj.traj <- enforceOrderedDirection(df.tempora.adj.traj)  
+
+# Diffusion MAP ##################################
+
+
+
+df.dm.adj.traj <- data.frame(origin = as.numeric(df.dm.edge$group1),
+                             destination = as.numeric(df.dm.edge$group2),
+                             x.origin = df.dm.edge$x1,
+                             y.origin = df.dm.edge$y1,
+                             x.destination = df.dm.edge$x2,
+                             y.destination = df.dm.edge$y2,
+                             weights = df.dm.edge$weight)
+
+df.dm.adj.traj <- enforceOrderedDirection(df.dm.adj.traj)
+df.dm.adj.traj <- df.dm.adj.traj[!duplicated(df.dm.adj.traj[,c("origin", "destination")]), ]
+df.dm.adj.traj <- df.dm.adj.traj[!(df.dm.adj.traj$origin == df.dm.adj.traj$destination), ]
+
+df.dm.adj.traj <- fillNodeCoordinates(df.dm.adj.traj, df.umap.centers, u.clusters)
+df.dm.adj.traj$weights <- rescaleValues(df.dm.adj.traj$weights)
+
+
+# POOL lineages
+
+
+list.trajectories <- list(
+  scPedigree = df.sp.adj.traj,
+  slingshot = df.ss.adj.traj,
+  dpt = df.dm.adj.traj,
+  paga = df.adj.paga,
+  tempora = df.tempora.adj.traj
+)
+
+list.trajectories$scPedigree$od <- paste0(list.trajectories$scPedigree$origin, "-", list.trajectories$scPedigree$destination)
+list.trajectories$slingshot$od <- paste0(list.trajectories$slingshot$origin, "-", list.trajectories$slingshot$destination)
+list.trajectories$dpt$od <- paste0(list.trajectories$dpt$origin, "-", list.trajectories$dpt$destination)
+list.trajectories$paga$od <- paste0(list.trajectories$paga$origin, "-", list.trajectories$paga$destination)
+list.trajectories$tempora$od <- paste0(list.trajectories$tempora$origin, "-", list.trajectories$tempora$destination)
+
+list.trajectories$scPedigree <- list.trajectories$scPedigree %>% arrange(od)
+list.trajectories$slingshot <- list.trajectories$slingshot %>% arrange(od)
+list.trajectories$dpt <- list.trajectories$dpt %>% arrange(od)
+list.trajectories$paga <- list.trajectories$paga %>% arrange(od)
+list.trajectories$tempora <- list.trajectories$tempora %>% arrange(od)
+
+df.ens.adj <- NULL
+
+for (i in 1:length(list.trajectories)){
+  
+  traj.name <- names(list.trajectories)[i]
+  if (is.null(df.ens.adj)){
+    df.ens.adj$od <- list.trajectories[[traj.name]]$od
+  }
+  df.cur.weights <- list.trajectories[[traj.name]][ ,c("od", "weights")]
+  colnames(df.cur.weights) <- c("od", traj.name)
+  df.ens.adj <- merge(df.ens.adj, df.cur.weights, by = "od", all.y = T)
+}
+
+df.ens.adj <- df.ens.adj %>% arrange(od)
+df.ens.adj.weights <- df.ens.adj %>% dplyr::select(-c("od"))
+
+df.ensemble.edges <- data.frame(origin = df.adj.paga$origin,
+                                destination = df.adj.paga$destination,
+                                x.origin = NA,
+                                y.origin = NA,
+                                x.destination = NA,
+                                y.destination = NA)
+df.ensemble.edges$od <- paste0(df.ensemble.edges$origin, "-", df.ensemble.edges$destination)
+df.ensemble.edges <- df.ensemble.edges %>% arrange(od)
+
+df.ensemble.edges$geom.weights <- apply(df.ens.adj.weights, 1,  function(x) prod(x)^(1/length(x)))
+df.ensemble.edges$mean.weights <- apply(df.ens.adj.weights, 1,  mean)
+df.ensemble.edges$sd.weights <- apply(df.ens.adj.weights, 1,  sd)
+df.ensemble.edges$z.weights <- df.ensemble.edges$mean.weights / df.ensemble.edges$sd.weights
+df.ensemble.edges$z.weights[is.na(df.ensemble.edges$z.weights)] <- 0
+df.ensemble.edges$z.weights[df.ensemble.edges$z.weights > 5] <- 5
+df.ensemble.edges$z.weights.scaled  <- rescaleValues(df.ensemble.edges$z.weights)
+
+do.contrast <- F
+if (do.contrast){
+  df.ensemble.edges$geom.weights <- rescaleValues(df.ensemble.edges$geom.weights)
+  df.ensemble.edges$mean.weights  <- rescaleValues(df.ensemble.edges$mean.weights)
+}
+
+
+# weights = apply(df.ens.adj.weights, 1,  function(x) prod(x)^(1/length(x)))
+df.ensemble.edges <- fillNodeCoordinates(df.ensemble.edges, df.umap.centers, u.clusters)
+df.ensemble.edges <- enforceOrderedDirection(df.ensemble.edges)
+
+
+# df umap
+df.umap <- data.frame(so.query@reductions[["umap"]]@cell.embeddings)
+df.umap$cluster <- so.query@meta.data[["seurat_clusters"]]
+colnames(df.umap) <- c("x","y", "cluster")
+
+# PLOTS
+
+ensemble.geom.plot <- trajectory.Plot(umap.x = df.umap$x, umap.y = df.umap$y, umap.cluster = df.umap$cluster, 
+                                      edge.x1 = df.ensemble.edges$x.origin, edge.y1 = df.ensemble.edges$y.origin, 
+                                      edge.x2 = df.ensemble.edges$x.destination, edge.y2 = df.ensemble.edges$y.destination, 
+                                      edge.weights = df.ensemble.edges$geom.weights, 
+                                      node.x = df.umap.centers$x.center, node.y = df.umap.centers$y.center, 
+                                      node.cluster = df.umap.centers$cluster) + 
+  labs(subtitle = "Ensemble: Geometric Mean (all)")
+
+ensemble.mean.plot <- trajectory.Plot(umap.x = df.umap$x, umap.y = df.umap$y, umap.cluster = df.umap$cluster, 
+                                      edge.x1 = df.ensemble.edges$x.origin, edge.y1 = df.ensemble.edges$y.origin, 
+                                      edge.x2 = df.ensemble.edges$x.destination, edge.y2 = df.ensemble.edges$y.destination, 
+                                      edge.weights = df.ensemble.edges$mean.weights, 
+                                      node.x = df.umap.centers$x.center, node.y = df.umap.centers$y.center, 
+                                      node.cluster = df.umap.centers$cluster) + 
+  labs(subtitle = "Ensemble: Arithmetic Mean (all)")
+
+ensemble.z.plot <- trajectory.Plot(umap.x = df.umap$x, umap.y = df.umap$y, umap.cluster = df.umap$cluster, 
+                                   edge.x1 = df.ensemble.edges$x.origin, edge.y1 = df.ensemble.edges$y.origin, 
+                                   edge.x2 = df.ensemble.edges$x.destination, edge.y2 = df.ensemble.edges$y.destination, 
+                                   edge.weights = df.ensemble.edges$z.weights.scaled, 
+                                   node.x = df.umap.centers$x.center, node.y = df.umap.centers$y.center, 
+                                   node.cluster = df.umap.centers$cluster) + 
+  labs(subtitle = "Ensemble: Z scores (all)")
+
+# threhsold
+z.thresh <- 0.1
+df.ensemble.edges.filtered <- df.ensemble.edges[df.ensemble.edges$z.weights.scaled >= z.thresh, ]
+
+
+plt.ensemble.traj <- cowplot::plot_grid(ensemble.geom.plot, ensemble.mean.plot, ensemble.z.plot,
+                                        ncol = 3)
+
+
+if (print.inline){
+  print(plt.ensemble.traj)
+}
+
+```
+
+
+```{r terminal nodes - ensemble}
+
+# df.ensemble.edges
+
+u.nodes <- as.numeric(unique(c(df.ensemble.edges$origin, df.ensemble.edges$destination)))
+
+df.node.score <- NULL
+for (i in 1:length(u.nodes)){
+  which.ind <- which((df.ensemble.edges$origin == u.nodes[i]) | (df.ensemble.edges$destination == u.nodes[i]))
+  df.ens.term <- df.ensemble.edges[which.ind, ]
+  
+  cur.weights <- df.ens.term$z.weights.scaled
+  df.node.score <- bind_rows(df.node.score, data.frame(node = u.nodes[i], 
+                                                       max.weight = max(cur.weights),
+                                                       sum.weight = sum(cur.weights),
+                                                       ratio = max(cur.weights) / sum(cur.weights),
+                                                       dif = sum(cur.weights) - max(cur.weights)))
+}
+
+df.ens.adj.term <- df.ens.adj
+df.ens.adj.term$origin <- stringr::str_extract(df.ens.adj.term$od, "[0-9]*-")
+df.ens.adj.term$origin <- as.numeric(gsub("-", "", df.ens.adj.term$origin))
+df.ens.adj.term$destination <- stringr::str_extract(df.ens.adj.term$od, "-[0-9]*")
+df.ens.adj.term$destination <- as.numeric(gsub("-", "", df.ens.adj.term$destination))
+
+# df.node.score.lin <- NULL
+
+df.lin.ratio <- NULL
+df.lin.dif <- NULL
+for (i in 1:ncol(df.ens.adj.weights)){
+  
+  lineage.name <- colnames(df.ens.adj.weights)[i]
+  df.node.score.cur <- df.ens.adj.term[ ,c("origin", "destination", lineage.name)]
+  colnames(df.node.score.cur) <- c("origin", "destination", "weight")
+  df.node.score.lin <- NULL
+  for (j in 1:length(u.nodes)){
+    which.ind <- which((df.node.score.cur$origin == u.nodes[j]) | (df.node.score.cur$destination == u.nodes[j]))
+    df.ens.term.cur <- df.node.score.cur[which.ind, ]
+    
+    cur.weights <- df.ens.term.cur$weight
+    df.node.score.lin <- bind_rows(df.node.score.lin, data.frame(node = u.nodes[j], 
+                                                                 max.weight = max(cur.weights),
+                                                                 sum.weight = sum(cur.weights),
+                                                                 ratio = max(cur.weights) / sum(cur.weights),
+                                                                 dif = sum(cur.weights) - max(cur.weights)))
+  }
+  
+  if (is.null(df.lin.ratio)){
+    df.lin.ratio$node <- df.node.score.lin$node
+    df.lin.dif$node <- df.node.score.lin$node
+  }
+  
+  cur.ratio <- df.node.score.lin[ ,c("node", "ratio")]
+  colnames(cur.ratio) <- c("node", lineage.name)
+  cur.dif <- df.node.score.lin[ ,c("node", "dif")]
+  colnames(cur.dif) <- c("node", lineage.name)
+  
+  df.lin.ratio <- merge(df.lin.ratio, cur.ratio, by = "node")
+  df.lin.dif <- merge(df.lin.dif, cur.dif, by = "node")
+}
+
+df.lin.ratio$mean.ratio <- apply(df.lin.ratio[ , colnames(df.ens.adj.weights)], 1, mean)
+df.lin.ratio$geom.ratio <- apply(df.lin.ratio[ , colnames(df.ens.adj.weights)], 1, function(x) prod(x)^(1/length(x)))
+df.lin.dif$mean.dif <- apply(df.lin.dif[ , colnames(df.ens.adj.weights)], 1, mean)
+df.lin.dif$geom.dif <- apply(df.lin.dif[ , colnames(df.ens.adj.weights)], 1, function(x) prod(x)^(1/length(x)))
+
+lineage.term <- data.frame(node = df.lin.ratio$node, lineage.rank = rank(-df.lin.ratio$geom.ratio))
+ensemble.term <- data.frame(node = df.node.score$node, ensemble.rank =  rank(df.node.score$dif))
+
+
+df.term.final <- merge(lineage.term, ensemble.term, by = "node")
+df.term.final$mean.ratio <- apply(df.term.final[ , c("lineage.rank", "ensemble.rank")], 1, mean)
+
+# df.term.final
+
+```
+
+
+```{r ensemble extend lineage method}
+
+
+extendLineage <- function(current.lineage, w.sub, u.sub, tn.n, tn, tolerance.threshold = 0.05){
+  
+  
+  lineage.holder <- list()
+  lin.fork.name <- c()
+  tracker <- 1
+  
+  lin.length <- length(current.lineage)
+    for (k in 1:lin.length){
+      cur.node <- paste0("c", current.lineage[[k]][length(current.lineage[[k]])])
+      w.sub0 <- w.sub[!(rownames(w.sub) %in% c(cur.node, paste0("c",  current.lineage[[k]]))), cur.node]
+      u.sub0 <- u.sub[!(rownames(w.sub) %in% c(cur.node, paste0("c",  current.lineage[[k]]))), cur.node]
+      
+      w.term <- w.sub0[tn]
+      u.term <- u.sub0[tn]
+      
+      weight.dif <- (w.sub0 - max(w.sub0))
+      weight.dif[abs(weight.dif) < tolerance.threshold] <- 0
+      which.next <- names(weight.dif)[which(weight.dif == 0)]
+      
+      if (grepl("term",names(current.lineage)[k])){
+            lin.fork.name[tracker] <- names(current.lineage)[k]
+           tracker <- tracker +1
+      } else {
+        if (!is.null(which.next)){
+          for (fork in 1:length(which.next)){
+            if (which.next[fork] != tn){
+              if (u.sub0[which.next[fork]] < u.term){
+                lin.fork.name[tracker] <- paste0(names(current.lineage)[k], "-", tracker)
+                current.lineage[[lin.fork.name[tracker]]] <-  c(current.lineage[[k]], as.numeric(gsub("c", "", which.next[fork])))
+                tracker <- tracker + 1
+              } else {
+                lin.fork.name[tracker] <- paste0(names(current.lineage)[k], "-", tracker, "-terminal")
+                current.lineage[[lin.fork.name[tracker]]] <- c(current.lineage[[k]], tn.n)
+                tracker <- tracker + 1
+              }     
+            } else {
+              lin.fork.name[tracker] <- paste0(names(current.lineage)[k], "-", tracker, "-terminal")
+              current.lineage[[lin.fork.name[tracker]]] <- c(current.lineage[[k]], tn.n)
+              tracker <- tracker +1
+            }
+          }
+        } else {
+          if (grepl("term",names(current.lineage)[k])){
+            lin.fork.name[tracker] <- names(current.lineage)[k]
+           tracker <-  tracker +1
+          } else {
+            lin.fork.name[tracker] <- paste0(names(current.lineage)[k], "-", tracker, "-terminal")
+            current.lineage[[lin.fork.name[tracker]]] <- c(current.lineage[[k]], tn.n)
+            tracker <- tracker +1
+          }
+          
+        }
+      }
+
+
+    }
+  lineage.holder <- current.lineage[lin.fork.name]
+  
+  # ensure no duplicates present
+  lin.orders <- c()
+ for (mm in 1:length(lineage.holder)){
+   lin.orders[mm] <- paste(lineage.holder[[mm]], collapse = "-")
+ }
+ lineage.holder <- lineage.holder[which(!(duplicated(lin.orders)))] 
+  
+  
+  return(lineage.holder)
+}
+  
+
+
+
+      
+```
+
+
+```{r ensemble random walk }
+
+
+# which.root <- c(0,4,5)
+
+
+# a.cluster <- as.numeric(as.character(so.query@meta.data[["seurat_clusters"]]))
+# a.cluster <- data.frame(cluster = a.cluster[(a.cluster %in% which.root)])
+# clust.tally <- as.vector( table(a.cluster))
+
+# edge dataframe to adjacency matrix
+df.ensemble.edges$origin <- as.numeric(df.ensemble.edges$origin)
+df.ensemble.edges$destination <- as.numeric(df.ensemble.edges$destination)
+u.nodes <- unique(c(df.ensemble.edges$origin, df.ensemble.edges$destination))
+u.nodes <- as.numeric(u.nodes)[order(as.numeric(u.nodes))]
+
+w.mat <- matrix(nrow = length(u.nodes), ncol = length(u.nodes))
+
+df.ensemble.edges$scaled.sim <- df.ensemble.edges$mean.weights / max(df.ensemble.edges$mean.weights)
+for (i in 1:length(u.nodes)){
+  for (j in 1:length(u.nodes)){
+    if (i != j){
+      which.ind.1 <- which((df.ensemble.edges$origin == u.nodes[i]) & (df.ensemble.edges$destination == u.nodes[j]))
+      which.ind.2 <- which((df.ensemble.edges$origin == u.nodes[j]) & (df.ensemble.edges$destination == u.nodes[i]))
+      which.ind <- unique(c(which.ind.1, which.ind.2))
+      if (length(which.ind) != 1) stop("incorrect dimensions")
+      w.mat[i,j] <- df.ensemble.edges$scaled.sim[which.ind]
+    } else {
+      w.mat[i,j] <- 1
+    }
+    
+  }
+}
+
+# get umap 
+df.ens.umap <- data.frame(
+  x = so.query@reductions[["umap"]]@cell.embeddings[ ,1],
+  y = so.query@reductions[["umap"]]@cell.embeddings[ ,2],
+  cluster = so.query@meta.data[["seurat_clusters"]]
+)
+
+df.ens.umap.centers <- getClusterCenters(df.ens.umap, which.center = "mean")
+
+u.dist <- matrix(nrow = length(u.nodes), ncol = length(u.nodes))
+for (i in 1:length(u.nodes)){
+  for (j in 1:length(u.nodes)){
+    if (i != j){
+      which.ind.1 <- which(df.ens.umap.centers$cluster == u.nodes[i])
+      which.ind.2 <- which(df.ens.umap.centers$cluster == u.nodes[j])
+
+      x2 <- (df.ens.umap.centers$x.center[which.ind.1] -  df.ens.umap.centers$x.center[which.ind.2])^2
+      y2 <- (df.ens.umap.centers$y.center[which.ind.1] -  df.ens.umap.centers$y.center[which.ind.2])^2
+
+      u.dist[i,j] <- sqrt(x2 + y2)
+    } else {
+      u.dist[i,j] <- 0
+    }
+    
+  }
+}
+
+# proportional to start 
+# do.prop.to.start <- F
+# 
+# if (do.prop.to.start){
+#   p.vec <- rep(0, length(u.nodes))
+# root.ind <- which(u.nodes %in% which.root)
+# p.vec[root.ind] <-clust.tally /sum(clust.tally)
+# } else {
+  p.vec <- rep(1/length(u.nodes),length(u.nodes))
+# }
+
+
+pt <- random.walk(p0 = p.vec, r = 0.5,graph = w.mat, do.analytical = T)
+
+ht <- NULL
+n.time <- 25
+df.ht.long <- NULL
+for (i in 1:(n.time+1)){
+  if (i == 1){
+      df.ht.long <- bind_rows(df.ht.long, data.frame(cluster = paste0("c", u.nodes), 
+                                                 time = paste0("t", i-1), 
+                                                 heat = 1/length(u.nodes)))
+  } else {
+      cur.ht <- heat.diffusion(h0 = p.vec, graph = w.mat, t = i-1)
+  ht <- cbind(ht, cur.ht[,1])
+  
+  df.ht.long <- bind_rows(df.ht.long, data.frame(cluster = paste0("c", u.nodes), 
+                                                 time = paste0("t", i-1), 
+                                                 heat = cur.ht[,1]))
+  }
+
+}
+last.time <- i-1
+
+
+# clusters that accumulate overtime = hubs (linkage nodes)
+# clusters that deplete overtime = terminal nodes
+
+classification.threshold <- 1/length(u.nodes)
+df.ht.long$time.point <- as.numeric(gsub("t", "", df.ht.long$time))
+plt.diffusion.simulation <- df.ht.long %>%
+  ggplot(aes(x = time.point, y = heat, color = cluster)) + 
+  geom_line(size = 1) + 
+  theme_miko(legend = T) + 
+  geom_hline(yintercept = classification.threshold, linetype = "dashed") + 
+  ylab("State Frequency") + 
+  xlab("Simulation Time") + 
+  labs(title = "Ensemble Network Diffusion", subtitle = "Initial condition: Equally-distributed states")
+
+df.ht.end <- df.ht.long %>% dplyr::filter(time.point == last.time)
+
+df.links <- df.ht.end %>% dplyr::filter(heat > classification.threshold)
+df.terminals <- df.ht.end %>% dplyr::filter(heat < classification.threshold)
+
+
+root.cluster.ensemble <- "c0"
+
+if (root.cluster.ensemble %in% df.links$cluster){
+  start.node <- root.cluster.ensemble
+} else {
+  start.node <- df.links$cluster[which.min(df.links$heat)]
+}
+
+link.nodes <- df.links$cluster[df.links$cluster != start.node]
+terminal.nodes <- df.terminals$cluster
+
+ln <- link.nodes
+ln.n <- as.numeric(gsub("c", "", ln))
+sn <- start.node
+sn.n <- as.numeric(gsub("c", "", sn))
+ens.lineages <- list()
+for (i in 1:length(terminal.nodes)){
+  
+  lineage.name <- paste0("ensemble.L", i)
+  
+  tn <- terminal.nodes[i]
+  tn.n <- as.numeric(gsub("c", "", tn))
+  
+  c(sn.n, ln.n, tn.n)
+  
+  o.ind <- which(df.ensemble.edges$origin %in% c(sn.n, ln.n, tn.n))
+  d.ind <- which(df.ensemble.edges$destination %in% c(sn.n, ln.n, tn.n))
+  which.ind <- unique(c(o.ind, d.ind))
+  df.edges.ens <- df.ensemble.edges[which.ind, ]
+  
+  which.ind <- which(u.nodes %in% c(sn.n, ln.n, tn.n))
+  
+  w.sub <- w.mat[which.ind, which.ind]
+  colnames(w.sub) <- paste0("c", u.nodes[which.ind])
+  rownames(w.sub) <- paste0("c", u.nodes[which.ind])
+  
+  u.sub <- u.dist[which.ind, which.ind]
+  colnames(u.sub) <- paste0("c", u.nodes[which.ind])
+  rownames(u.sub) <- paste0("c", u.nodes[which.ind])
+  
+  current.lineage <- list(L1 = c(sn.n))
+  terminal.tracker <- c(L1 = F)
+  is.terminal <- F
+
+  tolerance.threshold <- 0.15
+  
+
+  for (j in 1:1000){
+   current.lineage <-  extendLineage(current.lineage, w.sub, u.sub, tn.n, tn,tolerance.threshold)
+   if (all(grepl("term", names(current.lineage)))) break
+  }
+  
+  
+  lin.names <- paste0(lineage.name, "-", c(1:length(current.lineage)))
+  
+  for (j in 1:length(current.lineage)){
+    ens.lineages[[lin.names[j]]] <- current.lineage[[j]]
+  }
+  
+}
+
+
+```
+
+
+
+```{r assemble lineage trajectories for ensemble TI}
+
+# get ensemble umap and label nodes of interest
+df.ens.umap <- data.frame(
+  x = so.query@reductions[["umap"]]@cell.embeddings[ ,1],
+  y = so.query@reductions[["umap"]]@cell.embeddings[ ,2],
+  cluster = so.query@meta.data[["seurat_clusters"]]
+)
+
+df.ens.umap.centers <- getClusterCenters(df.ens.umap, which.center = "mean")
+df.ens.umap.centers <- df.ens.umap.centers[df.ens.umap.centers$cluster %in% unique(unlist(ens.lineages)), ]
+
+df.ens.umap.centers$node.type <- "link"
+df.ens.umap.centers$node.type[df.ens.umap.centers$cluster %in% sn.n] <- "start"
+df.ens.umap.centers$node.type[df.ens.umap.centers$cluster %in% as.numeric(gsub("c", "", terminal.nodes))] <- "end"
+
+# assign colors to each node type. 
+df.ens.umap.centers$node.color <- "#00BA38"
+df.ens.umap.centers$node.color[df.ens.umap.centers$node.type %in% "start"] <- "#619CFF"
+df.ens.umap.centers$node.color[df.ens.umap.centers$node.type %in% "end"] <- "#F8766D"
+df.ens.umap.centers$node.color[df.ens.umap.centers$node.type %in% "fork"] <- "#C77CFF"
+
+# get node adjaceny mapping
+df.ens.adj <- NULL
+for (i in 1:length(ens.lineages)){
+  lineage.name <- names(ens.lineages)[i]
+  lineage.cluster <- ens.lineages[[lineage.name]]
+  n.clust <- length(lineage.cluster)
+  df.ens.adj.lin <- data.frame(origin = lineage.cluster[1:(n.clust-1)],
+                              destination = lineage.cluster[2:(n.clust)])
+  df.ens.adj <- bind_rows(df.ens.adj, df.ens.adj.lin)
+}
+df.ens.adj <- unique(df.ens.adj)
+
+df.ens.coord <- NULL
+for (i in 1:nrow(df.ens.adj)){
+  x.origin <- df.ens.umap.centers$x.center[df.ens.umap.centers$cluster == df.ens.adj$origin[i]]
+  y.origin <- df.ens.umap.centers$y.center[df.ens.umap.centers$cluster == df.ens.adj$origin[i]]
+  x.destination <- df.ens.umap.centers$x.center[df.ens.umap.centers$cluster == df.ens.adj$destination[i]]
+  y.destination <- df.ens.umap.centers$y.center[df.ens.umap.centers$cluster == df.ens.adj$destination[i]]
+  df.ens.coord <- bind_rows(df.ens.coord, data.frame(x.origin, y.origin, x.destination, y.destination))
+}
+
+df.ens.adj <- bind_cols(df.ens.adj, df.ens.coord)
+
+```
+
+```{r ensemble principal curves, fig.width=10, fig.height=4}
+
+ensemble.list <- list()
+
+LT.ens.list <- list()
+pc.ens.coord.merge <- NULL
+
+lineage.dimred <- NULL
+for (i in 1:length(ens.lineages)){
+  lineage.name <- names(ens.lineages)[i]
+  
+  dimSubset <- subsetDimRed(so.query, which.features = ens.lineages[[lineage.name]], reduction = "umap")
+  
+  start.clust <- dimSubset[["centers"]]
+  start.clust <- start.clust[match(ens.lineages[[lineage.name]], start.clust$cluster), ]
+  # start.traj <- inferInitialTrajectory(as.matrix(dimSubset[["reduction"]]), k = length(unique(dimSubset[["features"]])))
+  
+  LT.ens.results <- lineageTrajectory(space = as.matrix(dimSubset[["reduction"]][ ,c(1,2)]),
+                                     start = as.matrix(start.clust[ ,c(2,3)]),
+                                     group.labels = dimSubset[["features"]],
+                                     pseudotimes = T
+  )
+  
+  pc.coord <- LT.ens.results[["principal.curve.coordinates"]]
+  pc.coord$lineage <- lineage.name
+  pc.ens.coord.merge <- bind_rows(pc.ens.coord.merge, pc.coord)
+  
+  LT.ens.list[[lineage.name]] <- LT.ens.results
+  
+  cur.dimset <- dimSubset[["reduction"]]
+  colnames(cur.dimset) <- c("x", "y")
+  cur.dimset$lineage <- lineage.name
+  cur.dimset$pseudotime <- LT.ens.results[["pseudotime"]]
+  cur.dimset$cell <- rownames(dimSubset[["reduction"]])
+  
+  lineage.dimred <- bind_rows(lineage.dimred, cur.dimset)
+  
+}
+
+# if ("fork" %in% df.sp.umap.centers$node.type){
+#   df.sp.umap.centers$node.type <- factor(df.sp.umap.centers$node.type, levels = c("end", "link", "start", "fork"))
+# }
+
+plt.trajectory.ens <- ggplot() +
+  geom_point(data = df.ens.umap, aes(x= x, y= y, color = cluster)) +
+  theme_classic() +
+  xlab("UMAP 1") +
+  ylab("UMAP 2")  +
+  geom_segment(data = df.ens.adj, aes(x = x.origin, y = y.origin, xend = x.destination, yend = y.destination), size = 1) +
+  geom_point(data = df.ens.umap.centers, aes(x = x.center, y = y.center, fill = node.type ), pch = 21, size = 4) +
+  ggtitle(paste("Lineages (", toupper(alt.reduction), ")", sep = "")) 
+
+
+lineage.dimred$lineage <- factor(lineage.dimred$lineage , levels = names(ens.lineages))
+pc.ens.coord.merge$lineage <- factor(pc.ens.coord.merge$lineage , levels = names(ens.lineages))
+plot.lineage.umap.ens <- ggplot() + 
+  geom_point(data = df.ens.umap, aes(x, y), color = "grey") + 
+  geom_point(data = lineage.dimred, aes(x, y, color = pseudotime)) + 
+  scale_color_viridis() + 
+  geom_path(data = pc.ens.coord.merge, aes(x, y, group = lineage), size = 1) + 
+  facet_wrap(~lineage) + 
+  theme_miko() + 
+  xlab("UMAP 1") + 
+  ylab("UMAP 2") + 
+  labs(title = "Lineage-Specific Pseudotimes", subtitle = "Ensemble")
+
+plt.ens.overview <- cowplot::plot_grid(plt.trajectory.ens, plot.lineage.umap.ens, rel_widths = c(2,3))
+if (print.inline) {
+  plt.ens.overview
+}
+
+ensemble.list$trajectory.plot <- plt.trajectory.ens
+ensemble.list$lineage.pseudotime.plot <- plot.lineage.umap.ens
+ensemble.list$lineage.umap <- lineage.dimred
+ensemble.list$root.cluster <- start.node
+
+
+
+```
+
+
+```{r Highly Variable Genes, message=FALSE, warning=FALSE}
+
+# get HVG
+
+# top.n.var <- 220
+top.n.var <- n.hvg
+
+top_hvg <- tryCatch({
+  df.var <- so.query@assays[["SCT"]]@meta.features
+  df.var$genes <- rownames(df.var)
+  df.var.top <- df.var %>% arrange(-sct.residual_variance) %>% top_n(top.n.var, sct.residual_variance)
+  top_hvg <- df.var.top$genes
+  
+}, error = function(e){
+  top_hvg <- HVFInfo(so.query) %>% 
+    mutate(., bc = rownames(.)) %>% 
+    arrange(desc(residual_variance)) %>% 
+    top_n(top.n.var, residual_variance) %>% 
+    pull(bc)
+  return(top_hvg)
+})
+
+if (!exists("top_hvg") | is.null(top_hvg)){
+  if (DefaultAssay(so.query) == "integrated") {
+    top_hvg <- rownames(so.query@assays[["integrated"]]@data)
+  } else {
+    stop("HVGs not available")
+  }
+}
+
+gene.rep <-  checkGeneRep(gNames.list, top_hvg)
+if (gene.rep == "ensembl") top_hvg <- as.vector(gNames.list[top_hvg])
+
+
+
+```
+
+
+```{r random forest helper function}
+
+pseudotimeRF.dev <- function(so, hvg, pseudotimes, lineage.name, slot = "data", assay = DefaultAssay(so),
+                             mtry = length(hvg)/10, trees = 1000, min_n = 15, mode = "regression", importance = "impurity", num.threads = 3){
+  
+  # get data for highly variable genes (hvg)
+  cur.data <- Seurat::GetAssayData(so, slot = slot, assay = assay)
+  # cur.data <-  as.matrix(as.data.frame(cur.data))
+  match.ind <- which(rownames(cur.data) %in% top_hvg)
+  dat_use <- as.data.frame(t(Seurat::GetAssayData(so, slot = slot, assay = assay)[match.ind,]))
+  rm(cur.data)
+  
+  # merge expression data and pseudotime
+  dat_use_df <- cbind(pseudotimes, dat_use)
+  colnames(dat_use_df)[1] <- "pseudotime"
+  dat_use_df <- as.data.frame(dat_use_df[!is.na(dat_use_df[,1]),])
+  
+  # Define training, testing and validation sets
+  colnames(dat_use_df) <- make.names(colnames(dat_use_df) , unique = TRUE, allow_ = TRUE)
+  dat_split <- rsample::initial_split(dat_use_df)
+  dat_train <- rsample::training(dat_split)
+  dat_val <- rsample::testing(dat_split)
+  
+  # Train Model
+  model <- parsnip::rand_forest(mtry =mtry, trees = trees, min_n = min_n, mode = mode) %>%
+    set_engine("ranger", importance =importance, num.threads = num.threads) %>%
+    fit(pseudotime ~ ., data = dat_train)
+  
+  # Evaluate Model
+  val_results <- dat_val %>%
+    dplyr::mutate(estimate = predict(model, .[,-1]) %>% 
+                    pull()) %>%
+    dplyr::select(truth = pseudotime, estimate)
+  model.metrics <- yardstick::metrics(data = val_results, truth, estimate)
+  
+  # store results
+  # model.list[[lineage.name]] <- model
+  # results.list[[lineage.name]] <- val_results
+  df.metrics <- data.frame(lineage = lineage.name,
+                           rmse = signif(model.metrics[[".estimate"]][1],3),
+                           rsq = signif(model.metrics[[".estimate"]][2],3),
+                           mae = signif(model.metrics[[".estimate"]][3],3))
+  
+  output <- list(
+    model = model,
+    prediction = val_results,
+    performance = df.metrics
+  )
+  
+  return(output)
+  
+}
+
+
+```
+
+
+
+```{r Random Forest Analysis}
+
+model.list <- list()
+results.list <- list()
+pt.list <- list()
+df.metrics <- NULL
+
+# specify which models to run random forest 
+which.models <- list(
+  slingshot = F,
+  scPedigree = T,
+  dpt = F,
+  scorpius = F,
+  paga = F,
+  ensemble = T
+)
+
+# RANDOM FOREST: SLINGSHOT TRAJECTORIES #########################################
+
+if (which.models$slingshot){
+  n.lineage<- length(sling@curves)
+  
+  for (i in 1:n.lineage){
+    # specify lineage and pseudotimes
+    which.lineage <- i
+    lineage.label <- paste0("Slingshot.L", which.lineage)
+    pt.input <- slingPseudotime(sling)[,which.lineage]
+    pt.input <- pt.input/max(pt.input, na.rm = T)
+    
+    # identify significant genes with random forest model 
+    RF.output <- pseudotimeRF.dev(so = so.query, 
+                                  hvg = top_hvg, 
+                                  pseudotimes = pt.input, 
+                                  lineage.name = lineage.label, 
+                                  slot = "data", 
+                                  assay = DefaultAssay(so.query))
+    
+    model.list[[lineage.label]] = RF.output$model
+    pt.list[[lineage.label]] = pt.input
+    results.list[[lineage.label]] = RF.output$prediction
+    df.metrics <- bind_rows(df.metrics, RF.output$performance)
+  }
+}
+
+# RANDOM FOREST: SCPEDIGREE TRAJECTORIES #########################################
+
+if (which.models$scPedigree){
+  
+  n.lineage <- length(sp.lineages)
+  
+  for (i in 1:n.lineage){
+    # specify lineage and pseudotimes
+    which.lineage <- i
+    lineage.label <- paste0("scPedigree.", names(sp.lineages)[i])
+    
+    # prep pseudotimes
+    df.sp.pt <- scPedigree.list[["lineage.umap"]]
+    df.sp.pt <- df.sp.pt[df.sp.pt$lineage %in% names(sp.lineages)[i], ]
+    
+    df.pt.input <- data.frame(cell = colnames(so.query), pt = NA)
+    df.pt.input <- merge(df.pt.input, df.sp.pt, by = "cell", all.x = T)
+    
+    # ensure cells are correctly ordered
+    df.pt.input <- df.pt.input[match(colnames(so.query), df.pt.input$cell), ]
+    pt.input <- df.pt.input$pseudotime
+    names(pt.input) <- df.pt.input$cell
+    pt.input <- pt.input/max(pt.input, na.rm = T)
+    
+    # identify significant genes with random forest model 
+    RF.output <- pseudotimeRF.dev(so = so.query, 
+                                  hvg = top_hvg, 
+                                  pseudotimes = pt.input, 
+                                  lineage.name = lineage.label, 
+                                  slot = "data", 
+                                  assay = DefaultAssay(so.query))
+    
+    model.list[[lineage.label]] <-RF.output$model
+    pt.list[[lineage.label]] <-pt.input
+    results.list[[lineage.label]]  <- RF.output$prediction
+    df.metrics <- bind_rows(df.metrics, RF.output$performance) 
+    
+  }
+}
+
+# RANDOM FOREST: DIFFUSION MAP TRAJECTORIES #########################################
+
+if (which.models$dpt){
+# specify lineage and pseudotimes
+lineage.label <- "dpt.global"
+pt.input <- dpt.list[["global.pseudotime"]]
+pt.input <- pt.input/max(pt.input, na.rm = T)
+
+# identify significant genes with random forest model 
+RF.output <- pseudotimeRF.dev(so = so.query, 
+                              hvg = top_hvg, 
+                              pseudotimes = pt.input, 
+                              lineage.name = lineage.label, 
+                              slot = "data", 
+                              assay = DefaultAssay(so.query))
+
+
+model.list[[lineage.label]] <- RF.output$model
+results.list[[lineage.label]] <- RF.output$prediction
+pt.list[[lineage.label]] <- pt.input
+
+df.metrics$lineage <- as.character(df.metrics$lineage)
+df.metrics <- bind_rows(df.metrics, RF.output$performance)
+
+}
+
+
+# RANDOM FOREST: SCORPIUS TRAJECTORIES #########################################
+
+if (which.models$scorpius){
+  # specify lineage and pseudotimes
+  lineage.label <- "SCORPIUS.global"
+  pt.input <- scorpius.list[["global.pseudotime"]]
+  pt.input <- pt.input/max(pt.input, na.rm = T)
+  
+  # identify significant genes with random forest model 
+  RF.output <- pseudotimeRF.dev(so = so.query, 
+                                hvg = top_hvg, 
+                                pseudotimes = pt.input, 
+                                lineage.name = lineage.label, 
+                                slot = "data", 
+                                assay = DefaultAssay(so.query))
+  
+  
+  model.list[[lineage.label]] <- RF.output$model
+  results.list[[lineage.label]] <- RF.output$prediction
+  pt.list[[lineage.label]] <- pt.input
+  
+  df.metrics$lineage <- as.character(df.metrics$lineage)
+  df.metrics <- bind_rows(df.metrics, RF.output$performance)
+}
+
+# RANDOM FOREST: PAGA TRAJECTORIES #########################################
+
+if (which.models$paga){
+  
+  # specify lineage and pseudotimes
+  lineage.label <- "PAGA.global"
+  pt.input <- paga.list[["global.pseudotime"]]
+  pt.input <- pt.input/max(pt.input, na.rm = T)
+  
+  # identify significant genes with random forest model 
+  RF.output <- pseudotimeRF.dev(so = so.query, 
+                                hvg = top_hvg, 
+                                pseudotimes = pt.input, 
+                                lineage.name = lineage.label, 
+                                slot = "data", 
+                                assay = DefaultAssay(so.query))
+  
+  
+  model.list[[lineage.label]] <- RF.output$model
+  results.list[[lineage.label]] <- RF.output$prediction
+  pt.list[[lineage.label]] <- pt.input
+  
+  df.metrics$lineage <- as.character(df.metrics$lineage)
+  df.metrics <- bind_rows(df.metrics, RF.output$performance)
+  
+}
+
+# RANDOM FOREST: ENSEMBLE TRAJECTORIES #########################################
+
+if (which.models$ensemble){
+  
+  n.lineage <- length(ens.lineages)
+  
+  for (i in 1:n.lineage){
+    # specify lineage and pseudotimes
+    which.lineage <- i
+    lineage.label <- names(ens.lineages)[i]
+    
+    # prep pseudotimes
+    df.ens.pt <- ensemble.list[["lineage.umap"]]
+    df.ens.pt <- df.ens.pt[df.ens.pt$lineage %in% names(ens.lineages)[i], ]
+    
+    df.pt.input <- data.frame(cell = colnames(so.query), pt = NA)
+    df.pt.input <- merge(df.pt.input, df.ens.pt, by = "cell", all.x = T)
+    
+    # ensure cells are correctly ordered
+    df.pt.input <- df.pt.input[match(colnames(so.query), df.pt.input$cell), ]
+    pt.input <- df.pt.input$pseudotime
+    names(pt.input) <- df.pt.input$cell
+    pt.input <- pt.input/max(pt.input, na.rm = T)
+    
+    # identify significant genes with random forest model 
+    RF.output <- pseudotimeRF.dev(so = so.query, 
+                                  hvg = top_hvg, 
+                                  pseudotimes = pt.input, 
+                                  lineage.name = lineage.label, 
+                                  slot = "data", 
+                                  assay = DefaultAssay(so.query))
+    
+    model.list[[lineage.label]] <-RF.output$model
+    pt.list[[lineage.label]] <-pt.input
+    results.list[[lineage.label]]  <- RF.output$prediction
+    df.metrics <- bind_rows(df.metrics, RF.output$performance) 
+    
+  }
+}
+
+
+if (print.inline) {
+  datatable(df.metrics, rownames = F)
+}
+
+
+
+```
+
+
+
+```{r plot most importance genes, message=FALSE, warning=FALSE}
+
+
+plt.gene.list <- list()
+
+df.gene.importance <- NULL
+
+for (i in 1:length(model.list)){
+  
+  model <- model.list[[i]]
+  lineage.label <- names(model.list)[i]
+  
+  # get most importance genes
+  var_imp <- sort(model$fit$variable.importance, decreasing = TRUE)
+  
+  df.var.imp <- data.frame(gene = names(var_imp),
+                           importance = as.vector(var_imp))
+  df.var.imp$importance <- signif((df.var.imp$importance - min(df.var.imp$importance)) / (max(df.var.imp$importance) - min(df.var.imp$importance)), 3)
+  colnames(df.var.imp) <- c("gene", lineage.label)
+  if (is.null(df.gene.importance)){
+    df.gene.importance <- df.var.imp
+  } else {
+    df.gene.importance <- merge(df.gene.importance, df.var.imp)
+  }
+  
+  top_genes <- names(var_imp)[1:6]
+  top_coef <- as.vector(var_imp)[1:6]
+  top_gene_name <- top_genes
+  
+  # get top genes
+  cur.data <- GetAssayData(so.query, slot = "data")
+  cur.data <- as.matrix(cur.data)
+  match.ind <- match( top_genes, rownames(cur.data)[rownames(cur.data) %in% top_genes])
+  match.ind <- match.ind[!is.na(match.ind)]
+  cur.data.filtered <- t(cur.data[rownames(cur.data) %in% top_genes, ][match.ind, ])
+  
+  # check which genes were retained
+  top_genes.filtered <- colnames(cur.data.filtered)
+  top_coef.filtered <- top_coef[top_gene_name %in%  top_genes.filtered]
+  
+  # some data wrangling
+  df.data.filtered <- as.data.frame(cur.data.filtered)
+  df.data.filtered$cells <- rownames(df.data.filtered)
+  df.alt.red$cells <- rownames(df.alt.red)
+  df.umap.gene <- merge(df.alt.red, df.data.filtered, by = "cells")
+  
+  # convert wide to long
+  df.umap.gene.long <- gather(df.umap.gene, gene, expression, top_genes.filtered)
+  
+  # df.umap.gene.long <- join(df.umap.gene.long, df.red.pseudotime.current)
+  plt.gene <- df.umap.gene.long %>%
+    ggplot(aes(group = gene)) +
+    geom_point(aes(x= x, y= y, color = expression), size=  1) +
+    scale_color_viridis(name = "Expression", option = "inferno")+
+    theme_classic() +
+    xlab(paste(toupper("UMAP"), " 1" , sep = "")) +
+    ylab(paste(toupper("UMAP"), " 2" , sep = "")) +
+    ggtitle(lineage.label) +
+    facet_wrap(~gene, ncol = 3)
+  
+  # print plots
+  if (print.inline) {
+    print(plt.gene)
+  }
+  
+  plt.gene.list[[lineage.label]] <- plt.gene
+  
+}
+
+# print(plt.gene.list)
+
+if (print.inline) {
+  datatable(df.gene.importance)
+  # flex.asDT(df.gene.importance)
+  
+  # df.gene.importance.sub <- df.gene.importance
+  # df.gene.importance.sub <- df.gene.importance[,grepl("Pedigree|gene", colnames(df.gene.importance))]
+  
+  
+  # datatable(df.gene.importance.sub)
+}
+
+
+
+```
+
+```{r URD}
+
+# library(URD)
+# pseudotimeDetermineLogistic()
+# https://github.com/farrellja/URD/blob/master/Analyses/QuickStart/URD-QuickStart-AxialMesoderm.md
+
+# Bias the transition matrix acording to pseudotime
+# axial.biased.tm <- as.matrix(pseudotimeWeightTransitionMatrix(axial, "pseudotime", logistic.params=axial.ptlogistic))
+
+# Simulate the biased random walks from each tip
+# axial.walks <- simulateRandomWalksFromTips(axial, tip.group.id="tip.clusters", root.cells=root.cells, transition.matrix = axial.biased.tm, n.per.tip = 25000, root.visits = 1, max.steps = 5000, verbose = F)
+
+# Process the biased random walks into visitation frequencies
+# axial <- processRandomWalksFromTips(axial, axial.walks, verbose = F)
+
+```
+
+
+```{r gene importance correlation, fig.height=5, fig.width=5}
+
+
+# correlation matrix of gene importance
+df.gene.importance.cor <- df.gene.importance
+colnames(df.gene.importance.cor) <- gsub("Lineage ", "L", colnames(df.gene.importance.cor))
+
+cor.res <- signif(cor(df.gene.importance.cor[ ,2:ncol(df.gene.importance.cor)], method = "spearman"),3)
+col<- colorRampPalette(c("blue", "white", "red"))(20)
+
+if (print.inline) pheatmap::pheatmap(cor.res, main = "Correlation of Gene Importance Across Lineages")
+
+
+
+```
+
+```{r visualize top genes across algorithms, fig.height=4, fig.width=20}
+
+
+df.gene.module.input <- df.gene.importance %>% dplyr::select(-c("gene"))
+rownames(df.gene.module.input) <- df.gene.importance$gene
+df.imp.module  <- extract_modules(scale_quantile(t(df.gene.module.input)))
+
+# module statistics
+imp.scaled <- ((df.gene.module.input))
+imp.scaled.av <- apply(imp.scaled, 1, mean)
+imp.scaled.med <- apply(imp.scaled, 1, mean)
+imp.scaled.threshold <- apply(imp.scaled, 1, function(x) sum(x > 0.01))
+imp.scaled.sd <- apply(imp.scaled, 1, sd)
+df.imp.stat <- data.frame(gene = names(imp.scaled.av), x = imp.scaled.av, m = imp.scaled.med , s = imp.scaled.sd, above.threshold = imp.scaled.threshold)
+df.imp.stat$z <- df.imp.stat$x / df.imp.stat$s
+df.imp.stat$cv <- df.imp.stat$s / df.imp.stat$x
+df.top.module.genes <- df.imp.module %>%
+  group_by(module) %>%
+  top_n(10, within_module_ordering)
+
+# get top genes across all algorithms
+df.imp.stat.top <- df.imp.stat %>% top_n(100, above.threshold)
+genes.above.threshold <- df.imp.stat.top$gene
+
+
+imp.mat <- as.matrix((df.gene.module.input))
+imp.mat <- imp.mat[rownames(imp.mat) %in% genes.above.threshold, ]
+df.imp.module.thresh <- df.imp.module[df.imp.module$feature %in% genes.above.threshold, ]
+x_part <- imp.mat[df.imp.module.thresh$feature, ]
+gaps_row <- which(df.imp.module.thresh$module[-1] != df.imp.module.thresh$module[-length(df.imp.module.thresh$module)])
+cluster_rows <- FALSE
+
+if (print.inline) {
+  pheatmap::pheatmap(t(x_part), 
+                     gaps_col = gaps_row,
+                     cluster_cols = FALSE,
+                     main = "Top Genes (by random forest importance)",
+                     angle_col = 45)
+}
+
+
+```
+
+
+```{r global pseudotime correlations}
+
+
+if (sum(grepl("global", names(pt.list))) < 2){
+  plt.pt.cor <- NULL
+} else {
+  glob.pt.names <- names(pt.list)[grepl("global", names(pt.list))]
+  
+  
+  df.glob.pt <- namedList2wideDF(pt.list[glob.pt.names])
+  df.glob.pt <- apply(df.glob.pt, 2, as.numeric)
+  df.glob.pt <- apply(df.glob.pt, 2, function(x) x/max(x, na.rm = T))
+  mat.glob.pt <- (as.matrix(df.glob.pt))
+  
+  # if (print.inline) pheatmap::pheatmap(mat.glob.pt, main = "Global Pseudotime Correlations")
+  
+  
+  plt.pt.cor <- GGally::ggpairs(as.data.frame(df.glob.pt), title="Global Pseudotime Correlations", 
+                                lower = list(continuous= GGally::wrap("smooth", alpha = 0.1, color = "black")),
+                                diag = list(continuous = GGally::wrap("barDiag"))) +
+    theme_miko() + 
+    xlab("Pseudotimes, x") + ylab("Pseudotimes, y")
+}
+
+
+if (print.inline){
+  print(plt.pt.cor)
+}
+
+```
+
+
+```{r pseudotime heatmap v1, fig.height=8, fig.width=12, include = FALSE}
+
+all.lineages <- names(model.list)
+plt.all.list <- list()
+mod.list <- list()
+
+df.cor.pt <- NULL
+
+for (i in 1:length(all.lineages)){
+  
+  # get top 50 important genes
+  df.imp <- df.gene.importance[ ,c("gene", all.lineages[i])] 
+  colnames(df.imp) <- c("genes", "importance")
+  df.imp <- df.imp %>% top_n(75, importance)
+  
+  # get expression matrix
+  so.query@assays[["RNA"]]@data@Dimnames[[1]] <- so.query@assays[["RNA"]]@meta.features[["SYMBOL"]]
+  cur.data <- so.query@assays[["SCT"]]@data
+  
+  # subset matrix
+  match.ind <- which(rownames(cur.data) %in% df.imp$genes)
+  dat_use <- as.data.frame(t(cur.data[match.ind,]))
+  dat_use_df <- cbind(pt.list[[ all.lineages[i]]], dat_use) 
+  colnames(dat_use_df)[1] <- "pseudotime"
+  dat_use_df <- dat_use_df[complete.cases(dat_use_df), ]
+  colnames(dat_use_df) <- make.unique(colnames(dat_use_df))
+  df.order <- dat_use_df %>% arrange(pseudotime)
+  
+  df.info <- data.frame(cells = rownames(dat_use_df), pt = dat_use_df$pseudotime) %>% arrange(pt)
+  
+  # order expression matrix by pseudotime x expression correlation
+  ph.mat <- as.matrix(df.order[, colnames(df.order) %in% df.imp$genes])
+  pt.cor <- cor(df.order$pseudotime, ph.mat, method = "spearman")
+  df.cor.pt <- bind_rows(df.cor.pt, data.frame(lineage = all.lineages[i], genes = colnames(pt.cor), rho = signif(pt.cor[1,], 3)))
+  ph.mat <- ph.mat[ ,order(pt.cor)]
+  
+  sample.ind <- sample(  1:nrow(ph.mat), round( nrow(ph.mat)*0.2))
+  sample.ind <- sample.ind[order(sample.ind)]
+  
+  ph.mat.sub <- t(ph.mat[sample.ind,])
+  df.info.sub <- df.info[sample.ind, ]
+  
+  df.meta <- so.query@meta.data
+  df.meta$cells <- rownames(df.meta)
+  df.info.sub <- merge(df.info.sub, df.meta, by = "cells")
+  df.info.sub <- df.info.sub %>% arrange(pt)
+  
+  col.info <- df.info.sub[,c("Barcode", "seurat_clusters", "pt")]
+  rownames(col.info) <- df.info.sub$cells
+  colnames(col.info) <- c("Barcode", "Cluster", "Pseudotime")
+  
+  colnames(ph.mat.sub) <- rownames(col.info)
+  
+  if (gene.grouping == "correlation"){
+    plt.hm <- pheatmap::pheatmap(ph.mat.sub,
+                                 color  = inferno(20),
+                                 cluster_cols = F,
+                                 cluster_rows = F,
+                                 annotation_col = col.info,
+                                 main = all.lineages[i],
+                                 annotation_colors = list(Pseudotime = viridis(n = 20, option = "D")), 
+                                 show_colnames = F)
+  } else if (gene.grouping == "modular") {
+    na.ind <- is.na(pt.list[[all.lineages[i]]])
+    e.mat.imp <- e.mat[ !na.ind,colnames(e.mat) %in% df.imp$genes]
+    pt.imp <- pt.list[[all.lineages[i]]][ !na.ind]
+    mod <- extract_modules(e.mat.imp, time = pt.imp)
+    mod.list[[all.lineages[i]]] <- mod
+    plt.hm <- draw_trajectory_heatmap(x = e.mat.imp,
+                                      time =  pt.imp,
+                                      progression_group = factor(df.meta$Barcode[ !na.ind]),
+                                      modules = mod,
+                                      show_labels_row = T,
+                                      scale_features = F,
+                                      color  = inferno(20))
+  }
+  
+  plt.lin <- NULL
+  plt.tra <- NULL
+  if (grepl("Slingshot", all.lineages[i])){
+    if (grepl("global", all.lineages[i])){
+      stop("missing plots")
+    } else {
+      plt.lin <- slingshot.list[["lineage.pseudotime.plot"]]
+      plt.tra <- slingshot.list[["trajectory.plot"]]
+    }
+  } else if (grepl("dpt", all.lineages[i])){
+    if (grepl("global", all.lineages[i])){
+      plt.tra <- dpt.list[["trajectory.plot"]]
+      plt.lin <-dpt.list[["global.pseudotime.plot"]]
+    } else {
+      plt.tra <- dpt.list[["trajectory.plot"]]
+      plt.lin <-dpt.list[["lineage.pseudotime.plot"]]
+    } 
+  } else if (grepl("PAGA", all.lineages[i])){
+    if (grepl("global", all.lineages[i])){
+      plt.lin <- paga.list[["global.pseudotime.plot"]]
+      plt.tra <- paga.list[["trajectory.plot"]]
+    } else {
+      stop("missing plots")
+    }
+  } else if (grepl("SCORPIUS", all.lineages[i])){
+    if (grepl("global", all.lineages[i])){
+      plt.lin <- scorpius.list[["global.pseudotime.plot"]]
+      plt.tra <- NULL  
+    } else {
+      stop("missing plots")
+    }
+  } else if (grepl("scPedigree", all.lineages[i])){
+    if (grepl("global", all.lineages[i])){
+      stop("missing plots")
+    } else {
+      plt.lin <- scPedigree.list[["lineage.pseudotime.plot"]]
+      plt.tra <- scPedigree.list[["trajectory.plot"]]
+    }
+  } else if (grepl("ensemble", all.lineages[i])){
+    if (grepl("global", all.lineages[i])){
+      stop("missing plots")
+    } else {
+      plt.lin <- ensemble.list[["lineage.pseudotime.plot"]]
+      plt.tra <- ensemble.list[["trajectory.plot"]]
+    }
+  } 
+  
+  plt.hm <- ggplotify::as.ggplot(plt.hm)
+  plt.left <- cowplot::plot_grid(plt.lin, plt.tra, ncol = 1)
+  plt.all <- cowplot::plot_grid(plt.left, plt.hm, ncol = 2, rel_widths = c(4,5))
+  plt.all.list[[all.lineages[i]]] <- plt.all
+}
+
+
+```
+
+
+```{r, fig.height=10, fig.width=14}
+
+if (print.inline){
+  print(plt.all.list)
+}
+
+
+```
+
+
+
+```{r rank genes by correlation and prep pathway enrichment}
+
+df.gene.cor <- NULL
+for (i in 1:length(all.lineages)){
+  
+  # get top 50 important genes
+  df.imp <- df.gene.importance[ ,c("gene", all.lineages[i])] 
+  colnames(df.imp) <- c("genes", "importance")
+  
+  # get expression matrix
+  so.query@assays[["RNA"]]@data@Dimnames[[1]] <- so.query@assays[["RNA"]]@meta.features[["SYMBOL"]]
+  cur.data <- so.query@assays[["SCT"]]@data
+  # cur.data <- so.query@assays[["SCT"]]@scale.data
+  
+  # subset matrix
+  match.ind <- which(rownames(cur.data) %in% df.imp$genes)
+  dat_use <- as.data.frame(t(cur.data[match.ind,]))
+  
+  dat_use_df <- cbind(pt.list[[ all.lineages[i]]], dat_use) 
+  colnames(dat_use_df)[1] <- "pseudotime"
+  dat_use_df <- dat_use_df[complete.cases(dat_use_df), ]
+  
+  colnames(dat_use_df) <- make.unique(colnames(dat_use_df))
+  df.order <- dat_use_df %>% arrange(pseudotime)
+  
+  ph.mat <- as.matrix(df.order[, colnames(df.order) %in% df.imp$genes])
+  
+  pt.cor <- cor(df.order$pseudotime, ph.mat, method = "spearman")
+  df.gene.cor <- bind_rows(df.gene.cor, data.frame(genes = colnames(pt.cor), rho = signif(pt.cor[ 1,], 3), lineage = all.lineages[i]))
+  
+}
+
+# get all genes of interest
+all.genes <- unique(df.gene.cor$genes)
+
+# specify sample appropriate species
+which.species <- unique(so.query@meta.data[["Organism"]])
+if (length(which.species) > 1) {
+  which.species <- "Hs"
+  all.genes <- toupper(all.genes)
+}
+
+# symbol to entrez mapping
+my.symbol <- as.vector(all.genes)
+my.entrez <- sym2entrez(my.symbol, my.species = which.species )
+my.entrez <- my.entrez[complete.cases(my.entrez), ]
+
+match.ind <- match(all.genes, my.entrez$SYMBOL)
+all.genes.entrez <- as.character(my.entrez$ENTREZID[match.ind]) 
+
+# get relevant pathways
+pathways <- getAnnotationPathways(all.genes.entrez, species = which.species)
+
+
+```
+
+
+```{r gsea enrichment analysis, warning = F, message = F}
+
+
+# initiate lists  
+gse.pathway.combined <- NULL
+gse.pathway.filtered.concat <- NULL
+gse.pathway.list <- list()
+
+# specify analysis parameters
+if (which.species == "Hs") {
+  org <- "human"
+  db <- org.Hs.eg.db::org.Hs.eg.db
+} else if (which.species == "Mm"){
+  org <- "mouse"
+  db <- org.Mm.eg.db::org.Mm.eg.db
+}
+
+# get unique lineages  (run enrichment for each)
+u.lineages <- unique(df.gene.cor$lineage)
+
+for (i in 1:length(u.lineages)){
+  
+  lineage.name <- u.lineages[i]
+  
+  gene.list <-df.gene.cor$rho[df.gene.cor$lineage %in% u.lineages[i]]
+  names(gene.list) <- df.gene.cor$genes[df.gene.cor$lineage %in% u.lineages[i]]
+  match.ind <- match(names(gene.list), my.entrez$SYMBOL)
+  names(gene.list) <- as.character(my.entrez$ENTREZID[match.ind])
+  gene.list = sort(gene.list, decreasing = TRUE)
+  
+  # clean list
+  df.ent <- data.frame(names = names(gene.list), values = as.vector(gene.list))
+  df.ent <- df.ent[complete.cases(df.ent), ]
+  df.ent <- df.ent[!is.infinite(df.ent$values), ]
+  gene.list.clean <- df.ent$values
+  names(gene.list.clean) <- df.ent$names
+  
+  
+  suppressMessages({
+    # pathway gsea enrichment
+    gse.pathway <- fgsea::fgsea(pathways, gene.list.clean, nperm=1000, maxSize=500, minSize = 5)
+    
+    if (nrow(gse.pathway) == 0) next
+    gse.pathway$query <- lineage.name
+    gse.pathway.combined <- bind_rows(gse.pathway.combined, gse.pathway)
+    
+    gse.pathway.filtered <- gse.pathway[(gse.pathway$pval < 0.01), ]
+    if (nrow(gse.pathway.filtered) == 0) next
+    
+    # make human readable (map entrez to symbol)
+    
+    gse.pathway.filtered$set <- lapply(gse.pathway.filtered$leadingEdge, mapvalues,from = my.entrez$ENTREZID, to = my.entrez$SYMBOL)
+    gse.pathway.filtered$set <- lapply(gse.pathway.filtered$set, paste,collapse = ", ")
+    gse.pathway.filtered$query <- lineage.name
+    # gse.pathway.filtered.orig <- gse.pathway.filtered
+  })
+  
+  # sig figs for numerics
+  gse.pathway.filtered$ES <- signif(gse.pathway.filtered$ES, 3)
+  gse.pathway.filtered$NES <- signif(gse.pathway.filtered$NES, 3)
+  gse.pathway.filtered$pval <- signif(gse.pathway.filtered$pval, 3)
+  gse.pathway.filtered$padj <- signif(gse.pathway.filtered$padj, 3)
+  
+  # filter and rearrange columns
+  
+  gse.pathway.all <- gse.pathway.filtered[ ,c("query", "pathway", "size", "ES", "NES", "pval", "padj", "set")]
+  gse.pathway.filtered.concat <- bind_rows(gse.pathway.filtered.concat, gse.pathway.all)
+  
+  # store results
+  gse.pathway.list[[lineage.name]] <- gse.pathway.all
+  
+} 
+
+
+
+
+```
+
+
+
+
+```{r pedigree differential branch analysis}
+
+
+dif.analysis <- "scPedigree" #options: ensemble, scPedigree
+# enriched pathway overlap
+venn.list <- list()
+
+
+if (dif.analysis == "ensemble"){
+  lin.list <- ens.lineages
+} else if (dif.analysis == "scPedigree"){
+  lin.list <- sp.lineages
+}
+    
+
+for (i in 1:length(names(lin.list))){
+  lineage.name <- paste0(dif.analysis, ".",names(lin.list)[i])
+  venn.list[[names(lin.list)[i]]] <- gse.pathway.filtered.concat$pathway[gse.pathway.filtered.concat$query %in% lineage.name & gse.pathway.filtered.concat$NES > 0]
+}
+
+pedigree.combo <- gtools::combinations(length(names(lin.list)), 2, names(lin.list), repeats.allowed = F)
+set.dif.list <- list()
+set.int.list <- list()
+for (i in 1:nrow(pedigree.combo)){
+  contast.set <- paste0(pedigree.combo[i,1], "-", pedigree.combo[i,2])
+  set.dif.list[[contast.set]] <- setdiff(venn.list[[pedigree.combo[i,1]]], venn.list[[pedigree.combo[i,2]]])
+  set.int.list[[contast.set]] <- intersect(venn.list[[pedigree.combo[i,1]]], venn.list[[pedigree.combo[i,2]]])
+}
+
+
+df.set.dif <- namedList2wideDF(set.dif.list)
+df.set.int <- namedList2wideDF(set.int.list)
+
+if (print.inline){
+  if (length(venn.list) < 5 & length(venn.list) > 1){
+    ggVennDiagram::ggVennDiagram(venn.list)
+  }
+  
+  DT::datatable(gse.pathway.filtered.concat,
+                filter = 'top')
+}
+
+
+```
+
+
+
+
+```{r time varying genes}
+
+which.lin.tva <- "ensemble"; # options: scPedigree, ensemble
+
+df.imp.ped <- df.gene.importance[ , grepl(which.lin.tva, colnames(df.gene.importance))]
+df.imp.ped$mean.imp <- apply(df.imp.ped[ ,colnames(df.gene.importance)[grepl(which.lin.tva, colnames(df.gene.importance))]], 1, mean)
+df.imp.ped$genes <- df.gene.importance$gene
+df.imp.ped <- df.imp.ped %>% arrange(-mean.imp)
+
+n.gene.length <- n.top.genes.timeVaryingAnalysis 
+if (nrow(df.imp.ped) > n.gene.length){
+  genes.ts <- df.imp.ped$genes[1:n.gene.length]
+} else {
+  genes.ts <- df.imp.ped$genes
+}
+
+# get expression matrix
+e.mat <- getExpressionMatrix(so.query, which.assay = "RNA", which.data = "data")
+
+# get pedigree-specific data
+if (which.lin.tva == "scPedigree"){
+  sp.pt <- scPedigree.list[["lineage.umap"]]
+} else if (which.lin.tva == "ensemble"){
+   sp.pt <- ensemble.list[["lineage.umap"]]
+}
+
+u.lineage <- as.character(unique(sp.pt$lineage))
+
+# fit gam for top genes (for each lineage)
+lin.ts.results <- list()
+
+# start cluster
+cl <- makeCluster(3)
+registerDoParallel(cl)
+
+lin.ts.results <- (foreach(i = 1:length(u.lineage))) %dopar% {
+  
+  which.lineage <- u.lineage[i]
+  
+  lin.pt <- sp.pt[sp.pt$lineage %in% which.lineage, ]
+  
+  gams <- list()
+  gam.p <- list()
+  exp.list <- list()
+  
+  for (j in 1:length(genes.ts)){
+    
+    try({
+      
+      gene.name <- genes.ts[j]
+      df.ts <- data.frame(cell =  colnames(e.mat),
+                          expression = e.mat[rownames(e.mat) %in% genes.ts[j], ])
+      
+      df.ts <- merge(df.ts, lin.pt, by = "cell")
+      df.ts$pseudotime <- df.ts$pseudotime/max(df.ts$pseudotime, na.rm = T)
+      df.ts <-dplyr::arrange(df.ts, pseudotime)
+      exp.list[[gene.name]] <- df.ts
+      
+      
+      # ds works nice
+      # ts
+      # good combo: bs = "ps", k =6
+      # alt: bs = "cs", k = 6 ps
+      gams[[gene.name]] <- mgcv::gam(expression ~ s(pseudotime, k = 6, bs = "cs"),
+                                     data = df.ts,
+                                     method = "REML")
+      temp_anova <- mgcv::anova.gam( gams[[gene.name]])
+      gam.p[[gene.name]] <- temp_anova$s.pv
+      
+      
+      ####
+      #       df.pred <- data.frame(x =df.ts$pseudotime,
+      #                       y.pred =  predict( gams[[gene.name]]),
+      #                       y.obs = df.ts$expression)
+      # df.pred <- df.pred %>% arrange(x)
+      
+      # fit.list[[gene.name]] <- df.pred$y.pred
+      
+      # plt.fit.2 <- ggplot() +
+      #    xlab("Inferred Time") +
+      #    ylab("Gene Expression") +
+      #    theme_miko() +
+      #    geom_point(data = df.pred, aes(x = x, y = y.obs)) +
+      #    geom_line(data = df.pred, aes(x, y.pred), size = 1, alpha = 0.8, color = "tomato") +
+      #    labs(title = gene.name,
+      #         subtitle = paste0("P-value: ", pixiedust::pval_string(pval, digits = 3, format = "scientific")))
+      # 
+      
+      ####
+      
+    }, silent = T)
+    
+  }
+  x.obs <- df.ts$pseudotime
+  x.obs <- x.obs[order(x.obs)]
+  
+  p_vals_adj <- p.adjust(unlist(gam.p[which(unlist(gam.p) > 0)]), method = "BH")
+  
+  df.padj <- data.frame(genes = names(p_vals_adj), padj = p_vals_adj)
+  
+  lin.ts.results[[which.lineage]] <- list(
+    pval = df.padj,
+    gams = gams,
+    x.obs = x.obs,
+    expression = exp.list
+  )
+}
+
+stopCluster(cl)
+
+# make plots and filter genes
+names(lin.ts.results) <- u.lineage
+
+for (i in 1:length(lin.ts.results)){
+  which.lineage <- names(lin.ts.results)[i]
+  df.lin.p <- lin.ts.results[[which.lineage]]$pval
+  
+  # get significant genes
+  sig.genes <- df.lin.p$genes[df.lin.p$padj < 0.05]
+  lin.ts.results[[which.lineage]]$sig.genes <- sig.genes
+  
+  gam.p <- lin.ts.results[[which.lineage]][["pval"]]
+  
+  # get predictions and plots
+  fit.list <- list()
+  plt.fit.list <- list()
+  for (j in 1:length(genes.ts)){
+    
+    gene.name <- genes.ts[j]
+    
+    # try({
+    cur.gam <- lin.ts.results[[which.lineage]]$gams[[gene.name]]
+    cur.exp <- lin.ts.results[[which.lineage]]$expression[[gene.name]]
+    
+    x.obs <- lin.ts.results[[which.lineage]]$x.obs
+    
+    x.pred <-  seq(min(x.obs, na.rm = T),
+                   max(x.obs, na.rm = T),
+                   by =(max(x.obs, na.rm = T) - min(x.obs, na.rm = T))/(length(x.obs)-1))
+    
+    lin.ts.results[[which.lineage]]$x.pred <- x.pred
+    
+    pval <- gam.p$padj[gam.p$genes == gene.name]
+    
+    if (is.null(cur.gam)) next
+    pred <- predict(lin.ts.results[[which.lineage]]$gams[[gene.name]])
+    
+    df.pred <- data.frame(x =x.obs,
+                          y.pred = pred,
+                          y.obs = cur.exp$expression)
+    df.pred <- df.pred %>% arrange(x)
+    
+    fit.list[[gene.name]] <- df.pred$y.pred
+    
+    plt.fit.list[[gene.name]] <- ggplot() +
+      xlab("Inferred Time") +
+      ylab("Gene Expression") +
+      theme_miko() +
+      geom_point(data = df.pred, aes(x = x, y = y.obs)) +
+      geom_line(data = df.pred, aes(x, y.pred), size = 1, alpha = 0.8, color = "tomato") +
+      labs(title = gene.name,
+           subtitle = paste0("P-value: ", pixiedust::pval_string(pval, digits = 3, format = "scientific")))
+    
+  }
+  lin.ts.results[[which.lineage]]$predictions <- fit.list
+  lin.ts.results[[which.lineage]]$plot.fit <- plt.fit.list
+  
+}
+
+
+
+```
+
+
+```{r module averaging function}
+
+temporalModuleSignatures <- function(df, time = df$time, module.list){
+  
+  df.mod.signature <- data.frame(time =time)
+  df.mod.standarderror <- data.frame(time =time)
+  peak.activity <- NULL
+  for (j in 1:length(module.list)){
+    module.name <- names(module.list)[j]
+    module.genes <- module.list[[module.name]]
+    mod.mat <- as.matrix(df[ ,colnames(df) %in% module.genes])
+    
+    new.entry <-  (rowMeans(mod.mat, na.rm = T))
+    new.sd <- apply(mod.mat, 1, sd, na.rm = T)
+    new.cv <- new.sd/new.entry
+    
+    new.entry <- rescaleValues(new.entry)
+    new.sd <- new.entry*new.cv
+    new.se <- new.sd/sqrt(nrow(mod.mat))
+    
+    new.df <- data.frame(time = df$time, new.entry)
+    colnames(new.df) <- c("time", module.name)
+    
+    new.df.se <- data.frame(time = df$time, new.se)
+    colnames(new.df.se) <- c("time", module.name)
+    
+    ne.cs <- cumsum(new.entry)
+    ne.cs <- ne.cs/max(ne.cs)
+    time.halfmax <- df.mod.signature$time[which((ne.cs - min(ne.cs[ne.cs>0.5])) == 0)][1]
+    
+    peak.activity <- bind_rows(peak.activity, data.frame(module = module.name, 
+                                                         peak.time = df.mod.signature$time[which.max(new.entry)],
+                                                         trough.time = df.mod.signature$time[which.min(new.entry)],
+                                                         half.maxauc = time.halfmax))
+    
+    df.mod.signature <- merge(df.mod.signature, new.df, by = "time")
+    df.mod.standarderror <- merge(df.mod.standarderror, new.df.se, by = "time")
+    
+  }
+  
+  peak.activity$peak.time <- signif(peak.activity$peak.time, 3)
+  peak.activity$half.maxauc <- signif(peak.activity$half.maxauc, 3)
+  
+  pa <- peak.activity %>%
+    group_by(peak.time, half.maxauc) %>%
+    summarize(mod = list(module))
+  
+  agg.mod.list <- list(
+    module.signature = df.mod.signature,
+    module.standarderror = df.mod.standarderror,
+    temporal.activity = peak.activity,
+    aggregate.activity = pa
+  )
+  
+  return(agg.mod.list)
+}
+
+# recurssively merge modules according to peak and half max criterion. 
+temporalModuleCollapse <- function(df, time = df$time, module.list){
+  
+  tms.output <- temporalModuleSignatures(df, df$time, module.list)
+  # df.mod.signature <- tms.output$module.signature
+  pa <- tms.output$aggregate.activity
+  
+  pa$n <- lapply(pa$mod, length)
+  
+  module.list.orig <- module.list
+  module.list.new <- list()
+  for (j in 1:nrow(pa)){
+    common.mod <- unlist(pa$mod[j])
+    if (length(common.mod) == 1) {
+      new.mod.name <- stringr::str_extract(common.mod, "(M[0-9]*[-]*)*")
+      module.list.new[[new.mod.name]] <- unlist(module.list.orig[common.mod])
+    } else {
+      new.mod.name <- paste(stringr::str_extract(common.mod, "(M[0-9]*[-]*)*"), collapse = "-")
+      module.list.new[[new.mod.name]] <- unlist(module.list.orig[common.mod])
+    }
+    common.mod <- NULL
+  }
+  
+  if (sum( pa$n>1) > 0){
+    
+    module.list.new <- temporalModuleCollapse(df, time = df$time, module.list = module.list.new)
+  } else {
+    return(module.list.new)
+  }
+  
+}
+
+
+
+
+
+```
+
+
+```{r cluster and plot signatures, warning = F, message = F}
+
+
+n.cluster <- length(unique(as.character(so.query$seurat_clusters)))
+
+plt.sig.list <- list()
+plt.sig.umap.list <- list()
+module.membership.list <- list()
+module.membership.list.v2 <- list()
+module.order.list <- list()
+
+for (i in 1:length(u.lineage)){
+  which.lineage <- u.lineage[i]
+  
+  which.significant <- lin.ts.results[[which.lineage]][["sig.genes"]]
+  
+  x.obs <- lin.ts.results[[which.lineage]]$x.obs
+  
+  fit.list <- lin.ts.results[[which.lineage]]$predictions
+  s.mat <- matrix(ncol = length(which.significant), nrow = length(x.obs))
+  for (j in 1:length(which.significant)){
+    s.mat[ ,j] <- fit.list[[which.significant[j]]]
+  }
+  colnames(s.mat) <- which.significant
+  
+  s.mat <- t(as.matrix(s.mat))
+  stand.mat <- s.mat
+  stand.mat <- BBmisc::normalize(stand.mat, method="range")
+  
+  
+  # bin matrix (for faster implementation)
+  n.bins.1 <- n.cluster*2
+  bin.size.1 <- round(ncol(stand.mat) / n.bins.1)
+  bin.mat.1 <- t(binMatrix(as.matrix(t(stand.mat)), bin.size.1))
+  bin.time.1 <- binVector(x.obs, bin.size.1)
+  
+  n.bins.2 <- round(nrow(stand.mat)/2)
+  bin.size.2 <- round(ncol(stand.mat) / n.bins.2)
+  bin.mat.2 <- t(binMatrix(as.matrix(t(stand.mat)), bin.size.2))
+  bin.time.2 <- binVector(x.obs, bin.size.2)
+  
+  bin.mat.3 <- as.matrix(stand.mat)
+  bin.time.3 <- x.obs
+  
+  # labels for each signature
+  observedLabels <- rownames(s.mat)
+  
+  # hierarchial clusters
+  cluster.method <- "consensus" #options: 'consensus', 'tree'
+  if (cluster.method == "tree"){
+    # dist.method <- "chebyshev"
+    dist.method <- "euclidean"
+    distMatrix <- philentropy::distance(bin.mat.1, method = dist.method)
+    rownames(distMatrix) <- rownames(bin.mat.1)
+    colnames(distMatrix) <- rownames(bin.mat.1)
+    
+    distMatrix <- as.matrix(distMatrix)
+    distMatrix.d <- as.dist(distMatrix)
+    
+    hc <- hclust(distMatrix.d, method="complete")
+    modules <- dynamicTreeCut::cutreeDynamic(dendro = hc, distM=distMatrix, minClusterSize = 3)
+  } else if (cluster.method == "consensus"){
+    
+    # hierarchical01; pam
+    # dist.method <- "euclidean"
+    # distMatrix <- philentropy::distance(bin.mat.1, method = dist.method)
+    # rownames(distMatrix) <- rownames(bin.mat.1)
+    # colnames(distMatrix) <- rownames(bin.mat.1)
+    
+    # dist.method <- "chebyshev"
+    # distMatrix <- philentropy::distance(bin.mat.1, method = dist.method)
+    
+    # hihisum = apply(bin.mat.1, 1, function(x) sum(x > 0.9)),
+    # lolosum = apply(bin.mat.1, 1, function(x) sum(x < 0.9)),
+    # minRate = apply(bin.mat.1, 1, function(x) min(diff(x))),
+    # peakRate = apply(bin.mat.1, 1, function(x) max(diff(x))),
+    # peak.time = apply(bin.mat.1, 1, function(x) which.min(abs(x - max(x, na.rm = T)))),
+    
+    quart.ind <- (ncol(bin.mat.1)/4)
+    third.ind <- (ncol(bin.mat.1)/3)
+    half.ind <- (ncol(bin.mat.1)/2)
+    
+    signal.characteristics <- data.frame(
+      early.peak = 2*apply(bin.mat.1, 1, function(x) which.min(abs(x - max(x, na.rm = T))) < third.ind),
+      late.peak = 2*apply(bin.mat.1, 1, function(x) which.min(abs(x - max(x, na.rm = T))) > 2*third.ind),
+      mid.activity = 3*apply(bin.mat.1, 1, function(x) sum(x[third.ind:(2*third.ind)])),
+      signal.mean = apply(bin.mat.1, 1, mean, na.rm = T),
+      losum = 2*apply(bin.mat.1, 1, function(x) sum(x < 0.33)),
+      earlysum = 2*apply(bin.mat.1, 1, function(x) sum(x[1:round(half.ind)])),
+      hisum = 2*apply(bin.mat.1, 1, function(x) sum(x > 0.66)),
+      latesum = 2*apply(bin.mat.1, 1, function(x) sum(x[round(half.ind):ncol(bin.mat.1)])),
+      meanRate = apply(bin.mat.1, 1, function(x) mean(diff(x))),
+      peak.start = 4*apply(bin.mat.1, 1, function(x) which.min(abs(x - max(x, na.rm = T))) == 1),
+      peak.end = 4*apply(bin.mat.1, 1, function(x) which.min(abs(x - max(x, na.rm = T))) == ncol(bin.mat.1)),
+      trough.start = 4*apply(bin.mat.1, 1, function(x) which.min(abs(x - min(x, na.rm = T))) == 1),
+      trough.end = 4*apply(bin.mat.1, 1, function(x) which.min(abs(x - min(x, na.rm = T))) == ncol(bin.mat.1))
+    )
+    
+    signal.characteristics <- apply(signal.characteristics, 2, rescaleValues)
+    
+    # signal.characteristics <- 
+    
+    # signal.characteristics <-  apply(signal.characteristics, 2, function(x) x * (sd(x)/(mean(x))))
+    # signal.median = apply(bin.mat.1, 1, median, na.rm = T),
+    # trough.time = apply(bin.mat.1, 1, function(x)  which.min(abs(x - min(x, na.rm = T)))),
+    sc.mat <- as.matrix(signal.characteristics)
+    
+    # 
+    ce<-clusterMany(t(sc.mat), clusterFunction="pam", ks=2:n.cluster, minSizes=3, isCount = F,nFilterDims=c(100,500,1000),
+                    reduceMethod=c("PCA"),nReducedDims=c(3, 10),run=TRUE)
+    
+    # ce<-clusterMany(t(bin.mat.1), clusterFunction="hierarchicalK", ks=2:n.cluster, minSizes=3, isCount = F,nFilterDims=c(100,500,1000),
+    # reduceMethod=c("PCA"),nReducedDims=c(3, 10),run=TRUE)
+    
+    # ce<-clusterMany(t(bin.mat.1), clusterFunction="hierarchical01", alpha = 0.1, beta = 0.8, 
+    #                 ks=2:n.cluster, minSizes=3, isCount = F,nFilterDims=c(100,500,1000),
+    #                 reduceMethod=c("PCA"),nReducedDims=c(3, 10),run=TRUE)
+    ce<-makeConsensus(ce,proportion=0.80, minSize = 3)
+    ce<-makeDendrogram(ce,reduceMethod="mad",nDims=500)
+    ce<-mergeClusters(ce,mergeMethod="adjP",DEMethod="edgeR",cutoff=0.01,plot=FALSE)
+    
+    modules <- ce@clusterMatrix[, "mergeClusters"]
+    
+    max.mod <- max(modules)
+    which.unassigned <- modules == -1
+    modules[modules == -1] <- max.mod + 1
+  }
+  
+  
+  # assign colors to modules
+  module.colours = WGCNA::labels2colors(modules)
+  module.colours[which.unassigned] <- "ambigious"
+  
+  module_colors= setdiff(unique(module.colours), "grey")
+  module.list <- list()
+  ticker <- 1
+  for (j in 1:length(module_colors) ){
+    color <- module_colors[j]
+    if (color != "ambigious"){
+      module.name <- paste("M", ticker, ".", color, sep = "")
+      module.list[[module.name]]=observedLabels[which(module.colours==color)]
+      ticker <- ticker + 1
+    } else {
+      amb.genes <- observedLabels[which(module.colours==color)]
+    }
+  }
+  
+  # low res data
+  ts.plot.1 <- data.frame(cbind(time = bin.time.1, t(bin.mat.1)))
+  
+  # mod res data
+  ts.plot.2 <- data.frame(cbind(time = bin.time.2, t(bin.mat.2)))
+  ts.plot.long.2 <- reshape2::melt(ts.plot.2, id = "time", variable_name = "signature")
+  
+  # high res data
+  ts.plot.3 <- data.frame(cbind(time = bin.time.3, t(bin.mat.3)))
+  
+  ts.plot.long.2$module <- NA
+  for (j in 1:length(module.list)){
+    ts.plot.long.2$module[ts.plot.long.2$variable %in% module.list[[j]]] <-  names(module.list)[j]
+  }
+  
+  ts.plot.long.2$module[is.na( ts.plot.long.2$module)] <- "no.module"
+  ts.plot.long.2 <- ts.plot.long.2[!(is.na(as.character(ts.plot.long.2$module))), ]
+  ts.plot.long.2 <- ts.plot.long.2[!(is.na(as.character(ts.plot.long.2$module))), ]
+  
+  ts.plot.long.2 <- ts.plot.long.2 %>%
+    group_by(module, variable) %>%
+    mutate(value.norm = rescaleValues(value))
+  ts.plot.long.2$value <- ts.plot.long.2$value.norm
+  
+  # recursively collapse modules (accoring to peak time and half max criterion)
+  if (cluster.method == "tree"){
+    # get average module activity
+    tms.output <- temporalModuleSignatures(ts.plot.1, ts.plot.1$time, module.list)
+    df.mod.signature <- tms.output$module.signature
+    pa <- tms.output$aggregate.activity
+    module.list.collapse <- temporalModuleCollapse(ts.plot.1, ts.plot.1$time, module.list)
+  } else if (cluster.method == "consensus"){
+    module.list.collapse <- module.list
+  }
+  
+  # get module signatures and activity levels
+  tms.output.collapsed <- temporalModuleSignatures(ts.plot.2, ts.plot.2$time, module.list.collapse)
+  df.mod.signature.collapsed <- tms.output.collapsed$module.signature
+  df.mod.se.collapsed <- tms.output.collapsed$module.standarderror
+  pa.collapsed <- tms.output.collapsed$aggregate.activity
+  peak.activity <- tms.output.collapsed$temporal.activity
+  
+  
+  # get high resolution (single-cell level) signatures
+  df.mod.hires.signature <- NULL
+  df.umap.lineage <- lin.ts.results[[which.lineage]][["expression"]][[1]][ ,c("x", "y", "pseudotime")]
+  for (j in 1:length(module.list.collapse)){
+    cur.mod <- names(module.list.collapse)[j]
+    cur.mod.genes <- module.list.collapse[[cur.mod]]
+    mod.mat <- as.matrix(ts.plot.3[ ,colnames(ts.plot.3) %in% cur.mod.genes])
+    
+    df.holder <- df.umap.lineage
+    df.holder$module <- cur.mod
+    df.holder$signature <- (rowMeans(mod.mat, na.rm = T))
+    df.mod.hires.signature <- bind_rows(df.mod.hires.signature, df.holder)
+  }
+  
+  # order modules acording to peak activity
+  # peak.activity$ranking.var <- peak.activity$peak.time * peak.activity$half.maxauc
+  peak.activity$ranking.var <- peak.activity$peak.time
+  module.order <- unique((peak.activity %>% arrange(ranking.var))$module)
+  
+  # get long signature and error dataframe
+  df.mod.signature.long <- pivot_longer(df.mod.signature.collapsed, cols = names(module.list.collapse))
+  colnames(df.mod.signature.long) <- c("time", "module", "value")
+  df.mod.signature.long$module <- factor(df.mod.signature.long$module, levels = module.order)
+  
+  df.mod.se.long <- pivot_longer(df.mod.se.collapsed, cols = names(module.list.collapse))
+  colnames(df.mod.se.long) <- c("time", "module", "se")
+  df.mod.se.long$module <- factor(df.mod.se.long$module, levels = module.order)
+  
+  # df.mod.signature.long <- merge(df.mod.signature.long, df.mod.se.long, by = c("time", "module"))
+  df.mod.signature.long$se <- df.mod.se.long$se
+  df.mod.signature.long$ci <- df.mod.signature.long$se * 1.96
+  
+  # update module names
+  ts.plot.long.2$module.new <- stringr::str_extract(ts.plot.long.2$module, "M[0-9]*") 
+  ts.plot.long.2$module.new[is.na(ts.plot.long.2$module.new)] <- "unclassified"
+  u.mod <- unique(as.character(ts.plot.long.2$module.new))
+  ts.plot.long.2$mod.f <- "unspecified"
+  
+  u.mod.reference <- names(module.list.collapse)
+  for(j in 1:length(u.mod)){
+    mod.name  <- u.mod[j]
+    
+    which.match <- grepl(mod.name, u.mod.reference)
+    
+    if (sum(which.match) == 1){
+      ts.plot.long.2$mod.f[ts.plot.long.2$module.new %in% mod.name] <- u.mod.reference[which.match]
+    } else {
+      which.match <- grepl(paste0(mod.name, "-"), u.mod.reference)
+      if (sum(which.match) == 1){
+        ts.plot.long.2$mod.f[ts.plot.long.2$module.new %in% mod.name] <- u.mod.reference[which.match]
+      } else {
+        which.match <- grepl(paste0("-", mod.name), u.mod.reference)
+        if (sum(which.match) == 1){
+          ts.plot.long.2$mod.f[ts.plot.long.2$module.new %in% mod.name] <- u.mod.reference[which.match]
+        } else {
+          which.match <- u.mod.reference %in% mod.name
+          if (sum(which.match) == 1){
+            ts.plot.long.2$mod.f[ts.plot.long.2$module.new %in% mod.name] <- u.mod.reference[which.match]
+          } 
+        }
+      } 
+      
+    }
+  }
+  
+  
+  plot.individual <- ts.plot.long.2
+  plot.individual$module <-  plot.individual$mod.f
+  
+  plot.individual$module <- factor(plot.individual$module , levels = module.order)
+  plot.individual <- plot.individual %>% dplyr::filter(!is.na(module))
+  try({plot.individual$module <- factor(plot.individual$module, levels = module.order)}, silent = T)
+  
+  #
+  plt.sig <- ggplot() +
+    geom_line(data = plot.individual, aes(x = time, y = rescaleValues(value), group = variable), color = "grey10", alpha = 0.1) + 
+    geom_line(data = df.mod.signature.long, aes(x = time, y = value), color = "tomato", size = 1) + 
+    geom_ribbon(data = df.mod.signature.long, aes(x = time, y = value, ymin = value-ci, ymax = value+ci), 
+                fill = "tomato", alpha = 0.3) + 
+    facet_wrap(~module, ncol = 2, scales = "fixed") +
+    labs(title = which.lineage, x = "Time", y = "Load (normalised)") +
+    theme_miko()
+  
+  
+  # project signatures onto UMAP
+  df.umap <- data.frame(x = so.query@reductions[["umap"]]@cell.embeddings[,1], 
+                        y = so.query@reductions[["umap"]]@cell.embeddings[,2])
+  df.mod.hires.signature$module <- factor(df.mod.hires.signature$module, levels = module.order)
+  plt.sig.umap <- ggplot() +
+    geom_point(data = df.umap, aes(x, y), color = "grey", size = 1, alpha = 1) +
+    geom_point(data = df.mod.hires.signature, aes(x, y, color = signature), size = 1, alpha = 1) +
+    theme_classic() +
+    xlab("UMAP 1") +
+    ylab("UMAP 2") +
+    facet_wrap(~module, ncol = 2, )+ 
+    scale_color_viridis("Module\nActivity", option = "B") + theme_miko(legend = T)
+  
+  
+  plt.sig.list[[which.lineage]] <- plt.sig
+  plt.sig.umap.list[[which.lineage]] <- plt.sig.umap
+  module.membership.list[[which.lineage]] <- module.list.collapse
+  module.membership.list.v2[[which.lineage]] <- namedList2wideDF(module.list.collapse[module.order])
+  module.order.list[[which.lineage]] <- module.order
+  
+  if (print.inline){
+    print(plt.sig)
+    plt.sig.list
+    plt.sig.umap.list
+  }
+}
+
+```
+
+```{r clear memory, include = FALSE}
+gc()
+```
+
+
+```{r pseudotime heatmap, fig.height=8, fig.width=12, include = FALSE, warning = F, message = F}
+
+all.lineages <- names(model.list)
+plt.hm.list <- list()
+mod.list <- list()
+
+for (i in 1:length(all.lineages)){
+  
+  lineage.name <- all.lineages[i]
+  if (!grepl(which.lin.tva, lineage.name)) next
+  if (which.lin.tva == "scPedigree"){
+    lineage.name.short <- gsub(paste0(which.lin.tva, "."), "", lineage.name)
+  } else if (which.lin.tva == "ensemble"){
+    lineage.name.short <- lineage.name
+  }
+  
+  
+  lineage.module <- module.membership.list[[lineage.name.short]] 
+  module.order <-  module.order.list[[lineage.name.short]]
+  module.genes <- namedList2longDF(lineage.module, name.header = "module", value.header = "genes")
+  module.genes$module <- factor(module.genes$module, levels = module.order)
+  
+  # get expression matrix
+  so.query@assays[["RNA"]]@data@Dimnames[[1]] <- so.query@assays[["RNA"]]@meta.features[["SYMBOL"]]
+  # cur.data <- so.query@assays[["SCT"]]@data
+  cur.data <- so.query@assays[["SCT"]]@data
+  
+  # subset matrix
+  match.ind <- which(rownames(cur.data) %in% module.genes$genes)
+  
+  # order here
+  dat_use <- as.data.frame( t(cur.data[match.ind,]))
+  rm(cur.data)
+  avg.data <- colMeans(as.matrix(dat_use))
+  df.avg <- data.frame(genes = names(avg.data), expression = avg.data)
+  
+  module.genes <- merge(module.genes, df.avg, by = "genes")
+  module.genes <- module.genes %>% arrange(module, -expression)
+  
+  query.order <- colnames(dat_use)
+  reference.order <- module.genes$genes
+  
+  match.ind.2 <- match(reference.order, query.order)
+  
+  dat_use <- dat_use[ ,match.ind.2]
+  
+  dat_use_df <- cbind(pt.list[[ all.lineages[i]]], dat_use) 
+  colnames(dat_use_df)[1] <- "pseudotime"
+  dat_use_df <- dat_use_df[complete.cases(dat_use_df), ]
+  
+  colnames(dat_use_df) <- make.unique(colnames(dat_use_df))
+  df.order <- dat_use_df %>% arrange(pseudotime)
+  
+  df.info <- data.frame(cells = rownames(dat_use_df), pt = dat_use_df$pseudotime) %>% arrange(pt)
+  ph.mat <- as.matrix(df.order[, colnames(df.order) %in% df.imp$genes])
+  
+  sample.ind <- sample(  1:nrow(ph.mat), round( nrow(ph.mat)*0.2))
+  sample.ind <- sample.ind[order(sample.ind)]
+  
+  ph.mat.sub <- t(ph.mat[sample.ind,])
+  df.info.sub <- df.info[sample.ind, ]
+  
+  df.meta <- so.query@meta.data
+  df.meta$cells <- rownames(df.meta)
+  df.info.sub <- merge(df.info.sub, df.meta, by = "cells")
+  df.info.sub <- df.info.sub %>% arrange(pt)
+  
+  # col annotation data
+  col.info <- df.info.sub[,c("Barcode", "seurat_clusters", "pt")]
+  rownames(col.info) <- df.info.sub$cells
+  colnames(col.info) <- c("Barcode", "Cluster", "Pseudotime")
+  colnames(ph.mat.sub) <- rownames(col.info)
+  
+  # row annotation data
+  u.mod <- unique(module.genes$module)
+  row.info <- data.frame(module = module.genes$module)
+  rownames(row.info) <- module.genes$genes
+  row.info$module <- factor(row.info$module, levels = u.mod)
+  
+  # get gap indices
+  gap.ind <- which(row.info$module[1:(nrow(row.info)-1)] != row.info$module[2:(nrow(row.info))])
+  
+  ph.mat.sub.2 <- ph.mat.sub
+  
+  do.contrast <- T
+  if (do.contrast){
+    ph.mat.sub.2 <- BBmisc::normalize(ph.mat.sub.2, method="range")
+    ph.mat.sub.2.sd <- apply(ph.mat.sub.2, 1, sd)
+    ph.mat.sub.2[ (ph.mat.sub.2.sd == 0), ] <- 0
+  }
+  
+  # manually specify module colors
+  u.module <- unique(as.character(row.info$module))
+  u.color <- gsub("M[0-9]*.", "", u.module)
+  names(u.color) <- u.module
+  
+  # if (gene.grouping == "correlation"){
+  plt.hm <- pheatmap::pheatmap(ph.mat.sub.2,
+                               color  = inferno(20),
+                               cluster_cols = F,
+                               cluster_rows = F,
+                               annotation_col = col.info,
+                               annotation_row =row.info,
+                               main = all.lineages[i],
+                               gaps_row = gap.ind,
+                               annotation_colors = list(Pseudotime = viridis(n = 20, option = "D"), module = u.color), 
+                               show_colnames = F,
+                               show_rownames = F)
+  
+  plt.hm <- ggplotify::as.ggplot(plt.hm)
+  
+  plt.hm.list[[all.lineages[i]]] <- plt.hm
+  
+  if (print.inline){
+    print(plt.hm)
+  }
+  
+  rm(plt.hm)
+  rm(ph.mat.sub.2)
+  rm(ph.mat.sub)
+}
+
+
+```
+
+
+```{r topGO enrichment, fig.height=8, fig.width=7, warning = FALSE}
+
+
+# original.lim <-  memory.limit()
+# new.lim <- 25000
+# memory.size(new.lim)
+
+memory.limit(2010241024*1024)
+# specify sample appropriate species
+which.species <- unique(so.query@meta.data[["Organism"]])
+if (length(which.species) > 1) {
+  which.species <- "Hs"
+}
+
+# inititate results list
+enrich.results <- list()
+
+# specify which geneset background to use for enrichment
+which.universe <- "all" # options: 'all', 'subset'
+
+# start cluster
+cl <- makeCluster(2)
+registerDoParallel(cl)
+
+enrich.results <- foreach(i = 1:length(module.membership.list), .packages = c("dplyr", "ggplot2", "scMiko")) %dopar% {
+  
+  # get current lineage and corresponding geneset
+  lineage.name <- names(module.membership.list)[i]
+  module.gene.list <- module.membership.list[[lineage.name]]
+  
+  # get gene universe
+  if (which.universe == "all"){
+    gene.uni <- as.vector(rownames(so.query))
+  } else if (which.universe == "subset"){
+    gene.uni <- as.vector(unlist(module.gene.list))
+  }
+  
+  # run GO enrichment
+  mod.enrichment <- scMiko::runEnrichment(gene.list = module.gene.list, 
+                                          gene.universe = as.vector(unlist(module.gene.list)), 
+                                          species = which.species,
+                                          p.threshold = 0.2)
+  mod.enrichment[["results.table.p"]]$lineage <- lineage.name
+  
+  # store results
+  df.enrich <- mod.enrichment[["results.table.p"]]
+  df.enrich$lp <- -log10(df.enrich$weightFisher)
+  df.enrich.top <- df.enrich %>%
+    group_by(module) %>%
+    top_n(5, lp)
+  df.enrich.top$Term <- make.unique(df.enrich.top$Term)
+  
+  # ensure modules are correctly ordered
+  module.order <-  module.order.list[[lineage.name]]
+  module.order <- unique(module.order)
+  df.enrich.top$module <- factor(df.enrich.top$module, levels = module.order)
+  df.enrich.top <- df.enrich.top %>% arrange((module))
+  term.order <- unique(as.character(df.enrich.top$Term))
+  df.enrich.top$Term <- factor(  df.enrich.top$Term, levels =  rev(term.order))
+  
+  # generate bar plot to visualize top enrichments
+  
+  u.module <- unique(as.character(df.enrich.top$module))
+  u.color <- gsub("M[0-9]*.", "", u.module)
+  names(u.color) <- u.module
+  
+  plt.enrich <- 
+    df.enrich.top %>%
+    ggplot(aes(x = (Term), y = lp, fill = module)) + 
+    geom_bar(stat = "identity") + 
+    coord_flip() + 
+    geom_hline(yintercept = -log10(0.01), linetype = "dashed")+
+    theme_miko(legend = T) + 
+    labs(title = "GO Enrichment of Modular Genes", subtitle = paste0("Lineage: ", lineage.name))+
+    xlab("") + 
+    ylab("-log10(p)") + 
+    scale_fill_manual(values = u.color)
+  
+  # store results
+  enrich.results[[lineage.name]] <- list(
+    plot = plt.enrich,
+    table =  mod.enrichment[["results.table.p"]]
+  )
+  
+  rm(mod.enrichment)
+  rm(plt.enrich)
+  
+  return(enrich.results)
+  
+}
+
+stopCluster(cl)
+
+names(enrich.results) <- names(module.membership.list)
+
+enrichment.list <- enrichment.plot.list <- list()
+for (i in 1:length(module.membership.list)){
+  lineage.name <- names(module.membership.list)[i]
+  if (is.null( enrich.results[[lineage.name]]$table)){
+    enrichment.list[[lineage.name]] <- enrich.results[[lineage.name]][[lineage.name]]$table
+    enrichment.plot.list[[lineage.name]] <- enrich.results[[lineage.name]][[lineage.name]]$plot
+  } else {
+    enrichment.list[[lineage.name]] <- enrich.results[[lineage.name]]$table
+    enrichment.plot.list[[lineage.name]] <- enrich.results[[lineage.name]]$plot
+  }
+  
+}
+
+if (print.inline){
+  enrichment.list
+  enrichment.plot.list
+}
+
+
+
+```
+
+```{r consolidate results plots, fig.height=8, fig.width=20, warning = F, message = F}
+
+plt.hm.mod.list <- list()
+
+for (i in 1:length(all.lineages)){
+  
+  lineage.name <- all.lineages[i]
+  # if (!grepl("scPedigree", lineage.name)) next
+  # lineage.name.short <- gsub("scPedigree.", "", lineage.name)
+  
+    if (!grepl(which.lin.tva, lineage.name)) next
+  if (which.lin.tva == "scPedigree"){
+    lineage.name.short <- gsub(paste0(which.lin.tva, "."), "", lineage.name)
+  } else if (which.lin.tva == "ensemble"){
+    lineage.name.short <- lineage.name
+  }
+  
+  plt.left <- plt.sig.list[[lineage.name.short]]
+  plt.middle.left <-  plt.sig.umap.list[[lineage.name.short]] + ggtitle("")
+  plt.right <- plt.hm.list[[lineage.name]]
+  plt.middle.right <- enrichment.plot.list[[lineage.name.short]]  + theme(legend.position="bottom")
+  
+  plt.all <- cowplot::plot_grid(plt.left, plt.middle.left, plt.middle.right, plt.right, ncol = 4, rel_widths = c(5,7,10, 12), align = "hv")
+  
+  plt.hm.mod.list[[lineage.name]] <- plt.all
+  
+  if (print.inline){
+    print(plt.all)
+  }
+}
+
+```
+
+```{r consolidate results from gene trajectory analysis}
+
+gta.results <- list()
+
+gta.results$module.enrichment.list <- enrichment.list
+gta.results$enrichment.plot.list <- enrichment.plot.list
+gta.results$heatmaps <- plt.hm.mod.list
+gta.results$module.genes <- module.membership.list.v2
+
+
+```
+
+```{r rm large variables}
+
+rm(bin.mat.1, bin.mat.2, bin.mat.3, 
+   ce, cur.data.filtered, cur.dimset, 
+   cur.exp, dat_use, dat_use_df, df.data.filtered, df.dpt, df.ens.umap, df.mod.hires.signature, 
+   df.meta.r, df.order, df.paga.pt.order, df.paga.pt.order.sum,
+   df.pt, df.pt.input, df.scorp.pt.order, df.sp.pt, df.tmp, df.tp, df.tp.m, df.umap, df.umap.all, df.umap.all.m,
+   df.umap.gene, df.umap.gene.long, df.var, dm, dm.emb, e.mat, lineage.dimred, model.list, pathways, ph.mat,
+   s.mat, lin.ts.results, pr)
+
+# sizes <- sapply(ls(), function(n) object.size(get(n)), simplify = FALSE); print(sapply(sizes[order(as.integer(sizes))], function(s) format(s, unit = 'auto')))
+
+```
+
+```{r, include= FALSE}
+gc()
+```
+
+UMAP
+===================================== 
+```{r}
+print(cluster.UMAP(so.query) + theme_miko(legend = T))
+
+rm(so.query)
+```
+
+Gene Selection
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Random Forest Performance
+```{r RF metrics}
+flex.asDT(df.metrics)
+
+```
+
+### Gene Correlations used for RF
+```{r RF cor input}
+flex.asDT(df.cor.pt)
+
+```
+
+### Gene Importance
+```{r RF genes}
+
+flex.asDT(df.gene.importance)
+```
+
+### Gene Importance Correlations (Method x Method)
+```{r gi cor mm, fig.height=5, fig.width=6}
+
+pheatmap::pheatmap(cor.res, main = "Gene Importance Correlations")
+```
+
+### Gene Importance Correlations (Method x Gene)
+```{r gi cor mg, fig.height=4, fig.width=22}
+
+# pheatmap::pheatmap(x_part, gaps_row = gaps_row,cluster_rows = FALSE,main = "Gene Importance Correlations")
+pheatmap::pheatmap(t(x_part), 
+                   gaps_col = gaps_row,
+                   cluster_cols = FALSE,
+                   main = "Top Genes (by random forest importance)",
+                   angle_col = 45)
+```
+
+UMAP | Gene Expression
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r plt plt.gene.list,  echo = FALSE, eval = TRUE}
+
+out <- lapply(seq_along(plt.gene.list), function(i) {
+  
+  s1 <- names(plt.gene.list)[i]
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1)) # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", 
+                                          paste("lineage_genes_", i, sep = ""))) # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n print(plt.gene.list[[%d]])", i)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+Pseudotimes
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Global Pseudotime Correlations
+```{r, warning = FALSE, message = FALSE}
+print(plt.pt.cor)
+```
+
+
+Results
+===================================== 
+Row {.tabset}
+-------------------------------------
+
+```{r plt plt.all.list,  echo = FALSE, eval = TRUE}
+
+out <- lapply(seq_along(plt.all.list), function(i) {
+  
+  s1 <- names(plt.all.list)[i]
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1)) # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,  fig.height=10, fig.width=14}", 
+                                          paste("results_", i, sep = ""))) # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n print(plt.all.list[[%d]])", i)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+Ensemble Trajectory
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+### Pooled Trajectories
+
+```{r ensemble meta-analysis, fig.width=12,fig.height=4}
+
+print(plt.ensemble.traj)
+
+```
+
+
+### Network Diffusion
+
+```{r net dif}
+
+print(plt.diffusion.simulation)
+
+```
+
+### Ensemble Trajectory
+
+```{r ensemble traj-analysis, fig.width=10,fig.height=4}
+
+print(plt.ens.overview)
+
+```
+
+Lineage GSEA
+===================================== 
+Row {.tabset}
+-------------------------------------
+
+### GSEA Enrichments (gene-pseudotime correlation ranking)
+```{r gsea enrichment}
+flex.asDT(gse.pathway.filtered.concat)
+```
+
+### scPedigree Differentials
+
+```{r sp enrichment differentials}
+flex.asDT(df.set.dif)
+```
+
+### scPedigree Intersections
+
+```{r sp enrichment intersections}
+flex.asDT(df.set.int)
+```
+
+### scPedigree Venn Diagram
+```{r sp venn}
+if (length(venn.list) < 5 & length(venn.list) > 1){
+  ggVennDiagram::ggVennDiagram(venn.list)
+}
+```
+
+
+Tempora | Trajectory
+===================================== 
+
+
+```{r bader trajectory, warning = FALSE, fig.height=6, fig.width=10}
+
+if (exists("so.tempora")){
+  try({
+    so.tempora <- PlotTrajectory(so.tempora)
+  }, silent = T)
+  
+}
+
+
+```
+
+Tempora | Pathways
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r plt tempora plots,  echo = FALSE, eval = TRUE}
+
+
+out <- NULL
+
+try({
+  # tempora.varyingPaths$plots
+  out <- lapply(seq_along(tempora.varyingPaths$plots), function(i) {
+    
+    # s1 <- names(tempora.varyingPaths)[i]
+    s1 <- paste0("Path ", i)
+    
+    a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1)) # tab header
+    a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=7, fig.height=5}", 
+                                            paste("results_tempora_", i, sep = ""))) # start r chunk
+    a3 <- knitr::knit_expand(text = sprintf("\n print(tempora.varyingPaths$plots[[%d]])", i)) 
+    a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+    
+    paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+    
+  })
+  
+}, silent = T)
+
+
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+
+
+
+
+Time-Varying Gene Analysis
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r plt plt.hm.mod.list}
+
+out <- lapply(seq_along(plt.hm.mod.list), function(i) {
+  
+  s1 <- names(plt.hm.mod.list)[i]
+  
+  # s1 <- paste0("resultv2 ", i)
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1)) # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,  fig.height=8, fig.width=20}", 
+                                          paste("results_geneVar_", i, sep = ""))) # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n print(plt.hm.mod.list[[%d]])", i)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+Tables | Time-Varying Module Genes
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r modular gene tables}
+
+df.list.1 <- gta.results$module.genes 
+out <- flex.multiTabTables(df.list.1, "df.list.1")
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+Tables | Time-Varying Module Enrichments
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r modular enrichment tables}
+
+df.list.2 <- gta.results$module.enrichment.list
+out <- flex.multiTabTables(df.list.2, "df.list.2")
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+
+```{r ph10,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out1 <- lapply(seq_along(module.logs), function(i) {
+  
+  module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
+  
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (Module %s)", paste(module.n)))
+  a2 <- knitr::knit_expand(text = "\n=====================================")
+  a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
+  a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
+  a5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+Log (Module 13)
+===================================== 
+
+```{r table.log_current, message=FALSE, warning=FALSE}
+
+# Update analysis log
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
+df.log[nrow(df.log), 2] <- as.character("elapsed.time")
+df.log[nrow(df.log), 3] <- as.character(elapsed.time)
+
+df.log_Module_13 <- df.log
+
+knitr::kable(df.log_Module_13)
+
+```
+
+
+

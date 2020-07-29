@@ -1,0 +1,1929 @@
+---
+title: "Module5_cell_annotation"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+
+```{r setup, include=FALSE}
+
+# last update: 18.03.20
+
+# clear global enviroment
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+packages2load <- c("Seurat", "GSVA", 
+                   "plyr", "dplyr", "tidyr", "reshape2", "preprocessCore", "stringr", "RColorBrewer", "ggplot2", "gridExtra", 
+                   "DT", "flexdashboard", "ggpmisc", "ggExtra", "grid", "ggrepel", "future", 
+                   "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "tm", "homologene", "plotly", "parallel", "doParallel", "foreach", "quantreg")
+
+# load packages
+lapply(packages2load, library, character.only = TRUE)
+
+library(scMiko)
+
+```
+
+
+
+```{r check available input files}
+
+show.available.files <- FALSE
+if (show.available.files){
+  list.files("Preprocessed_Datasets/")
+}
+
+```
+
+
+```{r analysis specifications}
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed_Datasets/"
+dir.reference <- "Reference_Datasets/"
+
+# Query input
+# input.file <- "pilot8_sci_summary_AB.RData"
+# input.file <- "Module1_p7_mesoderm_110620.Rdata"
+input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+# input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
+
+# specify reference genesets
+which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", "cancerSEA", "immune.signatures", "immuneSubtype", "GBM")
+# which.references <- c("MCA_50", "GBM")
+# , "TRRUSTv2_Hs_reg"
+# specify cluster resolution
+cluster.resolution <- 0.45 # OPTIONAL; range 0 to inf (default = 1)
+
+so.input.species <- "Mm" # REQUIRED; Hs, Mm
+
+# Data subsampling
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+min.geneset.size <- 5 # recommended: 2 (for TF classifcation, set to 1)
+
+# print inline
+print.inline <- FALSE # OPTIONAL; TRUE/FALSE
+
+# specify number of workers for parallelization
+n.workers <- list(
+  scoring = 3
+)
+
+#logical indicating whether to generate gene expression dot plots (computationally intensive)
+show.gene.exp <- T 
+
+```
+
+
+```{r specify input references}
+
+# all references
+all.references <- data.frame(names = c("MCA_50", "MCA_100", "Zhang_2019", "internal.Mm.neuro", "GBM", 
+                                       "GL261", "GBM_DEG", "internal.Mm.renca", "Panglao.Hs", "Panglao.Mm", 
+                                       "VastDB", "neural.dif.HH", "cycling.seurat", 
+                                       "TRRUSTv2_Mm", "TRRUSTv2_Hs", "TRRUSTv2_Mm_reg", "TRRUSTv2_Hs_reg",
+                                       "Kidney_Healthy_Mm", "Integrated_Renca_res0_6", "muscle.signatures", "immune.signatures", "cancerSEA", "immuneSubtype"),
+                             type = c("csv", "csv", "csv", "internal", "csv", "internal", 
+                                      "csv", "internal", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv"),
+                             formats = c("symbol","symbol", "symbol", NA, "symbol", NA, "symbol", NA, 
+                                         "symbol", "symbol", "symbol", "symbol", "symbol", "symbol", 
+                                         "symbol", "symbol", "symbol", "symbol", "symbol", "symbol","symbol", "symbol", "symbol"),
+                             species = c("Mm", "Mm", "Hs", "Mm", "Hs", "Mm", "Hs", "Mm", "Hs", 
+                                         "Mm", "Mm", "Mm", "Hs", "Mm", "Hs", "Mm", "Hs", "Mm", "Mm", "Mm","Hs", "Hs", "Hs"),
+                             samples = c(NA, NA, NA, "N2A, CGR8", NA, "GL261", NA, "Renca", NA, NA, NA, NA, NA, NA, NA, NA, NA,NA, NA,NA,NA,NA, NA),
+                             files = c("VALID_Module4_mouse_cell_atlas_SYMBOL_v3_top50.csv",
+                                       "VALID_Module4_mouse_cell_atlas_SYMBOL_v4_top100.csv",
+                                       "VALID_Module4_Zhang2019_Hs_cellmarkers_SYMBOLS_131219.csv",
+                                       "VALID_Module4_ReferenceSet_Mm_241119.Rdata",
+                                       "VALID_GBM_meta_module_genes_SYMBOL.csv",
+                                       "VALID_ReferenceSet_GL261.RData",
+                                       "VALID_GBM_Neftel_DEG_cancer_vs_normal_SYMBOL.csv",
+                                       "VALID_Module4_ReferenceSet_Mm_241119.Rdata",
+                                       "VALID_Panglao_referenceSets_Hs_300120_SYMBOLS.csv",
+                                       "VALID_Panglao_referenceSets_Mm_300120_SYMBOLS.csv",
+                                       "VALID_ReferenceSet_VastDB_Mm_261119_SYMBOLS.csv",
+                                       "VALID_NeuralDifferentiation_HH_Mm_040220_SYMBOLS.csv",
+                                       "VALID_cyclingGenes_seurat_Hs_040220_SYMBOLS.csv",
+                                       "VALID_TRRUSTv2_Mm_140220.csv",
+                                       "VALID_TRRUSTv2_Hs_140220.csv",
+                                       "VALID_TRRUSTv2_Mm_regulation_140220.csv",
+                                       "VALID_TRRUSTv2_Hs_regulation_140220.csv",
+                                       "VALID_Kidney_Healthy_Mm_PMID29622724_230220.csv",
+                                       "VALID_Renca_tumor_integrated_res0_6_Mm_230220.csv",
+                                       "VALID_pangleo_zhang_MCA_SYMBOL_forMuscle_180320.csv",
+                                       "VALID_immuneSignatures_Nirmal_2018_SYMBOLS_170320.csv",
+                                       "VALID_CancerSEA_HS_270320.csv",
+                                       "VALID_Thorsson2018_tumorImmuneSubtypes_260420.csv"))
+
+# get input references
+query.references <- all.references[all.references$names %in% which.references, ]
+
+# get csv reference specifications
+csv_ref_available <- "csv" %in% query.references$type
+csv_input <- as.list(as.vector(query.references$files[query.references$type %in% "csv"]))
+names(csv_input) <- as.vector(query.references$names[query.references$type %in% "csv"])
+csv_input_format <- as.vector(query.references$formats[query.references$type %in% "csv"])
+
+
+
+```
+
+
+```{r load data}
+
+# load query dataset
+load(paste(dir.preprocessed, input.file, sep = ""));
+
+so.query <- prepSeurat(so)
+rm(so)
+
+current.assay <- DefaultAssay(so.query)
+
+
+
+```
+
+
+
+```{r data subsetting and clustering}
+
+
+# cluster data
+so.query <- setResolution(so.query, cluster.resolution)
+
+# subsample 
+stopifnot(exists("subsample_factor"))
+if (subsample_factor < 1){
+  so.query <- downsampleSeurat(so.query, subsample.factor = subsample_factor)
+}
+
+# subset data
+if (exists("subset.df")){
+  so.query <- subsetSeurat(so.query, subset.df)
+}
+
+
+```
+
+```{r prep gene list}
+
+# prep gene list
+gNames.list <- prepGeneList(so.query, objects())
+
+```
+
+
+```{r analysis log}
+
+# Initiate and fill analysis Log
+df.log <- initiateLog("5, Cell Annotation")
+df.log <- addLogEntry("Query File (.Rdata)", input.file, df.log, "input.file")
+df.log <- addLogEntry("Default Assay", current.assay, df.log, "current.assay")
+df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
+df.log <- addLogEntry("Subsample Factor", subsample_factor, df.log, "subsample_factor")
+df.log <- addLogEntry("Input species", so.input.species, df.log, "so.input.species")
+df.log <- addLogEntry("Top N Markers per Cluster", "", df.log, 50)
+
+```
+
+
+```{r}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+
+```{r cluster results}
+
+# plot umap by cluster
+plt.umap_by_cluster <- DimPlot(so.query, reduction = "umap", group.by = "seurat_clusters", label = TRUE)  + 
+  labs(title = "UMAP", subtitle = "Stratified by Clusters") + 
+  xlab("UMAP 1") + ylab("UMAP 2") + theme_miko(legend = T)
+
+# plot umap by barcodes
+plt.umap_by_barcode <- DimPlot(so.query, reduction = "umap", group.by = "Barcode")  + 
+  labs(title = "UMAP", subtitle = "Stratified by Barcodes") + 
+  xlab("UMAP 1") + ylab("UMAP 2") + theme_miko(legend = T) + ggthemes::scale_color_ptol()
+
+# plot umap by subset labels
+plt.umap_by_subset <- DimPlot(so.query, reduction = "umap", group.by = "subset_group")  + 
+  ggtitle(label = "UMAP") + 
+  xlab("UMAP 1") + ylab("UMAP 2")  + theme_miko(legend = T) + ggthemes::scale_color_ptol()
+
+
+if (print.inline){
+  print(plt.umap_by_cluster)
+  print(plt.umap_by_barcode)
+  print(plt.umap_by_subset)
+}
+
+```
+
+
+
+
+```{r normalized and scale data}
+
+if (DefaultAssay(so.query) == "integrated"){
+  DefaultAssay(so.query) <- "RNA"
+  so.query <-NormalizeData(so.query, verbose = FALSE)
+  so.query <- ScaleData(so.query, verbose = FALSE)
+}
+
+current.assay =  DefaultAssay(so.query)
+
+```
+
+
+```{r function for long to wide annotation table}
+
+# function to convert long to wide df
+long2wide <- function(df){
+  
+  # create wide version (for output to excel), reorder factors, and get basic descriptive stats
+  df.wide <- dcast(df, cluster_membership ~ predicted_labels, value.var = "n")
+  df.wide[is.na(df.wide)] <- 0
+  reordered_factors <- order(as.numeric(as.vector(df.wide$cluster_membership)))
+  df.wide <- df.wide[reordered_factors, ]
+  rownames(df.wide) <- df.wide$cluster_membership
+  df.wide <- as.data.frame(t(df.wide))
+  df.wide <- df.wide[2:dim(df.wide)[1], ]
+  df_id_rnames <- rownames(df.wide)
+  colnames(df.wide) <- paste("cluster", colnames(df.wide), sep = "")
+  df.wide <- data.frame(apply(df.wide, 2, function(x) as.numeric(as.character(x))))
+  df.wide[dim(df.wide)[1]+1, ] <- apply(df.wide, 2, sum)
+  rownames(df.wide) <- c(df_id_rnames, "TOTAL")
+  df.wide[, dim(df.wide)[2]+1] <- apply(df.wide, 1, sum)
+  colnames(df.wide)[dim(df.wide)[2]] <- "TOTAL"
+  
+  return(df.wide)
+}
+
+```
+
+
+
+```{r get species appropriate gene symbol}
+
+genes4species <- function(x, target.species) {
+  if (target.species == "Hs") {
+    y <- toupper(x)
+  } else if (target.species == "Mm") {
+    y <- tolower(x)
+    substr(y, 1, 1) <- toupper(substr(y, 1, 1))
+  }
+  return (y)
+  
+}
+
+
+```
+
+
+
+
+
+```{r plot cluster composition alt}
+
+# alternative function to plot cluster composition
+plot.cluster_composition_alt <- function(df.cluster_annotations, other_threshold = 0.05, set_color = 2, lab_color = NULL, label_order = NULL){
+  levels(df.cluster_annotations$predicted_labels) <- c(levels(df.cluster_annotations$predicted_labels), "other")
+  df.cluster_annotations$predicted_labels[df.cluster_annotations$freq < other_threshold] <- as.character("other")
+  
+  # create graph to visualize representation across clusters
+  u_predictions <- unique(df.cluster_annotations$predicted_labels)
+  n_subgroups <- length(u_predictions)
+  
+  if (is.null(lab_color)){
+    color_count <- max(n_subgroups)
+    my_cols = colorRampPalette(brewer.pal(8, paste("Set", set_color, sep = "")))(color_count)
+  } else {
+    my_cols <- lab_color
+  }
+  
+  if (is.null(label_order)){
+    label_order <- unique(df.cluster_annotations$predicted_labels)
+  } 
+  
+  
+  # ensure that clusters are ordered numerically
+  reordered_clusters <- order(as.numeric(as.vector(df.cluster_annotations$cluster_membership)))
+  df.cluster_annotations <- df.cluster_annotations[reordered_clusters, ]
+  df.cluster_annotations$cluster_membership <- as.numeric(as.vector(df.cluster_annotations$cluster_membership))
+  cluster_chart_labels <- unique(df.cluster_annotations$cluster_membership)
+  
+  plt.cluster_composition <- ggplot(df.cluster_annotations, aes(x = cluster_membership, fill = factor(predicted_labels, levels = label_order), y = freq)) +
+    geom_bar(position = "fill", stat = "identity") + 
+    scale_x_continuous("Cluster", labels = as.character(cluster_chart_labels), breaks = cluster_chart_labels) + 
+    scale_fill_manual(values = my_cols) + 
+    xlab("Cluster ID") + ylab("Cluster Representation") + ggtitle("Cluster Annotations")
+  
+  return(plt.cluster_composition)
+}
+
+```
+
+
+
+
+```{r cluster composition by barcode}
+
+# get barcode labels and clusters
+cluster_membership <- as.vector(so.query@meta.data[["seurat_clusters"]])
+barcode_labels <- as.vector(so.query@meta.data[["Barcode"]])
+df.bar_codes <- data.frame(cluster_membership, barcode_labels)
+
+# tally up cluster compositions
+df.all_barcodes <- df.bar_codes %>% 
+  dplyr::group_by(cluster_membership, barcode_labels) %>%
+  tally() %>% 
+  dplyr::mutate(freq = n / sum(n)) 
+
+u_barcodes <- unique(df.all_barcodes$barcode_labels)
+
+if (length(u_barcodes) > 1) {
+  
+  # convert long to wide (cell type table)
+  df_for_wide_barcodes <- df.all_barcodes
+  colnames(df_for_wide_barcodes)[colnames(df_for_wide_barcodes) == "barcode_labels"] <- "predicted_labels"
+  df.all_barcodes_wide <- long2wide(df_for_wide_barcodes)
+  
+  # plot cluster compositio by barcode
+  df.cluster_annotations_barcodes <- df.all_barcodes
+  colnames(df.cluster_annotations_barcodes)[colnames(df.cluster_annotations_barcodes) == "barcode_labels"] <- "predicted_labels"
+  
+  plt.cluster_composition_barcodes <- plot.cluster_composition_alt(df.cluster_annotations_barcodes, 
+                                                                   other_threshold = 0)
+  
+  plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes + 
+    theme_miko(legend = T) + 
+    ggthemes::scale_fill_ptol("Barcode") + 
+    labs(title = "Cluster Composition", subtitle = "Stratified by Barcodes")
+} else {
+  df_for_wide_barcodes <- data.frame()
+  df.all_barcodes_wide <- data.frame()
+  df.cluster_annotations_barcodes <- data.frame()
+  plt.cluster_composition_barcodes <- c()
+  
+}
+
+
+```
+
+
+```{r convert to symbol}
+
+gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+
+# so.temp <- so.query
+if (gene.rep == "ensembl"){
+  so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list,  convert.RNA = TRUE)
+  gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+}
+
+
+```
+
+
+
+```{r prep gene set helper function}
+
+prepGeneSet <- function(gs.file, gs.dir, gs.species, gs.available.genes){
+  
+  gs.data <- read.csv(paste(gs.dir, gs.file, sep = ""), header = TRUE)
+  gs.long <- pivot_longer(gs.data, colnames(gs.data))
+  colnames(gs.long) <- c("set", "genes")
+  gs.long$set <- rmvCSVprefix(gs.long$set)
+  
+  # get correct speices
+  if (gs.species == "Hs"){
+    gs.long$genes <- toupper(gs.long$genes)
+  } else if (gs.species == "Mm"){
+    gs.long$genes <- firstup(gs.long$genes)
+  }
+  
+  # trim white space
+  gs.long$genes <- trimws(as.character(gs.long$genes))
+  
+  # keep only genes that are availale in seurat object
+  gs.long <- gs.long[gs.long$genes %in% gs.available.genes, ]
+  
+  # wrangle into named list
+  split_tibble <- function(tibble, column = 'col') {
+    tibble %>% split(., .[,column]) %>% lapply(., function(x) x[,setdiff(names(x),column)])
+  }
+  
+  dflist <- purrr::map(split_tibble(gs.long, 'set'), "genes")
+  
+  return(dflist)
+}
+
+
+
+
+```
+
+```{r prep all signatures}
+
+signatures.symbol <- list()
+so.df.list <- list()
+
+df.gs.statistics <- NULL
+gs.list <- list()
+
+# get available genes
+av.genes <- rownames(so.query)
+
+if (csv_ref_available){
+  for (i in 1:length(csv_input)){
+    # get set name
+    csv.label <- names(csv_input)[i]
+    
+    # import and prep data
+    signatures.symbol[[csv.label]] <- prepGeneSet(gs.file = csv_input[i], 
+                                                  gs.dir = "Reference_Datasets/", 
+                                                  gs.species = so.input.species, 
+                                                  gs.available.genes = av.genes)
+    
+    # get gene set statistics
+    df.gs.statistics <- bind_rows(df.gs.statistics, 
+                                  data.frame(
+                                    set = csv.label,
+                                    annotation = names( signatures.symbol[[csv.label]]),
+                                    n.genes = unlist(lapply(signatures.symbol[[csv.label]], function(x) length(x)))
+                                  ))
+    df.gs.statistics$annotation <- rmvCSVprefix(df.gs.statistics$annotation)
+    
+    # store list in df for flex output
+    gs.list[[csv.label]] <- namedList2wideDF( signatures.symbol[[csv.label]])
+    
+    if (!is.null( signatures.symbol[[csv.label]])){
+      cur.sig <- signatures.symbol[[csv.label]]
+      signatures.symbol[[csv.label]] <- cur.sig
+    } else {next}
+  }
+}
+
+```
+
+
+```{r reformat prediction scores}
+
+format.results <- function(scores, score.name){
+  reformated.scores <- as.data.frame(scores)
+  reformated.scores$cell <- rownames(reformated.scores)
+  reformated.scores.long <- pivot_longer(reformated.scores, colnames(reformated.scores)[1:(length(colnames(reformated.scores))-1)])
+  reformated.scores.long$cluster.prediction <- paste(reformated.scores.long$cell, "-", reformated.scores.long$name, sep = "")
+  reformated.scores.long <- reformated.scores.long[ ,c("cluster.prediction", "value")]
+  colnames(reformated.scores.long) <- c("cluster.prediction", score.name)
+  
+  return(reformated.scores.long)
+}
+
+
+```
+
+
+```{r processing function}
+
+rcnames.2d <- function (score.mat, exp.mat, sig){
+  rownames(score.mat) <- names(sig)
+  colnames(score.mat) <- colnames(exp.mat)
+  score.mat <- as.data.frame(score.mat)
+}
+```
+
+
+```{r standardize scores}
+
+# standardize.scores <- function(df.long, which.field){
+#   df <- as.data.frame(df.long)
+#   df[ ,which.field] <- (df[ ,which.field] - mean(df[ ,which.field])) / (sd(df[ ,which.field]))
+#   return(df)
+# }
+
+```
+
+```{r}
+
+# DEG analysis
+  deg.gene.a <- FindAllMarkers(so.query, 
+                             assay = DefaultAssay(so.query),
+                             slot = "data",
+                             only.pos = F, 
+                             min.pct = 0,
+                             test.use = "MAST",
+                             logfc.threshold = 0.15, 
+                             max.cells.per.ident = 200,
+                             return.thresh = 1, #1 ensures all genes are returned
+                             verbose = F)
+
+deg.gene.a$pct.dif <- deg.gene.a$pct.1 - deg.gene.a$pct.2
+
+
+# reformat data
+df.logfc <- deg.gene.a[ ,c("gene", "cluster", "avg_logFC")]
+df.lfc.wide  <- pivot_wider(df.logfc, names_from = "cluster", values_from = "avg_logFC")
+all.genes <- rownames(so.query)
+which.missing <-all.genes[!(all.genes %in% df.lfc.wide$gene)] 
+df.lfc.missing <- data.frame(gene = which.missing, matrix(0, nrow = length(which.missing), ncol = ncol(df.lfc.wide)-1))
+colnames(df.lfc.missing) <- c("gene", colnames(df.lfc.wide)[2:ncol(df.lfc.wide)])
+df.lfc.wide <- bind_rows(df.lfc.wide, df.lfc.missing)
+df.lfc.wide <- df.lfc.wide[match(all.genes, df.lfc.wide$gene), ]
+df.lfc.wide[is.na(df.lfc.wide)] <- 0
+df.lfc.wide <- as.data.frame(df.lfc.wide)
+# rownames(df.lfc.wide) <- df.lfc.wide$gene
+# df.lfc.wide <- df.lfc.wide %>% dplyr::select(-c("gene"))
+
+df.pd <- deg.gene.a[ ,c("gene", "cluster", "pct.dif")]
+df.pd.wide  <- pivot_wider(df.pd, names_from = "cluster", values_from = "pct.dif")
+all.genes <- rownames(so.query)
+which.missing <-all.genes[!(all.genes %in% df.pd.wide$gene)] 
+df.pd.missing <- data.frame(gene = which.missing, matrix(0, nrow = length(which.missing), ncol = ncol(df.pd.wide)-1))
+colnames(df.pd.missing) <- c("gene", colnames(df.pd.wide)[2:ncol(df.pd.wide)])
+df.pd.wide <- bind_rows(df.pd.wide, df.pd.missing)
+df.pd.wide <- df.pd.wide[match(all.genes, df.pd.wide$gene), ]
+df.pd.wide[is.na(df.pd.wide)] <- 0
+df.pd.wide <- as.data.frame(df.pd.wide)
+# rownames(df.pd.wide) <- df.pd.wide$gene
+# df.pd.wide <- df.pd.wide %>% dplyr::select(-c("gene"))
+
+```
+
+```{r random gene sets}
+
+# get gene size range side
+# min.set <- min(df.gs.statistics$n.genes, na.rm = T)
+# max.set <- max(df.gs.statistics$n.genes, na.rm = T)
+# set.vector <- round(c(seq(0, 100, by = 10), seq(120, 300, by = 20), seq(400, 1000, by = 30), seq(2000, 10000, by = 1000)))
+# set.vector <- set.vector[set.vector > 0]
+# # set.vector <- set.vector[set.vector > min.set]
+# set.vector <- set.vector[set.vector < max.set]
+# 
+# gene.names <- rownames(so.query)
+# 
+# random.sets <- list()
+# 
+# for (i in 1:length(set.vector)){
+#   set.name <- paste0("R", set.vector[i])
+#   random.sets[[set.name]] <- sample(gene.names, set.vector[i])
+# }
+# 
+# # add random set to signature scores
+# signatures.symbol <- c(signatures.symbol, list(random = random.sets))
+
+```
+
+
+```{r assign annotation scores UPDATED, fig.width = 10, fig.height = 12, warning=F, message=F}
+
+# get cluster memberships
+cluster.lab <- "seurat_clusters"
+cluster.membership <- so.query@meta.data[[cluster.lab]]
+
+# get unique clusters
+u.clusters <- unique(as.numeric(as.character((cluster.membership))))
+u.clusters <- u.clusters[order(u.clusters)]
+
+# initiate data frames and list
+df.exp.scale <- NULL
+dot.e.scale.list <- list()
+dot.s.scale.list <- list()
+dot.expr.scale.list <- list()
+dot.comp.scale.list <- list()
+dot.mod.scale.list <- list()
+dot.per.scale.list <- list()
+
+# remove duplicate gene names
+which.duplicate <- duplicated(rownames(so.query))
+so.query <- so.query[!which.duplicate, ]
+which.duplicate <- duplicated( rownames(so.query@assays[[DefaultAssay(so.query)]]@scale.data))
+so.query@assays[[DefaultAssay(so.query)]]@scale.data <- so.query@assays[[DefaultAssay(so.query)]]@scale.data[!which.duplicate, ]
+
+# Compute observed and null expression matrices (cluster-level averages)
+Idents(so.query) <- "seurat_clusters"
+df.exp.scale <- AverageExpression(object = so.query, use.scale = T, assays = DefaultAssay(so.query))[[1]]
+colnames(df.exp.scale) <- paste("c", colnames(df.exp.scale), sep = "")
+
+# cast expression data as matrix
+exp.mat.scale.processed <- as.matrix(df.exp.scale)
+
+# get avg expression / fraction
+exp.mat <- avgGroupExpression(so.query, which.data = "data", which.center = "mean")
+per.mat <- avgGroupExpression(so.query, which.data = "data", which.center = "fraction")
+exp.mat.long <- pivot_longer(exp.mat, colnames(exp.mat)[2:ncol(exp.mat)])
+exp.mat.long$cluster <- as.numeric(gsub("c", "",exp.mat.long$name))
+exp.mat.long$cluster <- factor(exp.mat.long$cluster, levels = unique(exp.mat.long$cluster)[order(unique(exp.mat.long$cluster))])
+per.mat.long <- pivot_longer(per.mat, colnames(per.mat)[2:ncol(per.mat)])
+per.mat.long$cluster <- as.numeric(gsub("c", "",per.mat.long$name))
+per.mat.long$cluster <- factor(per.mat.long$cluster, levels = unique(per.mat.long$cluster)[order(unique(per.mat.long$cluster))])
+rm(exp.mat); rm(per.mat);
+
+# initiate score lists
+e.score.list <- list()
+expr.score.list <- list()
+# mod.score.list <- list()
+per.score.list <- list()
+logfc.score.list <- list()
+pd.score.list <- list()
+sc.mod.score.list <- list()
+
+# start cluster
+cl <- parallel::makeCluster(n.workers$scoring)
+doParallel::registerDoParallel(cl)
+
+
+# iterate through each gene signature list
+score.results <- foreach(i = 1:length(signatures.symbol), .packages = c("scMiko", "Seurat", "dplyr", "purrr", "GSVA"))  %dopar% {
+  
+  # initiate score data frames
+  e.score <- NULL
+  expr.score <- NULL
+  mod.score <- NULL
+  per.score <- NULL
+  logfc.score <- NULL
+  pctdif.score <- NULL
+  df.n.gene <- NULL
+  
+  
+  # get current signautre list
+  which.sig <- names(signatures.symbol)[i]
+  sig <- signatures.symbol[[which.sig]] 
+  
+  # clean lists
+  list.lengths <- unlist(lapply(sig, length))
+  sig <- sig[list.lengths >= min.geneset.size]
+  
+  #####################
+  # calculate gene-expression percentage (per scores) and Avg Exp scores (expr scores)
+  per.score <- matrix(nrow = length(sig), ncol = ncol(exp.mat.scale.processed))
+  expr.score <- matrix(nrow = length(sig), ncol = ncol(exp.mat.scale.processed))
+  logfc.score <- matrix(nrow = length(sig), ncol = ncol(exp.mat.scale.processed))
+  pctdif.score <- matrix(nrow = length(sig), ncol = ncol(exp.mat.scale.processed))
+  
+  
+  for (j in 1:length(sig)){
+    
+    per.dot.score <- NULL
+    per.dot.null <- NULL
+    if (sum(rownames(exp.mat.scale.processed) %in% sig[[j]]) > 0){
+      # get features for current signature
+      cur.features <- unique(rownames(exp.mat.scale.processed)[rownames(exp.mat.scale.processed) %in% sig[[j]]])
+      
+      # get geneset size
+      n.genes.total <- length(sig[[j]])
+      n.genes.available <- length(cur.features)
+      df.n.gene <- bind_rows(df.n.gene, data.frame(ref.set = which.sig,
+                                                   cell = names(sig)[j],
+                                                   n.genes.total = n.genes.total,
+                                                   n.genes.available, n.genes.available))
+      
+      per.mat.sub <- per.mat.long[per.mat.long$genes %in% cur.features, ]
+      exp.mat.sub <- exp.mat.long[exp.mat.long$genes %in% cur.features, ]
+      df.lfc.sub <- df.lfc.wide[(df.lfc.wide$gene) %in% cur.features, ] %>% dplyr::select(-c("gene"))
+      df.pd.sub <- df.pd.wide[(df.pd.wide$gene) %in% cur.features, ] %>% dplyr::select(-c("gene"))
+      
+      per.exp <- as.vector(per.mat.sub %>% group_by(cluster) %>% summarize(mean.per= mean(value, na.rm = T)))
+      per.score[j,] <- as.vector(per.exp$mean.per)
+      
+      # avg expression (observed)
+      av.exp <- as.vector(exp.mat.sub %>% group_by(cluster) %>% summarize(mean.exp= mean(value, na.rm = T)))
+      expr.score[j,] <- as.vector(av.exp$mean.exp)
+      
+      # avg logFC and pd (observed)
+      logfc.score[j,] <-colMeans(df.lfc.sub)
+      pctdif.score[j,] <-colMeans(df.pd.sub)
+      
+    } else {
+      per.score[j,] <- 0
+      expr.score[j,] <- 0
+      logfc.score[j,] <- 0
+      pctdif.score[j,] <- 0
+    }
+  }
+  
+  per.score <- rcnames.2d(per.score, exp.mat.scale.processed, sig)
+  expr.score <- rcnames.2d(expr.score, exp.mat.scale.processed, sig)
+  logfc.score <- rcnames.2d(logfc.score, exp.mat.scale.processed, sig)
+  pctdif.score <- rcnames.2d(pctdif.score, exp.mat.scale.processed, sig)
+  
+  #######################
+  # calculate module scores (Mod scores)
+  # mod.score  <- matrix(nrow = length(sig), ncol = ncol(exp.mat.scale.processed))
+
+  # iterate through each input file
+  # mod.results <- list()
+  # for (j in 1:length(sig)){
+  #   
+  #   if (sum(rownames(exp.mat.scale.processed) %in% sig[[j]]) > 0){
+  #     cur.features <- list(unique(rownames(exp.mat.scale.processed)[rownames(exp.mat.scale.processed) %in% sig[[j]]]))
+  #     so.mod <- AddModuleScore(so.query, cur.features, name = "cur.sig",
+  #                              ctrl = 50,
+  #                              nbin = 5)
+  #     
+  #     cur.mode.scores <- data.frame(scores = so.mod@meta.data[["cur.sig1"]], clusters = cluster.membership) %>%
+  #       group_by(clusters) %>%
+  #       summarize(mean.score = mean(scores)) 
+  #     
+  #     mod.results[[names(sig)[j]]] <- list(
+  #       mod.score = as.numeric(t(as.vector(cur.mode.scores))["mean.score", ]),
+  #       mod.cell.score =  so.mod@meta.data[["cur.sig1"]])
+  #     
+  #     mod.score[j,] <- as.numeric(t(as.vector(cur.mode.scores))["mean.score", ])
+  #     
+  #     
+  #   } else {
+  #     mod.results[[names(sig)[j]]] <-  list(
+  #       mod.score = NULL,
+  #       mod.cell.score = NULL
+  #     )
+  #     mod.score[j,] <- 0
+  #   }
+  # }
+  # 
+  # sc.mod.score <-  purrr::map_dfc(mod.results, "mod.cell.score")
+  #   rownames(sc.mod.score) <- colnames(so.query)
+  # colnames(sc.mod.score) <- names(sig)
+  # 
+  #     # remove baggage
+  # rm(mod.results); rm(so.mod)
+  # 
+  # # reformat and store Mod scores
+  # mod.score <- rcnames.2d(mod.score, exp.mat.scale.processed, sig)
+
+  ###############################
+  # calculate GSVA scores
+  e.score <- gsva(exp.mat.scale.processed, sig, verbose = F)
+
+  ##################################
+  # store results 
+  
+  list(
+    exp = expr.score,
+    gsva = e.score,
+    per = per.score,
+    # mod = mod.score,
+    logfc = logfc.score,
+    pd =pctdif.score,
+    sc = expr.score,
+    df.n.gene = df.n.gene
+  )
+} 
+
+  # stop workers
+  parallel::stopCluster(cl)
+  
+  
+  df.n.gene <- NULL
+  # unpack results
+  for (i in 1:length(signatures.symbol)){
+     which.sig <- names(signatures.symbol)[i]
+       sig <- signatures.symbol[[which.sig]] 
+  
+  # clean lists
+  list.lengths <- unlist(lapply(sig, length))
+  sig <- sig[list.lengths >= min.geneset.size]
+  
+  
+     e.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$gsva, exp.mat.scale.processed, sig)
+     expr.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$exp, exp.mat.scale.processed, sig)
+     # mod.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$mod, exp.mat.scale.processed, sig)
+     per.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$per, exp.mat.scale.processed, sig)
+     pd.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$pd, exp.mat.scale.processed, sig)
+     logfc.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$logfc, exp.mat.scale.processed, sig)
+     sc.mod.score.list[[which.sig]] <- score.results[[i]]$sc
+     df.n.gene <-  bind_rows(df.n.gene, score.results[[i]]$df.n.gene)
+  }
+  
+
+```
+
+```{r DEG analysis using module scores}
+
+# get cell-level annotation scores 
+e.mat <- getExpressionMatrix(so.query, which.data = "data")
+sc.mod.all <- NULL
+sig.names.all <- c()
+for (i in 1:length(signatures.symbol)){
+  
+  # get current signautre list
+  which.sig <- names(signatures.symbol)[i]
+  sig <- signatures.symbol[[which.sig]] 
+  
+  # clean lists
+  list.lengths <- unlist(lapply(sig, length))
+  sig <- sig[list.lengths >= min.geneset.size]
+  
+  for (j in 1:length(sig)){
+    sig.name <- names(sig)[j]
+    sig.features <- sig[[sig.name]]
+    sc.mod.all <-  rbind(sc.mod.all, colMeans(e.mat[rownames(e.mat) %in% sig.features, ]))
+    sig.names.all[length(sig.names.all) + 1] <- sig.name
+  }
+}
+
+# assign annotation names
+rownames(sc.mod.all) <- sig.names.all
+
+# get rid of baggage
+rm(e.mat)
+
+sc.mod.all <- as.data.frame(t(sc.mod.all))
+rownames(sc.mod.all) <- colnames(so.query)
+so.deg <- CreateSeuratObject(
+  counts = t(sc.mod.all),
+  project = "module.score.DEG",
+  assay = "RNA",
+  min.cells = 0,
+  min.features = 0,
+  names.field = 1,
+  names.delim = "_",
+  meta.data = NULL
+)
+
+# get original seurat clusters
+so.deg@meta.data[["seurat_clusters"]] <- so.query@meta.data[["seurat_clusters"]]
+Idents(so.deg) <- so.deg@meta.data[["seurat_clusters"]]
+
+# run DEG analysis
+deg.gene <- FindAllMarkers(so.deg, 
+                           assay = DefaultAssay(so.deg),
+                           slot = "data",
+                           only.pos = T, 
+                           min.pct = 0,
+                           test.use = "MAST",
+                           logfc.threshold = 0, 
+                           max.cells.per.ident = 200,
+                           return.thresh = 1, #1 ensures all genes are returned
+                           verbose = F)
+
+
+# data wrangling
+deg.gene$pDif <- deg.gene$pct.1 - deg.gene$pct.2
+deg.gene$euc <- (((deg.gene$pDif/max(deg.gene$pDif))^2)  +  ((deg.gene$avg_logFC/max(deg.gene$avg_logFC))^2))
+deg.gene$log.p <- -log10(deg.gene$p_val)
+deg.gene$u.label <- paste0("c", deg.gene$cluster, "-", deg.gene$gene)
+top.dg.v1 <- deg.gene %>% group_by(cluster) %>%  top_n(1, euc)
+deg.gene$label.v1 <- ""
+deg.gene$label.v1[deg.gene$u.label %in% top.dg.v1$u.label] <- deg.gene$u.label[deg.gene$u.label %in% top.dg.v1$u.label]
+top.dg.v2 <- deg.gene %>%  top_n(15, euc)
+deg.gene$label.v2 <- ""
+deg.gene$label.v2[deg.gene$u.label %in% top.dg.v2$u.label] <- deg.gene$u.label[deg.gene$u.label %in% top.dg.v2$u.label]
+
+
+deg.gene.sig <- deg.gene[deg.gene$p_val_adj < 0.05, ]
+
+# plot
+plt.deg.mod.1 <- deg.gene.sig %>%
+  ggplot(aes(x = avg_logFC, y = pDif, color = cluster, size = log.p)) + 
+  geom_point(data = deg.gene, aes(x = avg_logFC, y = pDif), color = "grey", size = 1) + 
+  geom_point() + 
+  theme_miko(legend = T) + 
+  xlab('logFC (cluster n - other)') + 
+  ylab('expressing fraction difference (cluster n - other)') + 
+  labs(title = "Differential Module Analysis", subtitle = "colored: p < 0.05; grey: non-significant") + 
+  ggrepel::geom_text_repel(aes(label = label.v1)) 
+
+plt.deg.mod.2 <- deg.gene.sig %>%
+  ggplot(aes(x = avg_logFC, y = pDif, color = cluster, size = log.p)) + 
+  geom_point(data = deg.gene, aes(x = avg_logFC, y = pDif), color = "grey", size = 1) + 
+  geom_point() + 
+  theme_miko(legend = T) + 
+  xlab('logFC (cluster n - other)') + 
+  ylab('expressing fraction difference (cluster n - other)') + 
+  labs(title = "Differential Module Analysis", subtitle = "colored: p < 0.05; grey: non-significant") + 
+  ggrepel::geom_text_repel(aes(label = label.v2)) 
+
+deg.mod.final <- deg.gene.sig[ , c( "avg_logFC", "p_val","p_val_adj","pct.1", "pct.2",  "pDif", "euc", "cluster", "gene")]
+colnames(deg.mod.final) <- c( "avg_logFC", "p_val","p_val_adj","pct.1", "pct.2",  "pct.Dif", "dist.Origin", "Cluster", "Annotation")
+deg.mod.final[ ,c("p_val", "avg_logFC", "pct.1", "pct.2", "p_val_adj", "pct.Dif", "dist.Origin")] <- signif(deg.mod.final[ ,c("p_val", "avg_logFC", "pct.1", "pct.2", "p_val_adj", "pct.Dif", "dist.Origin")], 3)
+
+if (print.inline){
+  print(plt.deg.mod.1)
+  print(plt.deg.mod.2)
+  # deg.mod.final
+}
+
+# clean baggage 
+rm(so.deg)
+
+
+```
+
+```{r merge results df}
+
+#merge 
+df.n.gene <- unique(df.n.gene[ ,c("ref.set", "cell", "n.genes.total", "n.genes.available")])
+
+```
+
+
+```{r null dist functions}
+
+# compare null to results
+
+null.distribution <- function(score.list){
+  h1.h0.merge <- NULL
+  for (i in 1:length(score.list)){
+    cur.h1 <-  format.results(score.list[[i]], "H1") 
+    h1.h0.merge.cur <- cur.h1
+    h1.h0.merge <- bind_rows(h1.h0.merge, h1.h0.merge.cur)
+  }
+  colnames(h1.h0.merge)[colnames(h1.h0.merge) %in% "cluster.prediction"] <- "pred"
+  h1.h0.merge$cell <- gsub("-.*", "", h1.h0.merge$pred)
+  h1.h0.merge$ratio <- h1.h0.merge$H1 
+  h1.h0.merge <- merge(h1.h0.merge, df.n.gene)
+  return(h1.h0.merge)
+}
+
+```
+
+
+```{r null dist tables}
+
+df.dist.expr <- null.distribution(expr.score.list)
+df.dist.gsva <- null.distribution(e.score.list)
+df.dist.per <- null.distribution(per.score.list)
+# df.dist.mod <- null.distribution(mod.score.list)
+df.dist.logfc <- null.distribution(logfc.score.list)
+df.dist.pd <- null.distribution(pd.score.list)
+
+```
+
+
+```{r}
+
+box.cox <- function(x, parms=c(1,0)) {
+  lambda <- parms[1]
+  offset <- parms[2]
+  if (lambda==0) log(x+offset) else ((x+offset)^lambda - 1)/lambda
+}
+threepoint <- function(x, y, ladder=c(1, 1/2, 1/3, 0, -1/2, -1)) {
+  # x and y are length-three samples from a dataset.
+  dx <- diff(x)
+  f <- function(parms) (diff(diff(box.cox(y, parms)) / dx))^2
+  fit <- nlm(f, c(1,0))
+  parms <- fit$estimate #$
+  lambda <- ladder[which.min(abs(parms[1] - ladder))]
+  if (lambda==0) offset = 0 else {
+    do <- diff(range(y))
+    offset <- optimize(function(x) f(c(lambda, x)), 
+                       c(max(-min(x), parms[2]-do), parms[2]+do))$minimum    
+  }
+  c(lambda, offset)
+}
+
+```
+
+
+
+```{r}
+
+
+
+
+vstScoreThreshold.v2  <- function(x, y, label, set, percentile.threshold = 0.98, quantile.norm = F){
+
+  # purpose: scale and normalize gene set scores 
+  # step 1: loess-centering
+  #     - ensures that data not biased and that no outliers skew score distributions
+  # step 2: variance-stabilizing transform based on quantile regression
+  #
+  # output: normalized and scaled geneset scores 
+
+# loess-centering
+
+  df <- data.frame(x = x, x.log = log(x), y = y,
+                   annotation = label, ref.set = set)
+  
+  u.set <- unique(df$ref.set)
+  for (i in 1:length(unique(u.set))){
+     error.loess.mean <- loess(y ~ x.log , df[df$ref.set %in% u.set[i], ])
+  pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$ref.set %in% u.set[i]]), se = TRUE)[["fit"]]
+  df$y.centered[df$ref.set %in% u.set[i]] <-  df$y[df$ref.set %in% u.set[i]] - pred
+    
+    
+  }
+  
+#   parms <- threepoint(y[i3], temperature[i3])
+# x <- box.cox(temperature, parms)
+ # log1p(x)+ log1p(x) - x
+  # exp(-x) +log1p(x) - x
+  # log1p(x) - sqrt(x) - x
+  # quantile regression
+  if (quantile.norm){
+    rqfit <- rq(y.centered ~ log1p(x) - sqrt(x) - x, data = df, tau = percentile.threshold)
+    # rqfit <- rq("y.centered ~ log(x) - x", data = df, tau = percentile.threshold)
+    df$qr95 <- predict(rqfit, data.frame(x = (df$x)))
+    df$ratio <- df$y.centered/df$qr95
+    df$residuals <- rqfit[["residuals"]]
+    df$z.sig  <- (df$ratio - mean(df$ratio )) / sd(df$ratio )
+    df$sig <- df$z.sig > 2.575
+    df$color <- "black"
+    df$color[df$sig ] <- "tomato"
+    
+    plt.vstScore2 <- df %>%
+  ggplot(aes(x, y.centered)) +
+  geom_point() +
+  geom_smooth() +
+  geom_quantile(formula = y ~ log1p(x) - sqrt(x) - x, quantiles = percentile.threshold, linetype = "dashed", color = "tomato", size = 1) +
+  theme_miko()
+    
+    plt.vstScore <- df %>%
+  ggplot(aes(x, z.sig)) + 
+  geom_point() + 
+  geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
+  geom_hline(yintercept = 2.575, color = "tomato", linetype = "dashed") + 
+  theme_miko()
+    
+  } else {
+    df$ratio   <- df$y.centered
+    df$residuals   <- df$y.centered
+    df$z.sig  <- (df$y.centered - mean(df$y.centered )) / sd(df$y.centered )
+    
+plt.vstScore <- df %>%
+  ggplot(aes(x, z.sig)) + 
+  geom_point() + 
+  geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
+  geom_hline(yintercept = 2.575, color = "tomato", linetype = "dashed") + 
+  theme_miko()
+
+plt.vstScore2 <- NULL
+  }
+
+
+
+  list(
+    results = df,
+    plot = plt.vstScore,
+    plot.trans = plt.vstScore2
+  )
+
+}
+
+```
+
+
+
+```{r}
+
+# process scores
+vst.exp.list <- vstScoreThreshold.v2(x = df.dist.expr$n.genes.available, y = df.dist.expr$ratio, 
+                                  label = df.dist.expr$pred, set = df.dist.expr$ref.set, quantile.norm = T)
+vst.gsva.list <- vstScoreThreshold.v2(x = df.dist.gsva$n.genes.available, y = df.dist.gsva$ratio, 
+                                   label = df.dist.gsva$pred, set = df.dist.gsva$ref.set, quantile.norm = T)
+vst.per.list <- vstScoreThreshold.v2(x = df.dist.per$n.genes.available, y = df.dist.per$ratio, 
+                                  label = df.dist.per$pred, set = df.dist.per$ref.set, quantile.norm = T)
+# vst.mod.list <- vstScoreThreshold.v2(x = df.dist.mod$n.genes.available, y = df.dist.mod$ratio, 
+                                  # label = df.dist.mod$pred, set = df.dist.mod$ref.set, quantile.norm = T)
+vst.logfc.list <- vstScoreThreshold.v2(x = df.dist.logfc$n.genes.available, y = df.dist.logfc$ratio, 
+                                  label = df.dist.logfc$pred, set = df.dist.logfc$ref.set, quantile.norm = T)
+vst.pd.list <- vstScoreThreshold.v2(x = df.dist.pd$n.genes.available, y = df.dist.pd$ratio, 
+                                  label = df.dist.pd$pred, set = df.dist.pd$ref.set, quantile.norm = T)
+
+
+# merge results
+vst.list <-  list(exp = vst.exp.list$results, 
+                  gsva = vst.gsva.list$results, 
+                  per= vst.per.list$results, 
+                  # mod = vst.mod.list$results,
+                  logfc = vst.logfc.list$results,
+                  pd = vst.pd.list$results)
+
+vst.merge <- NULL
+for (i in 1:length(vst.list)){
+  
+  score.name <- names(vst.list)[i]
+  if (is.null(vst.merge)){
+    vst.merge <- vst.list[[score.name]][ ,c("ref.set", "annotation", "x", "z.sig")]
+    colnames(vst.merge) <- c("ref.set", "annotation", "n.genes", score.name )
+  } else {
+    cur.set <- vst.list[[score.name]][ ,c("ref.set", "annotation", "x", "z.sig")]
+    colnames(cur.set) <- c("ref.set", "annotation", "n.genes", score.name )
+    vst.merge <- merge(vst.merge, cur.set, by = c("ref.set", "annotation",  "n.genes"), all = T)
+  }
+  
+}
+
+vst.merge$uni.identifier <- paste0(vst.merge$annotation, "-", vst.merge$ref.set)
+vst.merge <- vst.merge[!duplicated(vst.merge$uni.identifier), ]
+vst.merge$composite <- apply(vst.merge[ ,names(vst.list)], 1, mean, na.rm = T)
+vst.merge[ ,c(names(vst.list), "composite")] <- signif(vst.merge[ ,c(names(vst.list), "composite")], 3)
+
+
+plt.vstComposite <- vst.merge %>%
+  ggplot(aes(x = (n.genes), y = composite)) + 
+  geom_hline(yintercept = 0,  color = "grey") + 
+  geom_point() + 
+  theme_miko() + 
+  xlab("Genes/Set (log10 N)") + 
+  ylab("Scores (variance stablized residuals)") 
+
+
+# pooled plot
+plt.score.thresholds.resids <- cowplot::plot_grid(vst.exp.list$plot.trans + labs(title = "Expression") + ylab("Residuals"),
+                                           vst.gsva.list$plot.trans  + labs(title = "GSVA") + ylab("Residuals"),
+                                           vst.per.list$plot.trans  + labs(title = "Expression Fraction") + ylab("Residuals"),
+                                           # vst.mod.list$plot.trans  + labs(title = "Modular Score") + ylab("Residuals"),
+                                           vst.logfc.list$plot.trans  + labs(title = "log FC") + ylab("Residuals"),
+                                           vst.pd.list$plot.trans  + labs(title = "Pct Differences") + ylab("Residuals"),
+                                           ncol = 3)
+
+plt.score.thresholds <- cowplot::plot_grid(vst.exp.list$plot + labs(title = "Expression") + ylab("z-scores"),
+                                           vst.gsva.list$plot  + labs(title = "GSVA") + ylab("z-scores"),
+                                           vst.per.list$plot  + labs(title = "Expression Fraction") + ylab("z-scores"),
+                                           # vst.mod.list$plot  + labs(title = "Modular Score") + ylab("z-scores"),
+                                           vst.logfc.list$plot  + labs(title = "log FC") + ylab("z-scores"),
+                                           vst.pd.list$plot  + labs(title = "Pct Differences") + ylab("z-scores"),
+                                           ncol = 3)
+
+
+# score correlation plots
+plt.rank.cor <- GGally::ggpairs(vst.merge[ ,c(names(vst.list), "composite")], title="correlogram with ggpairs()", 
+                                lower = list(continuous = GGally::wrap("points", alpha = 1), 
+                                             combo = GGally::wrap("dot_no_facet", alpha = 1))) +
+  theme_bw() + 
+  ggtitle("Score Correlations")
+
+if (print.inline){
+  plt.score.thresholds
+  plt.score.thresholds.resids
+}
+
+# get cluster ID
+vst.merge$cluster <- gsub("-", "", stringr::str_extract(vst.merge$annotation, "-c[0-9]*"))
+vst.merge$cell.type <- gsub("-c[0-9]*", "", vst.merge$annotation)
+
+
+
+vst.merge.final <- vst.merge[ ,c("cluster", "cell.type", "ref.set", "n.genes","exp","gsva","per","logfc", "pd", "composite")]
+
+vst.merge.final$z.comp <- signif(apply(vst.merge.final[ ,c("exp","gsva","per","logfc", "pd")], 1, function(x) mean(x, na.rm = T) / sd(x, na.rm = T)), 3)
+vst.merge.final$cv.comp <- signif(apply(vst.merge.final[ ,c("exp","gsva","per","logfc", "pd")], 1, function(x) sd(x, na.rm = T) / mean(x, na.rm = T)), 3)
+
+```
+
+```{r annotate tissue types}
+
+cell.types <- list(stem = "stem|germ|pluripotent|fetal|placent|Multipotent", 
+  endothelial = "endothelial", 
+  epithelial = "epithelial|Pulmonary.alveolar|ciliated|henle|proximal.tubule|distal.tubul|Urothelial.cells", 
+  hepatic = "liver|hepato|hepatic|cholangio", 
+  endoderm = "endoderm",
+  renal = "renal|kidney|distal.tubul|proximal.tubule|henle|Juxtaglomerula|Urothelial.cells",
+  neural = "neural|neuro|purkinje|lens|Retzius|photorecep|Pyramidal|Retinal.ganglion|Retinal|Science.Ex|Science.In",
+  myelin = "schwann|oligodendro",
+  brain = "schwann|oligodendro|glia|microgli|neural|neuro|purkinje|lens|astrocy|Retzius|photorecep|Pyramidal|Retinal.ganglion|Retinal|Science.Ex|Science.In",
+  mesenchymal = "fibroblast|osteo|chondro|mesench|keratinocyte|myofibro|connective|Jaw|tooth|notocho|adipo",
+  skin = "keratin|melano",
+  mesoderm = "mesoderm",
+  cancer = "cancer",
+  myeloid = "monocyte|macrophage|dendritic|microgli|myeloid",
+  lymphocyte = "T.cell|T.regulato|B.cells|Lymphoid|white.blood|NK|Thymocytes|memory",
+  muscle = "myocyte|myoblast|muscle",
+  blood = "T.cell|T.regulato|B.cells|Lymphoid|white.blood|monocyte|macrophage|dendritic|erythro|megakaryo|neutro|basophil|platelet|Hematopoietic|mast",
+  progenitor = "progeni",
+  immune = "CD8|CD4|T.regulato|B.cells|Lymphoid|white.blood|monocyte|macrophage|dendritic|microgli|neutrophi|natural.killer|killer|basophil|NK|Thymocytes|memory|mast",
+  cardiac = "cardio|cardiac|aorta")
+
+annotations <- vst.merge.final$cell.type
+
+for (i in 1:length(annotations)){
+  ann <- toupper(annotations[i])
+  vst.merge.final$gen[i] <- paste(names(which(purrr::map_dbl(cell.types, function(x) grepl(toupper(x), ann, fixed = F, perl = T)) == 1)), collapse = ", ")
+}
+
+```
+
+
+
+```{r wordclouds}
+
+
+sig.thresh <- 2.575
+vst.merge.cloud <- vst.merge.final
+vst.merge.cloud$sig.lenient <- F
+vst.merge.cloud$sig.lenient[vst.merge.cloud$exp > sig.thresh | 
+                              vst.merge.cloud$gsva > sig.thresh |
+                              vst.merge.cloud$per > sig.thresh | 
+                              vst.merge.cloud$logfc > sig.thresh | 
+                               vst.merge.cloud$pd > sig.thresh] <- T
+
+             # vst.merge.cloud$mod > sig.thresh | 
+
+vst.merge.cloud$sig.stringent <- F
+vst.merge.cloud$sig.stringent[vst.merge.cloud$exp > sig.thresh & 
+                              vst.merge.cloud$gsva > sig.thresh &
+                              vst.merge.cloud$per > sig.thresh & 
+                              vst.merge.cloud$logfc > sig.thresh & 
+                               vst.merge.cloud$pd > sig.thresh] <- T
+
+                              # vst.merge.cloud$mod > sig.thresh & 
+
+vst.merge.cloud$color <- "grey"
+vst.merge.cloud$color[vst.merge.cloud$sig.lenient] <- "orange"
+vst.merge.cloud$color[vst.merge.cloud$sig.stringent] <- "red"
+
+
+if (print.inline){
+  
+  u.cl <- paste("c", u.clusters, sep = "")
+  
+  cols <- rev(c("#d73027",
+                "#4575b4"))
+  
+  for (i in 1:length(u.cl)){
+    
+    vst.merge.subset <- vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[i], ]
+    # colors=brewer.pal(8, "Dark2"),
+    
+    
+    if (nrow(vst.merge.subset) >0){
+      wordcloud::wordcloud(words = vst.merge.subset$cell,
+                           freq =  round((vst.merge.subset$composite + abs(min(vst.merge.subset$composite)))*25), min.freq = -5,
+                           max.words=20, random.order=FALSE, rot.per=0, scale = c(1.3, 0.01),
+                           colors= vst.merge.subset$color, ordered.colors = T)
+      
+    } 
+  }  
+}
+
+vst.merge.lenient <- vst.merge.final[vst.merge.cloud$sig.lenient, ]
+
+
+```
+
+```{r deg evaluation}
+
+
+deg.gene.sub <- deg.gene.a[(deg.gene.a$p_val < 0.05) & (deg.gene.a$avg_logFC > 0), ]
+
+deg.list <- deg.gene.sub %>%
+  arrange(cluster) %>%
+  group_by(cluster) %>%
+  dplyr::summarize(
+    genes = list(gene)
+  )
+
+deg.list <- apply(deg.list[ ,"genes"], 1, function(x) unlist(x))
+names(deg.list) <- paste0("c", seq(0, length(deg.list)-1))
+
+# collapse.set <- c(lapply(signatures.symbol, function(x) (x)))
+collapse.set <- c()
+for (i in 1:length(signatures.symbol)){
+  collapse.set <- c(collapse.set, signatures.symbol[[i]])
+}
+
+fraction.deg <- lapply(deg.list, function(x) lapply(collapse.set, function(y) sum(x %in% y)/length(x)))
+
+df.fct.deg <- purrr::map_dfc(fraction.deg, function(x) unlist(x))
+df.fct.deg <- as.data.frame(df.fct.deg)
+rownames(df.fct.deg) <- make.unique(names(fraction.deg[[1]]))
+
+df.fct.deg.wide <- df.fct.deg
+df.fct.deg.wide$annotation <- rownames(df.fct.deg)
+df.fct.deg.long <- pivot_longer(df.fct.deg.wide, cols = colnames(df.fct.deg))
+
+df.top.deg <- df.fct.deg.long %>%
+  group_by(name) %>%
+  top_n(5, value)
+
+top.terms <- unique(df.top.deg$annotation)
+
+df.fct.deg.hm <- df.fct.deg[df.fct.deg.wide$annotation %in% top.terms, ]
+
+if (print.inline){
+  # deg.gene.sub
+  pheatmap::pheatmap(df.fct.deg.hm, 
+                     main = "Fraction of DEGs present in Genesets\n x: cluster; y: annotation; z: DEG fraction",
+                     color = viridis::inferno(10))
+}
+
+
+```
+
+
+```{r plot signature gene expressions, message=FALSE, warning=FALSE, fig.width = 10, fig.height = 10}
+
+# only plot sort list of putative gene sets. 
+# pred.results.st.final
+
+
+all.signatures.list <- list()
+
+if (length(signatures.symbol) > 0){
+  for (i  in 1:length(signatures.symbol)){
+    cur.signature.list.name <- names(signatures.symbol)[i]
+    cur.signature.list <- signatures.symbol[[cur.signature.list.name]]
+    signature.df <- NULL
+    for (j in 1:length(cur.signature.list)){
+      if (length(cur.signature.list[[j]])>0){
+        cur.signature.name <- names(cur.signature.list)[j]
+        cur.signature.df <- as.data.frame(unlist(cur.signature.list[[cur.signature.name]]))
+        cur.signature.df$signature <- cur.signature.name
+        cur.signature.df <- cur.signature.df[ ,c(2,1)]
+        colnames(cur.signature.df) <- c("signature", "genes")
+        signature.df <- bind_rows(signature.df,cur.signature.df )
+      }
+    }
+    
+    all.signatures.list[[cur.signature.list.name]] <- signature.df
+  }
+}
+
+plt.signature.subset <- TRUE # (flag specifying whether to plot all or just subset)
+
+# top 20 signatures
+df.sig2plt <- unique((vst.merge.final %>% arrange(-composite) %>% top_n(90, composite))[ ,c("cell.type", "ref.set")])
+if (nrow(df.sig2plt) > 35) df.sig2plt <- df.sig2plt[1:35, ]
+
+signature.dot.list <- list()
+if (plt.signature.subset){
+  for (i in 1:length(all.signatures.list)){
+    which.sig <- names(all.signatures.list)[i]
+    if (which.sig %in% df.sig2plt$ref.set){
+      df.sig2plt.cur <- df.sig2plt[df.sig2plt$ref.set %in% which.sig, ]
+      signature.dot.list[[which.sig]] <- all.signatures.list[[which.sig]][all.signatures.list[[which.sig]]$signature %in% df.sig2plt.cur$cell,]
+    }
+  }
+} else {
+  signature.dot.list <- all.signatures.list
+}
+
+signature.dot.list.all <- list()
+signature.dot.list.all[["all"]] <- NULL
+for (i in 1:length(signature.dot.list)){
+  signature.dot.list.all[["all"]] <- bind_rows( signature.dot.list.all[["all"]], signature.dot.list[[i]])
+}
+
+signature.dot.list.all[["all"]] <- unique(signature.dot.list.all[["all"]])
+
+plt.expression.all.dotplots <- list()
+if (show.gene.exp){
+  
+  for (i in 1:length(signature.dot.list.all)){
+    
+    cur.signature.list.name <- names(signature.dot.list.all)[i]
+    plt.expression.dotplot <- list()
+    signature.df <- signature.dot.list.all[[i]]
+    u.signatures <- as.vector(unique(signature.df$signature))
+    for (j in 1:length(u.signatures)){
+      
+      cur.signature.df <- signature.df %>% dplyr::filter(signature == u.signatures[j])
+      cur.signature.genes <- as.vector(cur.signature.df$genes)
+      
+      n.genes <- length(cur.signature.genes)
+      
+      if (n.genes < 11) xlab.size <- 15
+      if (n.genes > 10) xlab.size <- 12
+      if (n.genes > 40) xlab.size <- 10
+      if (n.genes > 50) xlab.size <- 9
+      if (n.genes > 60) xlab.size <- 8
+      if (n.genes > 70) xlab.size <- 7
+      if (n.genes > 80) xlab.size <- 6
+      
+      plt.expression.dotplot[[u.signatures[j]]] <-  DotPlot(so.query, features = cur.signature.genes, dot.scale = 8,
+                                                            cols="RdBu") + 
+        RotatedAxis() + 
+        ylab("Clusters") + 
+        labs(title = u.signatures[j], subtitle = paste0(length(cur.signature.genes), " Genes")) +
+        theme(axis.text.x=element_text(size=xlab.size, angle = 75))
+      
+      if ((print.inline) & (j < 21)) 
+        print( plt.expression.dotplot[[u.signatures[j]]])
+    }
+    
+    plt.expression.all.dotplots[[cur.signature.list.name]] <- plt.expression.dotplot
+  }
+  
+  
+}
+
+```
+
+
+```{r compute percentiles}
+
+# use only variable features (other wise gene matrix too large for html file)
+var.features <- so.query@assays[[DefaultAssay(so.query)]]@var.features
+
+if (length(var.features) == 0) {
+  so.query <- FindVariableFeatures(so.query)
+  var.features <- so.query@assays[[DefaultAssay(so.query)]]@var.features
+}
+var.feature.representation <- checkGeneRep(gNames.list, var.features)
+
+# potential gene name manipulation here
+df.exp.scale.v2 <- as.data.frame(signif(df.exp.scale, 3))
+rownames(df.exp.scale.v2) <- make.names(rownames(exp.mat.scale.processed), unique = T)
+
+# get available meta-features
+try({
+  available.meta.features <- so.query@assays[["RNA"]]@meta.features 
+}, silent = T)
+if (!exists("available.meta.features")) available.meta.features <- NULL
+
+
+if (var.feature.representation == "ensembl"){
+  if (all(colnames(available.meta.features) %in% c("ENSEMBL", "SYMBOL"))){
+    av.ens <- as.character(available.meta.features$ENSEMBL)
+    av.sym <- as.character(available.meta.features$SYMBOL)
+    var.features.ens <- var.features
+    var.features.sym <-  av.sym[av.ens %in% var.features.ens]
+  } else {
+    var.features.sym <- as.vector(gNames.list)[(as.vector(names(gNames.list))) %in% (var.features.ens)]
+  }
+} else if ((var.feature.representation == "symbol")) {
+  var.features.sym <- var.features
+}
+
+# filter data to include variable features only
+match.ind <- rownames(exp.mat.scale.processed) %in% var.features.sym
+df.exp.scale.v3 <- df.exp.scale.v2[match.ind ,]
+rownames(df.exp.scale.v3) <- rownames(df.exp.scale.v2)[match.ind]
+
+# get mean and sd of all expression values
+df.exp.scale.v3.long <- pivot_longer(df.exp.scale.v3, colnames(df.exp.scale.v3))
+mean.val <- mean(df.exp.scale.v3.long$value, na.rm = T)
+std.val <- sd(df.exp.scale.v3.long$value, na.rm = T)
+
+# standardize values
+df.exp.scale.v4 <- df.exp.scale.v3 %>%
+  mutate_each(funs((.-mean.val)/std.val))
+df.exp.scale.v4 <- signif(df.exp.scale.v4, 3) 
+rownames(df.exp.scale.v4) <- rownames(df.exp.scale.v3) 
+
+# verify standardization
+df.exp.scale.v4.long <- pivot_longer(df.exp.scale.v4, colnames(df.exp.scale.v4))
+mean.val <- mean(df.exp.scale.v4.long$value, na.rm = T)
+std.val <- sd(df.exp.scale.v4.long$value, na.rm = T)
+
+
+
+mat.exp.scale.v4 <- as.matrix(df.exp.scale.v4)
+cur.cluster.id <- colnames(mat.exp.scale.v4)
+
+# cluster colors
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+cols <- sample(col_vector, length(cur.cluster.id))
+
+# heatmap colors
+hmcol <- colorRampPalette(brewer.pal(9, "RdBu"))(100)
+
+scale.min = -2
+scale.max = 2 
+
+if (print.inline){
+  gplots::heatmap.2( mat.exp.scale.v4, labCol= colnames(mat.exp.scale.v4),
+                     trace="none", 
+                     col= rev(hmcol),
+                     ColSideColors= cols, 
+                     breaks = c(min(mat.exp.scale.v4), 
+                                seq(scale.min, scale.max, by = ((scale.max-scale.min)/98)), max(mat.exp.scale.v4)),
+                     distfun = function(x) as.dist(1-cor(t(x))),
+                     hclustfun = function(x) hclust(x, method="average"),
+                     main = "Gene Exp Matrix",
+                     labRow = F,
+                     xlab = "Cluster ID")
+  
+}
+
+
+```
+
+
+cluster UMAP
+===================================== 
+
+```{r plt.umap_by_c}
+print(plt.umap_by_cluster)
+```
+
+
+Barcodes
+===================================== 
+
+Row {data-height=600}
+-------------------------------------
+
+### Barcode Identities
+```{r plt.umap_by_barcode}
+print(plt.umap_by_barcode)
+```
+
+Row {.tabset}
+-------------------------------------
+
+### Cluster Composition (Barcodes)
+```{r plt.cluster_composition_barcodes, fig.width=13, fig.height=4}
+print(plt.cluster_composition_barcodes)
+```
+
+### Cluster Composition (Table)
+```{r df.all_barcodes_wide}
+
+datatable(df.all_barcodes_wide, filter="top", extensions = 'Buttons',
+          options = list(pageLength = 50, 
+                         autoWidth = TRUE,
+                         dom = 'Bfrtip',
+                         buttons = c('copy', 'csv', 'pdf')))
+
+
+```
+
+
+Score Distributions
+===================================== 
+
+Prior to thresholding, scores were preprocessed using 1) variance-stabilizing transform and 2) detrending 
+
+Row {.tabset}
+-------------------------------------
+
+### Scores Distributions
+```{r Score Distributions, fig.width=12, fig.height=6, warning = F, message=F}
+
+print(plt.score.thresholds)
+
+```
+
+### Variance-Stabilizing Transform
+```{r Score Distributions v2, fig.width=12, fig.height=6, warning = F, message=F}
+
+print(plt.score.thresholds.resids)
+
+```
+
+
+### Score Correlations
+```{r Gene-Set Size Relation, fig.width=8, fig.height=7, warning = F, message=F}
+
+print(plt.rank.cor)
+
+```
+
+
+
+
+Annotation Scores
+===================================== 
+
+EXP: Gene set (average) expression, GSVA: Gene set variation analysis, PER: Expressing Fraction (average), MOD: Modular score (Tirosh et 2016), LOGFC: log fold-change, PD: difference between percentage of expression cells,  COMPOSITE: Average of component scores
+
+Row {.tabset}
+-------------------------------------
+
+### Scores (significant)
+
+```{r lenient filter tab,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+# pred.results.scale.final.v2
+
+datatable(vst.merge.lenient, 
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip', 
+                         buttons = c('copy', 'csv', 'pdf')))
+
+```
+
+### Scores (no filter)
+
+```{r no filter tab,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+datatable(vst.merge.final, 
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip', 
+                         buttons = c('copy', 'csv', 'pdf')))
+
+```
+
+Word Clouds (Cell)
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r Clouds}
+
+u.cl <- unique(as.numeric(as.character((cluster.membership))))
+u.cl <- u.cl[order(u.cl)]
+u.cl <- paste("c", u.cl, sep = "")
+
+out_word <- lapply(seq_along(u.cl), function(i) {
+  
+  table.name <- u.cl[i]
+  
+  s4 <-   paste("wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$cell, 
+                           freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$composite)*50), min.freq = 0,
+                           max.words=30, random.order=FALSE, rot.per=0, scale = c(1.5, .2),
+                           colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$color, ordered.colors = T)", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("detailed_tab", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s",s4)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+# vst.merge.subset$gen
+
+```
+
+`r paste(knitr::knit(text = paste(out_word, collapse = '\n')))`
+
+
+Word Clouds (Tissue)
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r Clouds tissue}
+
+u.cl <- unique(as.numeric(as.character((cluster.membership))))
+u.cl <- u.cl[order(u.cl)]
+u.cl <- paste("c", u.cl, sep = "")
+
+out_word <- lapply(seq_along(u.cl), function(i) {
+  
+  table.name <- u.cl[i]
+  
+  s4 <-   paste("wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$gen, 
+                           freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$composite)*50), min.freq = 0,
+                           max.words=30, random.order=FALSE, rot.per=0, scale = c(1.5, .2),
+                           colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$color, ordered.colors = T)", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("detailed_tab v2", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s",s4)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+# vst.merge.subset$gen
+
+```
+
+`r paste(knitr::knit(text = paste(out_word, collapse = '\n')))`
+
+
+
+
+Differential Module Scores
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Differential Scores 1
+
+Top annotation for each cluster is shown.
+
+```{r plt.deg.mod.1}
+
+print(plt.deg.mod.1)
+```
+
+### Differential Scores 2
+
+Top N annotations are shown. 
+
+```{r plt.deg.mod.2}
+
+print(plt.deg.mod.2)
+```
+
+### DEG Table
+
+```{r deg.mod.final}
+
+datatable(deg.mod.final,
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip',
+                         buttons = c('copy', 'csv', 'pdf')))
+
+```
+
+Differential Genes
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Fraction of differential genes in each geneset
+
+```{r, fig.width = 10, fig.height=8}
+
+  pheatmap::pheatmap(df.fct.deg.hm, 
+                     main = "Fraction of DEGs present in Genesets\n x: cluster; y: annotation; z: DEG fraction",
+                     color = viridis::inferno(10))
+  
+```
+
+### DEG Table
+
+```{r, fig.width = 10, fig.height=8}
+
+
+deg.gene.sub[ ,c("p_val", "avg_logFC", "p_val_adj")] <- signif(deg.gene.sub[ ,c("p_val", "avg_logFC", "p_val_adj")], 3)
+deg.gene.sub <- deg.gene.sub[ ,c("gene", "cluster", "avg_logFC", "pct.1", "pct.2", "pct.dif", "p_val", "p_val_adj")]
+deg.gene.sub$cluster <- paste0("c", deg.gene.sub$cluster )
+datatable(deg.gene.sub,
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip',
+                         buttons = c('copy', 'csv', 'pdf')))
+
+
+  
+```
+
+
+
+
+
+
+Gene Expression 
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Heatmap
+
+```{r exp mat, warning = F, message = F}
+
+try({
+  # mat.exp.scale.v4[is.na(mat.exp.scale.v4)] <- 0
+  gplots::heatmap.2( mat.exp.scale.v4, labCol= colnames(mat.exp.scale.v4),
+                     trace="none", 
+                     col= rev(hmcol),
+                     ColSideColors= cols, 
+                     breaks = seq(-3, 3, by = ((6)/100)),
+                     distfun = function(x) as.dist(1-cor(t(x))),
+                     hclustfun = function(x) hclust(x, method="complete"),
+                     main = "Gene Exp Matrix",
+                     labRow = F,
+                     xlab = "Cluster ID")
+
+}, silent = T)
+
+```
+
+### Table
+
+Cluster-specific scaled gene expression
+
+```{r exp mat table, warning = F, message = F}
+
+datatable(mat.exp.scale.v4, 
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip', 
+                         buttons = c('copy', 'csv', 'pdf')))
+
+```
+
+
+```{r ph4 expression dotplots, include = FALSE, message=FALSE, warning=FALSE}
+
+if (show.gene.exp){
+  
+  out.sig <- tryCatch({
+    
+    
+    out.sig <- lapply(seq_along(plt.expression.all.dotplots), function(i) {
+      
+      
+      a1 <- knitr::knit_expand(text = sprintf("\nExpr | %s", paste(names(plt.expression.all.dotplots)[i])))
+      a2 <- knitr::knit_expand(text = "\n=====================================")
+      a3 <- knitr::knit_expand(text = "\nRow {.tabset}")
+      a4 <- knitr::knit_expand(text = "\n-------------------------------------")
+      
+      out2 <- lapply(seq_along(plt.expression.all.dotplots[[i]]), function(j) {
+        
+        s1 <- paste("plt.expression.all.dotplots[[", i, "]][[",j ,"]]", sep = "")
+        
+        b1 <- knitr::knit_expand(text = sprintf("\n### %s\n", names(plt.expression.all.dotplots[[i]])[j])) # tab header
+        b2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=10, fig.height=10, message=FALSE, warning=FALSE}", paste("expression.dot", i, j, sep = ""))) 
+        b3 <- knitr::knit_expand(text = sprintf("\n%s",s1)) 
+        b4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+        
+        out2 <- paste(b1, b2, b3, b4, collapse = '\n')
+        return(out2) # collapse together all lines with newline separator
+        
+      })
+      
+      a5 <- paste(knitr::knit(text = paste(out2, collapse = '\n')))
+      
+      out.sig <- paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+      return(out.sig)
+      
+    })
+    
+  }, error = function(e) {
+    out.sig <- NULL
+    return(out.sig)
+  })
+  
+  
+} else {
+  out.sig <- NULL
+}
+
+```
+
+`r paste(knitr::knit(text = paste(out.sig, collapse = '\n')))`
+
+Gene Sets
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Summary
+```{r}
+
+datatable(df.gs.statistics, 
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip', 
+                         buttons = c('copy', 'csv', 'pdf')))
+```
+
+```{r res4, echo = FALSE, eval = TRUE, message=TRUE, warning=FALSE}
+out <- flex.multiTabTables(gs.list, "gs.list")
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+
+```{r save analysis log and Rdata results}
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log <- addLogEntry("Run Time (s)", (elapsed.time), df.log, "elapsed.time")
+
+df.log_Module_5 <- df.log
+
+
+```
+
+
+
+
+```{r ph10,  echo = FALSE, eval = TRUE}
+
+out1 <- lapply(seq_along(module.logs), function(i) {
+  
+  module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
+  
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (Module %s)", paste(module.n)))
+  a2 <- knitr::knit_expand(text = "\n=====================================")
+  a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
+  a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
+  a5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+Log (Module 5)
+===================================== 
+
+```{r table.log_current}
+
+knitr::kable(df.log_Module_5)
+
+```
+
+

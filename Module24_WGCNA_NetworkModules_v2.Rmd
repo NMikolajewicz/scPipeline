@@ -1,0 +1,2565 @@
+---
+title: "Module24_WGCNA_NetworkModules"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+---
+
+```{r load libraries, include=FALSE}
+
+# clear global enviroment                          
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+# load packages
+
+library(doParallel)
+library(scMiko)
+library(WGCNA)
+library(topGO)
+library(ape)
+library(RCy3)
+library(fastICA)
+library(fdrtool)
+library(e1071) 
+modulePackages(module.number = 9)
+
+```
+
+
+
+```{r subset lists}
+
+subset.list <- list(
+  no.subset=data.frame(field = NA,
+                       subgroups = NA),
+  renca.tumor.4000ds.T12=data.frame(field = "seurat_clusters",
+                                    subgroups = c(0,2,3,5,6,7,9,15)),                # Renca Tumor
+  cadiac.p6=data.frame(field = "seurat_clusters",
+                       subgroups = c(0, 3, 4, 5, 9)),                                # cardiac tissue p6
+  cardiac.p10=data.frame(field = "seurat_clusters",
+                         subgroups = c(0,6,8,10,2,3)),                               # cardiac tissue p10
+  p4.gbm.scaled.tumor=data.frame(field = "seurat_clusters",
+                                 subgroups = c(0, 15, 4, 36, 10, 19, 29, 33, 32)),   # cardiac tissue p10
+  p4.gbm.scaled.c10 = data.frame(field = "seurat_clusters",
+                                 subgroups = c(10)),
+  invivo.screen.NSG=data.frame(field = "Condition",
+                               subgroups = c("NSG")),   # cardiac tissue p10
+  invivo.screen.BALB=data.frame(field = "Condition",
+                                subgroups = c("BALB")),   # cardiac tissue p10
+  invivo.EMT6.sc = data.frame(field = "seurat_clusters",
+                              subgroups = c(1,2,3))
+  
+)
+
+
+```
+
+
+```{r GENERAL - parameter specification}
+
+cluster.resolution <- 1
+# cluster.resolution <- 0.4
+
+which.subset <- "no.subset"
+subset.df <- subset.list[[which.subset]] # NA specified as "no.subset"
+
+# query.file <- "Module2_Renca_cell_nuc_sci_T12_4000ds_Celsius_integrated_240220.Rdata"
+# query.file <- "Module1_invivo_EMT6_kumar2018_080420.Rdata"
+# query.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata" # best power = 3
+# query.file <- "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata"
+# query.file <- "Module1_m27_p7_mesoderm_070420.Rdata"
+query.file <- "Module1_M16_M27_UHN_070620.Rdata"
+
+dir.preprocessed <- "Preprocessed Datasets/"
+
+
+downsample.factor <-1 # 1 if unspecified
+
+which.species <- "Hs"
+
+
+# flag to use topological overlap for clustering
+use.TOM <- T
+
+# enrichment thresholds
+p.threshold = 0.01 # GO enrichment threshold (p.value)
+padj.threshold = 0.2 # GO enrichment threshold (p.adj)
+
+# variable gene only matrix (T recommended)
+use.var <- T
+
+# network parameters
+min.module.size <- 10 # for WGCNA only
+
+# specify which genes to include (additional to variable). Set to NA if none
+use.additional.genes <- NA
+
+print.inline <- F
+
+```
+
+
+
+```{r GENERAL - nalysis log}
+
+df.log <- initiateLog("24, WCGNA Network Analysis")
+
+# Query File
+df.log <- addLogEntry("Query File", query.file, df.log, "query.file")
+# Directory
+df.log <- addLogEntry("Directory", dir.preprocessed, df.log, "dir.preprocessed")
+# Downsample factor
+df.log <- addLogEntry("Downsample factor", downsample.factor, df.log, "downsample.factor")
+# use.TOM
+df.log <- addLogEntry("Topological overlap matrix flag", use.TOM, df.log, "use.TOM")
+# which.species
+df.log <- addLogEntry("Species", which.species, df.log, "which.species")
+# Cluster resolution
+df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
+# use.var
+df.log <- addLogEntry("Use variable genes only", use.var, df.log, "use.var")
+# List of additional genes to include
+df.log <- addLogEntry("Additional genes", use.additional.genes, df.log, "use.additional.genes")
+# print.inline
+df.log <- addLogEntry("Print inline", print.inline, df.log, "print.inline")
+# which data subset
+df.log <- addLogEntry("Data subset ID", which.subset, df.log, "which.subset")
+# data subset
+df.log <- addLogEntry("Data subset field", subset.list$field, df.log, "subset.list$field")
+# data subset
+df.log <- addLogEntry("Data subset members", subset.list$subgroups, df.log, "subset.list$subgroups")
+# GO enrichment threshold (p value)
+df.log <- addLogEntry("GO enrichment threshold (p value)", p.threshold, df.log, "p.threshold")
+# GO enrichment threshold (p.adj value)
+df.log <- addLogEntry("GO enrichment threshold (p.adj value)", padj.threshold, df.log, "padj.threshold")
+
+
+# get prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+```{r GENERAL - import seurat object}
+
+# import and preprocess data
+load(getLoadPath(query.file, dir.preprocessed))
+
+if (exists("so.query")){
+  so.query <- prepSeurat(so.query)
+} else if (exists("so")){
+  so.query <- prepSeurat(so)
+  rm(so)
+}
+
+
+```
+
+```{r GENERAL - get clusters and assay}
+
+# get current assay
+current.assay <- DefaultAssay(so.query)
+
+# get cluster
+so.query <- setResolution(so.query, cluster.resolution)
+
+
+```
+
+
+```{r GENERAL - seurat data subsetting }
+
+# subset seurat object
+so.query <- subsetSeurat(so.query, subset.df)
+
+```
+
+
+```{r GENERAL - prior log history}
+# get prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+
+```{r GENERAL - prep seurat  gene list}
+gNames.list <- prepGeneList(so.query, objects())
+```
+
+
+
+```{r GENERAL - convert to symbol}
+
+# convert ENSEBLE to GENE names in Seurat object
+gene.rep <-  checkGeneRep (gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+
+if (gene.rep == "ensembl"){
+  so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list)
+  gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+}
+
+```
+
+
+```{r GENERAL - get clusters and set assay}
+
+if (DefaultAssay(so.query) == "integrated") DefaultAssay(so.query) <- "SCT"
+
+current.assay =  DefaultAssay(so.query)
+
+```
+
+
+
+```{r GENERAL - downsample Seurat, warning = FALSE}
+
+if (exists("downsample.factor")) so.query <- downsampleSeurat(so.query, downsample.factor)
+
+```
+
+
+
+
+```{r GENERAL - get annotation pathways}
+
+# my.symbol <- as.vector(rownames(so.query.3@assays[["RNA"]]))
+my.symbol <- rownames(so.query)
+my.entrez <- sym2entrez(my.symbol, my.species = which.species )
+my.entrez <- my.entrez[complete.cases(my.entrez), ]
+
+# # get gene lists for pathway annotation
+
+which.pathway <- "Bader" # options: GO, Bader
+
+if (which.pathway == "GO"){
+  pathways <- getAnnotationPathways(query.genes = my.entrez$ENTREZID, 
+                                    db = c("GO"), ontology = "BP", species = which.species)
+  
+} else if (which.pathway == "Bader"){
+  pathways <- getAnnotationPathways(query.genes = my.entrez$ENTREZID, 
+                                    db = c("Bader"), species = which.species)
+  
+}
+
+
+```
+
+```{r}
+e.mat <- getExpressionMatrix(so.query, which.data = "scale", which.assay = "SCT")
+
+ef.mat <- e.mat[tolower(rownames(e.mat)) %in% tolower(c("FZD2", "FZD7")), ]
+
+df.fz <- data.frame(t(ef.mat))
+df.fz$cell <- rownames(df.fz)
+df.fz$cluster <- so.query@meta.data[["seurat_clusters"]]
+
+
+df.fz$exp.detected <- "none"
+df.fz$exp.detected[(df.fz$FZD7 > 0) & (df.fz$FZD2 > 0)] <- "FZD2 + FZD7"
+df.fz$exp.detected[(df.fz$FZD7 > 0) & (df.fz$FZD2 == 0)] <- "FZD7"
+df.fz$exp.detected[(df.fz$FZD7 == 0) & (df.fz$FZD2 > 0)] <- "FZD7"
+
+
+df.fz.table <- data.frame(table(df.fz$exp.detected))
+
+df.fz.subgroup <- df.fz %>%
+  group_by(cluster, exp.detected) %>%
+  summarize(n = length(exp.detected))
+
+
+plt.fzd <- df.fz.subgroup %>%
+  ggplot(aes(x = cluster, y = n, fill = exp.detected)) + 
+  geom_bar(stat = "identity", position="fill") + 
+  labs(title = "FZD2 and FZD7 Expression",
+       subtitle = "Expressing Fraction") + 
+  scale_fill_viridis_d("FZD Expression", begin = 0.2, end = 1, option = "E") +
+  theme_miko(legend = T) + 
+  ylab("Relative Expression") + 
+  xlab("Cluster ID")
+
+
+
+
+```
+
+
+```{r WGCNA - prep expression matrix, message = F, warning=F}
+
+# WGCNA tutorials:
+# https://ucdavis-bioinformatics-training.github.io/2017_2018-single-cell-RNA-sequencing-Workshop-UCD_UCB_UCSF/day3/scRNA_Workshop-PART6.html
+# https://hms-dbmi.github.io/scw/WGCNA.html 
+# https://www.bioconductor.org/packages/release/bioc/vignettes/CVE/inst/doc/WGCNA_from_TCGA_RNAseq.html 
+
+# entire matrix
+exp.mat.complete <- getExpressionMatrix(so.query, which.data = "scale")
+
+if ("similarity.scale" %in% names(so.query@misc)){
+  s.mat <- so.query@misc[["similarity.scale"]][["similarity.matrix"]]
+  s.mat <- s.mat[!duplicated(rownames(s.mat)), !duplicated(colnames(s.mat))]
+  so.query@misc[["similarity.scale"]][["similarity.matrix"]] <- s.mat
+  query.genes <- rownames(s.mat)
+  query.genes <- unique(query.genes)
+  exp.mat <- exp.mat.complete[rownames(exp.mat.complete) %in% query.genes, ]
+} else {
+  
+  # variable gene only matrix
+  if (use.var){
+    exp.mat <- getExpressionMatrix(so.query, only.variable = use.var, which.data = "scale", use.additional.genes = use.additional.genes)
+  } else {
+    exp.mat <- exp.mat.complete
+  }
+  
+  # max var n
+  if (DefaultAssay(so.query) == "SCT"){
+    max.var.n <- 8000
+    df.var <- so.query@assays[["SCT"]]@meta.features
+    df.var$genes <- rownames(df.var)
+    top.var.df <- df.var %>% top_n(max.var.n, (sct.residual_variance))
+    top.var <- top.var.df$genes
+    
+    exp.mat <- exp.mat[rownames(exp.mat) %in% unique(top.var,use.additional.genes), ]
+  }
+  
+}
+
+# transpose expressio matrix (genes are columns)
+t.exp.mat <- t(exp.mat)
+datExpr <- as.matrix(t.exp.mat)
+
+
+# transform matrix if necessary
+if (min(datExpr) < 0) datExpr <- datExpr + abs(min(datExpr))
+
+
+# omit duplicates
+datExpr <- datExpr[ , !duplicated(colnames(datExpr))]
+SubGeneNames=colnames(datExpr)
+
+# assert unique names
+rownames(datExpr) <- make.names(rownames(datExpr), unique = T)
+
+# capture output used to hide undesired print statement
+print2hide <- capture.output(allowWGCNAThreads())
+
+# specify network parameters
+TOM.type <- "unsigned"
+which.network <- "signed hybrid"
+
+
+# get similary matrices
+if ("similarity.scale" %in% names(so.query@misc)){
+  which.cor <- so.query@misc[["similarity.scale"]][["metric"]]
+  s.mat <- so.query@misc[["similarity.scale"]][["similarity.matrix"]]
+  a.mat <-  sim2adj(s.mat, soft.power = 2, network.type = which.network)
+} else {
+  which.cor <- "rho_p"
+  output.all.preliminary <- runWGCNA(datExpr, cor.metric = which.cor, soft.power = 2,
+                                     use.TOM = F, network.type = which.network, TOM.type = TOM.type)
+  s.mat <- output.all.preliminary$s.mat
+  a.mat <- output.all.preliminary$a.mat
+}
+
+```
+
+```{r WGCNA - optimize softpower, fig.width=15, fig.height=10}
+
+sft <- getSoftThreshold2(s.mat, power =c(seq(1,5, by = 0.5), seq(6,10)), 
+                         network.type = which.network, rescale.adjacency = F,
+                         nBreaks = 10)
+
+if (print.inline){
+  # fig.width=15, fig.height=10
+  cowplot::plot_grid(plotlist = sft$distribution.plot, ncol = 5)
+  print(sft$optimization.plot)
+  
+}
+
+```
+
+
+
+```{r WGCNA - calculate network connectivity}
+
+# get soft power
+
+library(doParallel)
+
+best.power <- sft[["powerEstimate"]]
+if (is.na(best.power)) best.power <- 1
+
+# run WCGNA
+output.all <- runWGCNA(e.mat = datExpr, s.mat = s.mat, cor.metric = which.cor, 
+                       soft.power = best.power, use.TOM = T, 
+                       network.type = which.network, TOMDenom  = "min", TOM.type = TOM.type, rescale.adjacency = F)
+
+# unpack output
+s.mat <- output.all[["s.mat"]] # similar matrix
+a.mat <- output.all[["a.mat"]] # adjacency matrix
+w.mat <- output.all[["w.mat"]] # topological overlap matix
+d.mat <- output.all[["d.mat"]] # disimilarity matix
+
+```
+
+
+
+
+```{r WGCNA - connectivity}
+
+df.con.1 <- getConnectivity(w.mat, gene.names = colnames(a.mat))
+
+wi.1 <- df.con.1$wi
+
+plt.rank.connectivity.1 <- df.con.1 %>%
+  arrange(rank) %>%
+  ggplot(aes(x = rank, y = log10(wi+1))) + 
+  geom_point() +  theme_bw() + 
+  ggtitle("Ranked Connectivity\nSingles") + xlab("Gene Rank") + ylab("Connectivity Measure (wi)") +
+  geom_text_repel(aes(rank, log10(wi+1), label =ifelse(label ,as.character(genes),'')))
+
+if (print.inline) {
+  print(plt.rank.connectivity.1)
+}
+
+```
+
+```{r WGCNA - matrix distributions, fig.width=15, fig.height=4}
+
+
+if (print.inline){
+  # fig.width=15, fig.height=4
+  par(mfrow = c(1,4))
+  hist(datExpr, main = "Expression", xlab = "Expression")
+  hist(s.mat[s.mat != 1], main = "Similarity (correlation)", xlab = "Similarity")
+  hist(a.mat[a.mat != 1], main = "Adjacency", xlab = "Adjacency")
+  hist(w.mat[w.mat != 1], main = "TOM", xlab = "TOM")
+}
+
+
+```
+
+```{r WGCNA - TOM scaling and consensus}
+
+# recompute the distance matrix
+d.mat <- 1-w.mat
+
+```
+
+
+
+```{r WGCNA - cluster network,warning = F, echo= F}
+
+library(flashClust)
+
+# get dendrograms
+geneTree.wgcna <- dist2hclust(as.matrix(d.mat))
+
+# determine number of modules based on refrence dataset
+print2hide <- capture.output(mColorh <- optimalDS(tree = geneTree.wgcna, d.mat = d.mat, 
+                                                  genes  = rownames(a.mat), minClusterSize  = min.module.size))
+
+# select modules based off best clustering above
+which.deepcut <- "ds.4"
+modules <- mColorh[ ,which.deepcut]
+
+#assign module colours
+module.colours <- labels2colors(modules)
+
+#plot the dendrogram and corresponding colour bars underneath
+if (print.inline){
+  plotDendroAndColors(geneTree.wgcna, mColorh[,1:5], paste("dpSplt =", 0:4), main = "Singles", dendroLabels = F)
+}
+
+modules.wgcna <- modules
+df.mod <- data.frame(genes =  rownames(a.mat), modules = modules.wgcna)
+
+```
+
+
+```{r WGCNA - TOM plot}
+
+do.TOM.plot <- F
+if (print.inline){
+  cut.height <- 0.75
+  d.mat.scale <- d.mat
+  d.mat.scale[d.mat.scale<cut.height] <- cut.height
+  d.mat.scale <- (1/cut.height)*(d.mat.scale - cut.height)
+  TOMplot(dissim = d.mat.scale, dendro = geneTree.wgcna)
+  rm(d.mat.scale)
+  
+}
+
+```
+
+```{r WGCNA - calculate eigengenes}
+
+#calculate eigengenes
+PC.wgcna <- moduleEigengenes(datExpr, colors = modules.wgcna, excludeGrey = F)
+ME.wgcna <- PC.wgcna$eigengenes
+
+
+```
+
+
+```{r WGCNA helper function}
+addMembership <- function(df.merge, gmm, cur.mod, kme.name){
+  
+  attempt.success <- F
+  
+  
+  if (cur.mod %in% colnames(gmm)){
+    try({
+      df.kme <- data.frame(genes = rownames(gmm), kME = gmm[ ,cur.mod])
+      colnames(df.kme) <- c("genes", kme.name)
+      attempt.success <- T
+      
+    }, silent = T)
+  } else {
+    
+    df.kme <- data.frame(genes = rownames(gmm), kME = rep(NA, nrow(gmm)))
+    colnames(df.kme) <- c("genes", kme.name)
+  }
+  
+  if (is.null(df.merge)){
+    df.merge <- df.kme
+  } else {
+    df.merge <- merge(df.merge, df.kme, by = "genes")
+  }
+  
+  if (!attempt.success) warning("unable to add data")
+  
+  return(df.merge)
+}
+```
+
+
+```{r WGCNA - get robust module memberships, fig.height=4, fig.width=10}
+# 
+# get module membership (kME)
+u.mod <- paste0("kME", unique(as.character(modules.wgcna)))
+
+gmm.f <- signedKME(datExpr, ME.wgcna)
+gmm.f <- gmm.f[ ,colnames(gmm.f) %in% u.mod]
+
+member.list <- list()
+
+df.moduleMap <- data.frame(genes = colnames(datExpr), module = "grey")
+df.moduleMap$module <- as.character(df.moduleMap$module)
+
+for (i in 1:length(u.mod)){
+  
+  cur.mod <- u.mod[i]
+  cur.df <- NULL
+  
+  # assign membership scores to data.frame
+  cur.df <- addMembership(df.merge = cur.df, gmm = gmm.f, cur.mod = cur.mod, kme.name = "kme.f")
+  
+  # get original assignments (discrete)
+  cur.mod.v2 <- gsub("kME", "", cur.mod)
+  
+  df.mod.cur <- df.mod[df.mod$modules %in% cur.mod.v2, ]
+  cur.df$in.mod <- F
+  cur.df$in.mod[cur.df$genes %in% df.mod.cur$genes] <- T
+  
+  # omit missing entries
+  cur.df <- cur.df[complete.cases(cur.df), ]
+  
+  # statistics
+  cur.df.noG <- cur.df %>% select(-c("genes"))
+  cur.df$mean.kme <- apply(cur.df.noG, 1, function(x) mean(x, na.rm = T))
+  cur.df$sd.kme <- apply(cur.df.noG, 1, function(x) sd(x, na.rm = T))
+  cur.df$cv <-cur.df$sd.kme/cur.df$mean.kme
+  cur.df$z <-cur.df$mean.kme/cur.df$sd.kme
+  cur.df$sig.1 <- cur.df$z > 1.96
+  cur.df$sig.2 <- (cur.df$z > 1.96) &  (cur.df$mean.kme > 0.5)
+  cur.df$sig.3 <- (cur.df$z > 1.96) & cur.df$in.mod
+  
+  # correlation coefficients
+  r2.1 <- NA
+  r2.2 <- NA
+  
+  member.list[[cur.mod]] <- cur.df
+  
+  df.moduleMap$module[df.moduleMap$genes %in% cur.df$genes[cur.df$sig.3]] <- cur.mod.v2
+}
+
+# update module membership
+modules.fz.wgcna <- as.character(df.moduleMap$module)
+
+# omit modules that fall short of minimal membership
+omit.which <- names(table(modules.fz.wgcna)[table(modules.fz.wgcna) < min.module.size])
+modules.fz.wgcna[modules.fz.wgcna %in% omit.which] <- "grey"
+
+slim.genes <- as.character(df.moduleMap$genes[df.moduleMap$module != "grey"])
+PC.wgcna <- moduleEigengenes(datExpr, colors = modules.fz.wgcna, excludeGrey = T)
+ME.wgcna <- PC.wgcna$eigengenes
+
+```
+
+
+```{r WGCNA - fuzzy module membership}
+
+
+# TODO: explore weighting schemes
+
+
+# get fuzzy membership for final module assignments
+gmm.fuz <- as.matrix(signedKME(datExpr, ME.wgcna))
+gmm.fuz.perm <- gmm.fuz
+rownames(gmm.fuz.perm) <- NULL
+
+# specify number of permutations
+n.perm <- 100
+
+# start cluster
+cl <- parallel::makeCluster(8)
+doParallel::registerDoParallel(cl)
+
+count.list <- (foreach(i = 1:n.perm, .packages = c("WGCNA"))) %dopar% {
+  dat.rand <- datExpr[sample.int(nrow(datExpr)),sample.int(ncol(datExpr))]
+  gmm.rand<- as.matrix(signedKME(dat.rand, ME.wgcna))
+  rownames(gmm.rand) <- NULL
+  list( count.em = (gmm.fuz.perm - gmm.rand))
+}
+
+parallel::stopCluster(cl)
+
+# specify count matrix (to keep track of sig permutations)
+count.em <- gmm.fuz.perm
+count.em[ ,]<- 0
+count.em.twice <- array(rep(NA, nrow(gmm.fuz)*ncol(gmm.fuz)*n.perm), dim=c(nrow(gmm.fuz), ncol(gmm.fuz), n.perm))
+
+# unpack results
+for (i in 1:n.perm){
+  count.em <- count.em + count.list[[i]][["count.em"]]
+  count.em.twice[ , ,i] <-count.list[[i]][["count.em"]]
+}
+
+
+rownames(count.em) <- rownames(gmm.fuz)
+p.em <- count.em/n.perm
+
+# aggregate data and compute significance
+count.mean <- apply(count.em.twice, c(1,2), mean)
+count.sd <- apply(count.em.twice, c(1,2), sd)
+count.z <- count.mean/count.sd
+rownames(count.z) <- rownames(gmm.fuz)
+colnames(count.z) <- colnames(gmm.fuz)
+count.p <- 2*pnorm(-abs(count.z))
+
+count.pAdj <- count.p
+for (i in 1:ncol(count.p)){
+  count.pAdj[,i] <- p.adjust(count.p[,i], method = "BH", nrow(count.p))
+}
+count.slogP <- -log10(count.pAdj + 1e-20)
+
+# initiate result containers
+df.perm.list <- list()
+df.member.tally <- NULL
+df.fuzzy.member <- NULL
+plt.perm.volc.list <- list()
+module.wgcna.list <- list()
+
+# for each module...
+for (i in 1:ncol(p.em)){
+  
+  # get current module name
+  cur.module <- colnames(p.em)[i]
+  
+  # consolidate data
+  df.perm <- data.frame(genes = rownames(count.slogP),
+                        rank = rank(count.slogP[, i]),
+                        logp = count.slogP[, i],
+                        kme = gmm.fuz[, i],
+                        z = count.z[, i])
+  
+  # flag significant hits
+  p.threshold <- 0.001
+  df.perm$sig.all <- F
+  df.perm$sig.all[df.perm$logp > -log10(p.threshold)] <- T
+  df.perm$sig.in <- F
+  df.perm$sig.in[df.perm$kme > 0 & df.perm$logp > -log10(p.threshold)] <- T
+  df.perm$sig.out <- F
+  df.perm$sig.out[df.perm$kme < 0 & df.perm$logp > -log10(p.threshold)] <- T
+  
+  # label top and bottom members
+  top.members  <- df.perm %>% dplyr::filter(sig.all == T, kme > 0 ) %>% dplyr::top_n(20, kme)
+  bottom.members <- df.perm %>% dplyr::filter(sig.all == T, kme < 0 ) %>% dplyr::top_n(20, -kme)
+  df.perm$lab <- F
+  df.perm$lab[df.perm$genes %in% bind_rows(top.members, bottom.members)$genes] <- T
+  
+  n.sig.up <- sum(df.perm$sig.in)
+  n.sig.down <- sum(df.perm$sig.out)
+  n.no.sig <- nrow(df.perm) - n.sig.up - n.sig.down
+  # generate volcano plot
+  plt.perm <-  df.perm %>%
+    ggplot(aes(x = kme, y = abs(z), size = logp, color = sig.all)) + 
+    geom_point( alpha = 0.5) + 
+    geom_vline(xintercept =0, linetype ="dashed")+
+    ggrepel::geom_text_repel(aes(kme, abs(z), label =ifelse(lab ,as.character(genes),'')), size = 2.5, color = "black") + 
+    theme_bw() + 
+    xlab("Module Membership (kme)") + 
+    ylab("|z|") + 
+    labs(color = "significant", 
+         title = colnames(p.em)[i], 
+         subtitle = paste0("Gene Counts: ", 
+                           n.sig.up, " in-module; ", 
+                           n.sig.down, " out-module; ", 
+                           n.no.sig, " independent" )) + 
+    theme_miko(legend = T)
+  
+  plt.perm.volc.list[[cur.module]] <- plt.perm
+  
+  if (print.inline){
+    print(plt.perm)  
+  }
+  
+  # store results
+  df.perm.list[[cur.module]] <- df.perm
+  
+  # consolidate fuzzy memberships
+  df.fuz.mem.cur <- data.frame(genes = df.perm$genes, holder = rep("independent", nrow(df.perm)))
+  df.fuz.mem.cur$holder <- as.character(df.fuz.mem.cur$holder)
+  colnames(df.fuz.mem.cur) <- c("genes", cur.module)
+  df.fuz.mem.cur[ df.perm$sig.in,cur.module] <- "in"
+  df.fuz.mem.cur[ df.perm$sig.out,cur.module] <- "out"
+  
+  # tally members
+  df.tally.cur <- as.data.frame(table(df.fuz.mem.cur[ ,cur.module]))
+  colnames(df.tally.cur) <- c("membership", cur.module)
+  
+  # df.tally.cur
+  
+  membership.entries <- c("in", "independent", "out")
+  if (!all(membership.entries %in% df.tally.cur$membership )){
+    which.missing <- membership.entries[!(membership.entries %in% df.tally.cur$membership)]
+    
+    df.tally.temp <- data.frame(membership = which.missing, n = 0)
+    colnames(df.tally.temp) <- c("membership", cur.module)
+    
+    df.tally.cur <- bind_rows(df.tally.cur, df.tally.temp)
+    
+    # stop(i)
+  }
+  if (!is.null(df.member.tally)){
+    df.member.tally <- merge(df.member.tally, df.tally.cur, by = "membership")
+  } else {
+    df.member.tally <-df.tally.cur
+  }
+  
+  # merge membership
+  if (!is.null(df.fuzzy.member)){
+    df.fuzzy.member <- merge(df.fuzzy.member, df.fuz.mem.cur, by = "genes")
+  } else {
+    df.fuzzy.member <-df.fuz.mem.cur
+  }
+  
+  
+  module.wgcna.list[[cur.module]] <- df.fuzzy.member$genes[ df.fuzzy.member[ ,cur.module] == "in"]
+  
+  
+}
+
+# summarize tallies
+df.fuzzy.member$independent <- 0
+df.fuzzy.member$mod.in <- 0
+df.fuzzy.member$mod.out <- 0
+df.fuzzy.member$u.member <- NA
+
+# which cols correspond to module memberships
+which.ind <- colnames(df.fuzzy.member) %in% colnames(p.em)
+which.mod <- colnames(df.fuzzy.member)[which.ind]
+
+# tally membership status for each gene
+df.fuzzy.member$independent <- apply(df.fuzzy.member, 1, function(x) sum(x[which.ind] == "independent"))
+df.fuzzy.member$mod.in <- apply(df.fuzzy.member, 1, function(x) sum(x[which.ind] == "in"))
+df.fuzzy.member$mod.out <- apply(df.fuzzy.member, 1, function(x) sum(x[which.ind] == "out"))
+df.fuzzy.member$u.member <- apply(df.fuzzy.member, 1, 
+                                  function(x) if ((sum(x[which.ind] == "in")) == 1) which.mod[which(x[which.ind] == "in")] 
+                                  else if ((sum(x[which.ind] == "in")) > 1) "multi" else NA)
+
+# get data subsets
+df.fuzzy.involved <- df.fuzzy.member[df.fuzzy.member$mod.in > 0, ]
+df.fuzzy.unique <- df.fuzzy.member[df.fuzzy.member$mod.in == 1, ]
+
+# show distribution of module members
+df.member.tally.long <- pivot_longer(df.member.tally, cols = colnames(p.em))
+
+# generate tally plot
+plt.member.tally <- df.member.tally.long %>%
+  ggplot(aes(x = name, y = value, fill = membership)) + 
+  geom_bar(stat = "identity") + 
+  xlab("Modules") + 
+  ylab("Gene Count") + 
+  ggtitle("Module Membership\nSignificant Fuzzy Members") + 
+  theme_bw()
+
+if (print.inline){
+  print(plt.member.tally)
+}
+
+
+gmm.fuz.df <- as.data.frame(gmm.fuz)
+gmm.fuz.long <- pivot_longer(gmm.fuz.df, colnames(gmm.fuz.df))
+colnames(gmm.fuz.long) <- c("module", "kme")
+
+gmm.fuz.long.background <- gmm.fuz.long
+gmm.fuz.long.background <- NULL
+for (i in 1:length(colnames(p.em))){
+  gmm.fuz.temp <- gmm.fuz.long
+  gmm.fuz.temp$module <- colnames(p.em)[i]
+  gmm.fuz.long.background <- bind_rows(gmm.fuz.long.background, gmm.fuz.temp)
+}
+
+plt.fuz.density <- gmm.fuz.long %>%
+  ggplot(aes(kme, fill = module)) + 
+  geom_density(data = gmm.fuz.long.background, aes(kme), fill = "black", alpha = 0.5) + 
+  geom_density(alpha = 0.5) + 
+  facet_wrap(~module) + 
+  theme_classic() + 
+  xlab("Module Membership (kme)") + 
+  ylab("Density") + ggtitle("Distribution of Module Memberships\nFuzzy Membership (kme)")
+
+if (print.inline){
+  plt.fuz.density
+}
+
+
+
+
+
+```
+
+
+
+
+
+```{r WGCNA - enrich fuzzy membership}
+
+
+gmm.fuz.df <- as.data.frame(gmm.fuz)
+# only include genes with unique membership
+
+do.unique <- T
+if (do.unique){
+  gmm.fuz.sub <- gmm.fuz.df[!(rownames(gmm.fuz.df) %in% 
+                                df.fuzzy.member$genes[df.fuzzy.member$u.member == "multi"]), ]
+} else {
+  gmm.fuz.sub <- gmm.fuz.df
+}
+
+
+gse.pathway.list <- list()
+gse.pathway.kme <- NULL
+
+u.modules <- colnames(gmm.fuz.df)
+
+for (i in 1:length(u.modules)){
+  
+  which.mod <- u.modules[i]
+  
+  # get DEGs
+  df.fuz <- data.frame(genes= rownames(gmm.fuz.sub), kme = gmm.fuz.sub[ ,which.mod])
+  
+  # ranked by signed lop p 
+  if (is.null(df.fuz)) next
+  df.fuz <- df.fuz[complete.cases(df.fuz),]
+  
+  # prep gene list (match to EntrezID, sort)
+  gene.list <- df.fuz$kme
+  names(gene.list) <- df.fuz$genes
+  match.ind <- match(names(gene.list), my.entrez$SYMBOL)
+  names(gene.list) <- as.character(my.entrez$ENTREZID[match.ind])
+  gene.list = sort(gene.list, decreasing = TRUE)
+  
+  # clean list
+  df.ent <- data.frame(names = names(gene.list), values = as.vector(gene.list))
+  df.ent <- df.ent[complete.cases(df.ent), ]
+  df.ent <- df.ent[!is.infinite(df.ent$values), ]
+  gene.list.clean <- df.ent$values
+  names(gene.list.clean) <- df.ent$names
+  
+  # pathway gsea enrichment
+  gse.pathway <- fgsea::fgsea(pathways, gene.list.clean, nperm=1000, maxSize=500)
+  
+  if (nrow(gse.pathway) == 0) next
+  
+  gse.pathway$module <- which.mod
+  gse.pathway.kme <- bind_rows(gse.pathway.kme, gse.pathway)
+  
+  
+}
+
+
+gse.pathway.kme[ ,c("ES","NES", "pval", "padj")] <- signif(gse.pathway.kme[ ,c("ES","NES", "pval", "padj")], 3)
+gse.pathway.kme.all <- gse.pathway.kme[ ,c("module", "pathway", "ES","NES", "pval", "padj", "nMoreExtreme", "size")]
+gse.pathway.kme.sig <- gse.pathway.kme.all[(gse.pathway.kme.all$pval < 0.01) & (abs(gse.pathway.kme.all$NES) >= 1), ]
+
+gse.pathway.kme.sub <- gse.pathway.kme[ ,c("module", "pathway", "ES","NES", "pval", "padj", "nMoreExtreme", "size")]
+
+
+# print data table
+if (print.inline){
+  datatable(gse.pathway.kme.sig, 
+            filter = 'top',
+            extensions = 'Buttons',
+            options = list(pageLength = 50,
+                           dom = 'Bfrtip', 
+                           buttons = c('copy', 'csv', 'pdf')))
+}
+
+```
+
+```{r}
+
+# check how much variance is explained by each module eigengene
+df.var.exp <- as.data.frame(t(PC.wgcna[["varExplained"]]))
+df.var.exp$module <- names(PC.wgcna[["eigengenes"]])
+colnames(df.var.exp) <- c("var.exp", "module")
+
+plt.var.exp <- df.var.exp %>%
+  ggplot(aes(x = reorder(module, var.exp), y = var.exp)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + 
+  xlab("Module") + 
+  ylab("Variance Explained by PC1") + 
+  theme_bw() + 
+  ggtitle("Module Eigengenes\nVariance Explained") + 
+  geom_hline(yintercept = 0.2, linetype = "dashed")
+
+if (print.inline){
+  print(plt.var.exp)
+}
+
+```
+
+```{r WGCNA - consolidate WGCNA results}
+
+
+WGCNA.results <- list(
+  module.list = module.wgcna.list,
+  fuzzy.membership = gmm.fuz,
+  gene.tree = geneTree.wgcna,
+  gene.universe = rownames(s.mat)
+)
+
+
+```
+
+
+```{r ica sig genes}
+
+getICAGenes <- function(feature.loading, fdr.cutoff = 0.0001, local.fdr = T, assert.positive.skew = T, only.pos = T){
+  
+  ica.kme <- feature.loading
+  
+  
+  # ica.kme <- so.query@reductions[["ica"]]@feature.loadings
+  
+  if (assert.positive.skew){
+    median.loading <- apply(ica.kme, 2, median)
+    mean.loading <- apply(ica.kme, 2, mean)
+    pos.skew <- mean.loading > median.loading
+    
+    reflection.vector <- pos.skew*1
+    reflection.vector[reflection.vector == 0] <- -1
+    
+    for (i in 1:length(reflection.vector)){
+      ica.kme[,i] <- ica.kme[,i]*reflection.vector[i]
+    } 
+  }
+  
+  # compute FDR
+  if (local.fdr){
+    ica.p <- apply(ica.kme, 2, 
+                   function(x) fdrtool::fdrtool(x, statistic=c("normal"),
+                                                plot=T, color.figure=F, verbose=F, 
+                                                cutoff.method=c("fndr"),
+                                                pct0=0.75)$lfdr )
+    
+  } else {
+    ica.p <- apply(ica.kme, 2, 
+                   function(x) fdrtool::fdrtool(x, statistic=c("normal"),
+                                                plot=T, color.figure=F, verbose=F, 
+                                                cutoff.method=c("fndr"),
+                                                pct0=0.75)$qval  )    
+  }
+  
+  rownames(ica.p) <- rownames(ica.kme)
+  
+  # count number of sig module genes
+  if (only.pos){
+    ica.p[ica.kme < 0] <- fdr.cutoff+1
+  }
+  # n.sig.genes <- apply(ica.p, 2, function(x) sum(x < fdr.cutoff))
+  
+  # get module genes
+  module.genes <- apply(ica.p, 2, function(x) rownames(ica.p)[x < fdr.cutoff])
+  module.size <- unlist(lapply(module.genes, length))
+  ica.module.genes <- module.genes[module.size > 0]
+  
+  return(ica.module.genes)
+}
+
+
+
+```
+
+```{r ICA - get modules and pool similar sets,fig.width=7, fig.height=7, include = FALSE}
+
+
+# get ICA embedding
+cell.emb.ica <- so.query@reductions[["ica"]]@cell.embeddings
+
+# cell to cluster mapping
+cellClusterMap <- data.frame(cell = colnames(so.query), cluster = so.query@meta.data$seurat_clusters)
+
+# cluster-level ICA activity
+u.cluster <- as.numeric(as.character(unique(cellClusterMap$cluster)))
+u.cluster <- u.cluster[order(u.cluster)]
+ica.cluster.activity <- matrix(nrow = length(u.cluster), ncol = dim(cell.emb.ica)[2])
+for (i in 1:(length(u.cluster))){
+  which.cell <- cellClusterMap$cell[cellClusterMap$cluster == u.cluster[i]]
+  for (j in 1:(dim(cell.emb.ica)[2])){
+    ica.cluster.activity[i,j] <- mean(cell.emb.ica[ rownames(cell.emb.ica) %in% which.cell,j])
+  }
+}
+rownames(ica.cluster.activity) <- u.cluster
+colnames(ica.cluster.activity) <- colnames(cell.emb.ica)
+
+if (print.inline){
+  pheatmap::pheatmap(ica.cluster.activity, main = "ICA Pathway Similarities", scale  = "column")
+}
+
+# get ICA cluster activity dendrograms
+dist.ica <- 1- cor(ica.cluster.activity, method = "spearman")
+geneTree.ica <- dist2hclust(dist.ica)
+
+# determine number of modules based on refrence dataset
+print2hide <- capture.output(mColorh.ica <- optimalDS(tree = geneTree.ica, d.mat = dist.ica, 
+                                                      genes  = rownames(dist.ica), minClusterSize  = 1))
+
+# select modules based off best clustering above
+which.deepcut <- "ds.4"
+modules.ica <- mColorh.ica[ ,which.deepcut]
+
+#assign module colours
+module.ica.colours <- labels2colors(modules.ica)
+
+#plot the dendrogram and corresponding colour bars underneath
+if (print.inline){
+  plotDendroAndColors(geneTree.ica, mColorh.ica[,1:5], paste("dpSplt =", 0:4), main = "Singles", dendroLabels = F)
+}
+
+# pool similar modules
+ica.fuz.df <-  data.frame(so.query@reductions[["ica"]]@feature.loadings)
+u.ica.modules <- unique(module.ica.colours)
+
+# get ica genes
+ica.module.genes <- getICAGenes(so.query@reductions[["ica"]]@feature.loadings)
+
+ica.comp.names <- colnames(dist.ica)
+ica.module.merge.genes <- list()
+ica.fuz.merge.df <- matrix(nrow = nrow(ica.fuz.df), ncol = length(u.ica.modules))
+
+
+for (i in 1:length(u.ica.modules)){
+  module.name <- u.ica.modules[i]
+  merge.which <- ica.comp.names[which(module.ica.colours %in% module.name)]
+  
+  all.genes <- unlist(ica.module.genes[merge.which])
+  u.genes <- unique(all.genes)
+  
+  
+  merge.fuz <- ica.fuz.df[, merge.which]
+  merge.fuz$a.mean <- apply(ica.fuz.df[, merge.which], 1, mean, na.rm = T)
+  ica.fuz.merge.df[ ,i] <-  merge.fuz$a.mean
+  
+  ica.module.merge.genes[[module.name]] <- u.genes
+}
+
+ica.fuz.merge.df <- data.frame(ica.fuz.merge.df)
+colnames(ica.fuz.merge.df) <- u.ica.modules
+rownames(ica.fuz.merge.df) <- rownames(ica.fuz.df)
+
+if (print.inline){
+  j.mat.ig <- jaccardSimilarityMatrix(gene.sets = ica.module.merge.genes, assert.unique = T)
+  pheatmap::pheatmap(j.mat.ig, main = "ICA Gene Module Similarities")
+}
+
+
+```
+
+
+
+```{r ICA - get signfiicant genes in each module, include = FALSE}
+
+# pooled feature loading
+ica.kme <- as.matrix(ica.fuz.merge.df)
+ica.module.genes <- getICAGenes(as.matrix(ica.fuz.merge.df))
+
+ica.module.table <- data.frame(table(unlist(ica.module.genes)))
+
+if (print.inline){
+  ica.module.table %>%
+    ggplot(aes(x = Freq)) + 
+    geom_histogram(bins = 10) + 
+    theme_miko() + 
+    labs(title = "ICA Module Membership Distribution", subtitle = "ICA module genes") + 
+    xlab("N Modules/Gene") + 
+    ylab("Frequency")
+}
+
+
+ica.genes.u <- unique(unlist(ica.module.genes))
+
+j.mat <- jaccardSimilarityMatrix(gene.sets = ica.module.genes, assert.unique = T)
+
+
+if (print.inline){
+  
+  ggVennDiagram::ggVennDiagram(ica.module.genes[1:4]) 
+  j.mat <- jaccardSimilarityMatrix(gene.sets = ica.module.genes, assert.unique = T)
+  pheatmap::pheatmap(j.mat, main = "ICA Gene Module Similarities")
+}
+
+
+```
+
+```{r ICA - enrich fuzzy membership}
+
+
+gse.pathway.ica.list <- list()
+gse.pathway.ica <- NULL
+
+u.modules <- colnames(ica.fuz.merge.df)
+warning("Running ICA module GSEA...")
+for (i in 1:length(u.modules)){
+  
+  
+  which.mod <- u.modules[i]
+  
+  # get DEGs
+  df.fuz <- data.frame(genes= rownames(ica.fuz.merge.df), kme = ica.fuz.merge.df[ ,which.mod])
+  
+  # ranked by signed lop p 
+  if (is.null(df.fuz)) next
+  df.fuz <- df.fuz[complete.cases(df.fuz),]
+  
+  # prep gene list (match to EntrezID, sort)
+  gene.list <- df.fuz$kme
+  names(gene.list) <- df.fuz$genes
+  match.ind <- match(names(gene.list), my.entrez$SYMBOL)
+  names(gene.list) <- as.character(my.entrez$ENTREZID[match.ind])
+  gene.list = sort(gene.list, decreasing = TRUE)
+  
+  # clean list
+  df.ent <- data.frame(names = names(gene.list), values = as.vector(gene.list))
+  df.ent <- df.ent[complete.cases(df.ent), ]
+  df.ent <- df.ent[!is.infinite(df.ent$values), ]
+  gene.list.clean <- df.ent$values
+  names(gene.list.clean) <- df.ent$names
+  
+  # pathway gsea enrichment
+  gse.pathway <- fgsea::fgsea(pathways, gene.list.clean, nperm=1000, maxSize=500)
+  
+  if (nrow(gse.pathway) == 0) next
+  
+  gse.pathway$module <- which.mod
+  gse.pathway.ica <- bind_rows(gse.pathway.ica, gse.pathway)
+  
+  
+}
+
+
+gse.pathway.ica[ ,c("ES","NES", "pval", "padj")] <- signif(gse.pathway.ica[ ,c("ES","NES", "pval", "padj")], 3)
+gse.pathway.ica.all <- gse.pathway.ica[ ,c("module", "pathway", "ES","NES", "pval", "padj", "nMoreExtreme", "size")]
+gse.pathway.ica.sig <- gse.pathway.ica.all[(gse.pathway.ica.all$pval < 0.01) & (abs(gse.pathway.ica.all$NES) >= 1), ]
+
+gse.pathway.ica.sub <- gse.pathway.ica[ ,c("module", "pathway", "ES","NES", "pval", "padj", "nMoreExtreme", "size")]
+
+
+# print data table
+if (print.inline){
+  datatable(gse.pathway.ica.sig, 
+            filter = 'top',
+            extensions = 'Buttons',
+            options = list(pageLength = 50,
+                           dom = 'Bfrtip', 
+                           buttons = c('copy', 'csv', 'pdf')))
+}
+
+```
+
+
+```{r consolidate ICA results}
+# ica.module.merge.genes
+ICA.results <- list(
+  module.list = ica.module.genes,
+  fuzzy.membership = ica.fuz.merge.df,
+  gene.universe = rownames(so.query@reductions[["ica"]]@feature.loadings)
+)
+
+
+
+```
+
+
+```{r NMF sig genes}
+
+getNMFGenes <- function(feature.loading, norm.cutoff = 0.5){
+  
+  nmf.kme <- t(feature.loading)
+  nmf.kme <- (apply(nmf.kme, 2, function(x) (x/sum(x))))
+  
+  # get module genes
+  module.genes <-  apply(nmf.kme, 1, function(x) colnames(nmf.kme)[x>norm.cutoff])
+  
+  module.size <- unlist(lapply(module.genes, length))
+  nmf.module.genes <- module.genes[module.size > 0]
+  
+  return(nmf.module.genes)
+}
+
+
+
+```
+
+
+
+```{r NMF - get signfiicant genes in each module, include = FALSE}
+
+
+# pooled feature loading
+nmf.kme <- as.matrix(so.query@misc[["nmf"]][["nmf"]][["W"]])
+colnames(nmf.kme) <- labels2colors(c(1:ncol(nmf.kme)))
+so.query@misc[["nmf"]][["nmf"]][["W"]] <-nmf.kme
+nmf.module.genes <- getNMFGenes((nmf.kme), norm.cutoff = (1/ncol(nmf.kme)) + .25)
+
+nmf.module.table <- data.frame(table(unlist(nmf.module.genes)))
+
+if (print.inline){
+  nmf.module.table %>%
+    ggplot(aes(x = Freq)) + 
+    geom_histogram(bins = 10) + 
+    theme_miko() + 
+    labs(title = "NMF Module Membership Distribution", subtitle = "NMF module genes") + 
+    xlab("N Modules/Gene") + 
+    ylab("Frequency")
+}
+
+
+nmf.genes.u <- unique(unlist(nmf.module.genes))
+
+j.mat.nmf <- jaccardSimilarityMatrix(gene.sets = nmf.module.genes, assert.unique = T)
+
+
+if (print.inline){
+  
+  ggVennDiagram::ggVennDiagram(nmf.module.genes[1:4]) 
+  pheatmap::pheatmap(j.mat.nmf, main = "NMF Gene Module Similarities")
+}
+
+
+```
+
+```{r NMF - enrich fuzzy membership}
+
+
+gse.pathway.nmf.list <- list()
+gse.pathway.nmf <- NULL
+
+nmf.fuz.df <- so.query@misc[["nmf"]][["nmf"]][["W"]]
+# colnames(nmf.fuz.df) <- paste0("NMF_", c(1:ncol(nmf.fuz.df)))
+
+u.modules <- colnames(nmf.fuz.df)
+warning("Running NMF module GSEA...")
+for (i in 1:length(u.modules)){
+  
+  
+  which.mod <- u.modules[i]
+  
+  # get DEGs
+  df.fuz <- data.frame(genes= rownames(nmf.fuz.df), kme = nmf.fuz.df[ ,which.mod])
+  
+  # ranked by signed lop p 
+  if (is.null(df.fuz)) next
+  df.fuz <- df.fuz[complete.cases(df.fuz),]
+  
+  # prep gene list (match to EntrezID, sort)
+  gene.list <- df.fuz$kme
+  names(gene.list) <- df.fuz$genes
+  match.ind <- match(names(gene.list), my.entrez$SYMBOL)
+  names(gene.list) <- as.character(my.entrez$ENTREZID[match.ind])
+  gene.list = sort(gene.list, decreasing = TRUE)
+  
+  # clean list
+  df.ent <- data.frame(names = names(gene.list), values = as.vector(gene.list))
+  df.ent <- df.ent[complete.cases(df.ent), ]
+  df.ent <- df.ent[!is.infinite(df.ent$values), ]
+  gene.list.clean <- df.ent$values
+  names(gene.list.clean) <- df.ent$names
+  
+  # pathway gsea enrichment
+  gse.pathway <- fgsea::fgsea(pathways, gene.list.clean, nperm=1000, maxSize=500)
+  
+  if (nrow(gse.pathway) == 0) next
+  
+  gse.pathway$module <- which.mod
+  gse.pathway.nmf <- bind_rows(gse.pathway.nmf, gse.pathway)
+  
+  
+}
+
+
+gse.pathway.nmf[ ,c("ES","NES", "pval", "padj")] <- signif(gse.pathway.nmf[ ,c("ES","NES", "pval", "padj")], 3)
+gse.pathway.nmf.all <- gse.pathway.nmf[ ,c("module", "pathway", "ES","NES", "pval", "padj", "nMoreExtreme", "size")]
+gse.pathway.nmf.sig <- gse.pathway.nmf.all[(gse.pathway.nmf.all$pval < 0.01) & (abs(gse.pathway.nmf.all$NES) >= 1), ]
+
+gse.pathway.nmf.sub <- gse.pathway.nmf[ ,c("module", "pathway", "ES","NES", "pval", "padj", "nMoreExtreme", "size")]
+
+
+# print data table
+if (print.inline){
+  datatable(gse.pathway.nmf.sig, 
+            filter = 'top',
+            extensions = 'Buttons',
+            options = list(pageLength = 50,
+                           dom = 'Bfrtip', 
+                           buttons = c('copy', 'csv', 'pdf')))
+}
+
+```
+
+```{r consolidate NMF results}
+
+NMF.results <- list(
+  module.list = nmf.module.genes,
+  fuzzy.membership = nmf.fuz.df,
+  gene.universe = rownames(nmf.fuz.df)
+)
+
+```
+
+
+```{r label modules according to methodology}
+
+all.results <- list(
+  ica = ICA.results,
+  wgcna = WGCNA.results,
+  nmf = NMF.results
+)
+
+master.module.list <- list()
+for (i in 1:length(all.results)){
+  method.name <- names(all.results)[i]
+  module.list <- all.results[[method.name]]$module.list
+  
+  names(module.list) <- gsub("kME", "", names(module.list))
+  
+  names(module.list) <- paste0(method.name, ".", names(module.list))
+  
+  all.results[[method.name]]$module.list <- module.list
+  master.module.list <- c(master.module.list, module.list)
+}
+```
+
+
+```{r GENERAL - topGO enrichment}
+
+#get list of significant GO before multiple testing correction
+results.table.master.p <- NULL
+
+#get list of significant GO after multiple testing correction
+results.table.master.bh <- NULL
+
+# enrich each module
+topGO.data.master <- NULL
+last.uni <- "not.specified"
+for (i in 1:length(master.module.list)){
+  
+  module.name <- names(master.module.list)[i]
+  
+  # get gene universe
+  if (grepl("ica.", module.name)){
+    all.genes <- unique(ICA.results$gene.universe)
+    if (last.uni != "ica"){
+      last.uni <- "ica"
+      topGO.data.master <- NULL
+    }
+  } else if (grepl("wgcna.", module.name)){
+    all.genes <- unique(WGCNA.results$gene.universe)
+    if (last.uni != "wgcna"){
+      last.uni <- "wgcna"
+      topGO.data.master <- NULL
+    }
+  } else if (grepl("nmf.", module.name)){
+    all.genes <- unique(NMF.results$gene.universe)
+    if (last.uni != "nmf"){
+      last.uni <- "nmf"
+      topGO.data.master <- NULL
+    }
+  } else {
+    if (last.uni != "misc"){
+      last.uni <- "misc"
+      topGO.data.master <- NULL
+    }
+    all.genes <- unique(rownames(so.query))
+  }
+  
+  if (which.species == "Hs"){
+    
+    enrich.list <- enrichGO.fisher(gene.candidates = toupper(master.module.list[[i]]),
+                                   gene.universe = toupper(all.genes),
+                                   which.species = which.species,
+                                   p.threshold = p.threshold,
+                                   padj.threshold = padj.threshold,
+                                   topGO.object = topGO.data.master)
+    
+  } else if (which.species == "Mm"){
+    
+    enrich.list <- enrichGO.fisher(gene.candidates = master.module.list[[i]],
+                                   gene.universe = all.genes,
+                                   which.species = which.species,
+                                   p.threshold = p.threshold,
+                                   padj.threshold = padj.threshold,
+                                   topGO.object = topGO.data.master)
+    
+  }
+  
+  # get results
+  results.table.p.cur <- enrich.list$unadjusted.results
+  results.table.bh.cur <- enrich.list$adjusted.results
+  
+  # get and reuse topGo object by updating gene list.
+  topGO.data.master <- enrich.list$topGo.object
+  
+  
+  if (nrow(results.table.p.cur) > 0) {
+    results.table.p.cur$module <- names(master.module.list)[i]
+    results.table.master.p <- bind_rows(results.table.master.p, results.table.p.cur)
+  }
+  
+  if (nrow(results.table.bh.cur) > 0) {
+    results.table.bh.cur$module <-  names(master.module.list)[i]
+    results.table.master.bh <- bind_rows(results.table.master.bh, results.table.bh.cur)
+  }
+}
+
+
+```
+
+```{r GENERAL enrichment similarity}
+
+u.modules <- unique(results.table.master.p$module)
+
+
+module.term.list <- list()
+for (i in 1:length(u.modules)){
+  mod.name <- u.modules[i]
+  module.term.list[[mod.name]] <- results.table.master.p$Term[results.table.master.p$module %in% mod.name]
+}
+
+j.mat.term <- jaccardSimilarityMatrix(module.term.list)
+if (print.inline){
+  j.mat.term <- jaccardSimilarityMatrix(module.term.list)
+  pheatmap::pheatmap(j.mat.term, main = "Term Enrichment Similarity")
+}
+
+
+```
+
+
+
+
+```{r meta module }
+
+
+# gNames <- gNames.list
+available_markers <- c()
+
+exp.mat.new <- NULL
+
+all.list <- list()
+for (i in 1:length(master.module.list)){
+  
+  # get meta module name
+  cur.marker <- names(master.module.list)[i]
+  
+  # clean dataset and include only those available in seurat object
+  cur.features <- as.character(master.module.list[[i]])
+  cur.features <- cleanFilterGenes(cur.features, so.query, which.species)
+  
+  if (length(cur.features) == 0) next
+  
+  # append module prefix and get module scores
+  module.name <- cur.marker
+  
+  so.query.try = NA
+  so.query.try <-  try(AddModuleScore(so.query,  
+                                      features = list(cur.features),
+                                      ctrl = 50,
+                                      name = "new.module",
+                                      nbin = 5), silent = T)
+  
+  if (is.na(so.query.try)) next
+  
+  # assign name to modlue score
+  names(so.query.try@meta.data)[names(so.query.try@meta.data) %in% paste("new.module", 1, sep = "")] <- module.name
+  so.query@meta.data[[module.name]] <- so.query.try@meta.data[[module.name]]
+  
+  # concat scores to dataframe
+  cur.module.df <- as.data.frame(so.query@meta.data[[module.name]])
+  colnames(cur.module.df) <- module.name
+  exp.mat.new <- bind_cols(exp.mat.new, cur.module.df)
+  
+  available_markers[i] <- module.name
+  all.list[[module.name]] <- cur.features
+  
+}
+
+# get all scores and cast as matrix
+exp.mat.new.mat.t <- t(as.matrix(exp.mat.new))
+
+# concat scores to seurat objects
+exp.mat.1 <-so.query@assays[[DefaultAssay(so.query)]]@data
+colnames(exp.mat.new.mat.t) <- colnames(exp.mat.1)
+exp.mat.1 <- rbind(exp.mat.1, exp.mat.new.mat.t)
+so.query@assays[[DefaultAssay(so.query)]]@data <- exp.mat.1
+
+exp.mat.2 <-so.query@assays[[DefaultAssay(so.query)]]@scale.data
+colnames(exp.mat.new.mat.t) <- colnames(exp.mat.2)
+exp.mat.2 <- rbind(exp.mat.2, exp.mat.new.mat.t)
+so.query@assays[[DefaultAssay(so.query)]]@scale.data <- exp.mat.2
+markers_of_interest <- available_markers[!is.na(available_markers)]
+
+if (exists("so.query.try")) rm("so.query.try")
+```
+
+```{r heatmap module activity}
+
+# query.modules <- unique(rownames(exp.mat.new.mat.t))
+
+
+df.meta <- so.query@meta.data
+
+ds.cell.n <- 1500
+if (ds.cell.n > nrow(df.meta) ) ds.cell.n <- nrow(df.meta)
+sample.ind <- sample(seq(1,nrow(df.meta)), ds.cell.n)
+df.meta <- df.meta[sample.ind, ]
+df.module <- df.meta[, colnames(df.meta) %in% c(available_markers)]
+
+df.module.labeled <- df.meta[, colnames(df.meta) %in% c(available_markers, "seurat_clusters")]
+df.module.avg <- df.module.labeled %>%
+  group_by(seurat_clusters) %>%
+  summarise_all(funs(mean))
+rownames(df.module.avg) <- paste0("c", df.module.avg$seurat_clusters)
+df.module.avg <- df.module.avg %>% select(-c("seurat_clusters"))
+
+scale.max <- max(df.module)
+scale.min <- min(df.module)
+
+grouping.mem <- df.meta$seurat_clusters
+
+# cell level
+if (print.inline){
+  pheatmap::pheatmap(df.module, show_colnames = T, show_rownames = F, scale = "column")
+}
+
+
+scale.max.c <- max(df.module.avg)
+scale.min.c <- min(df.module.avg)
+scale.lim.c <- max(c(abs(scale.max.c), abs(scale.max.c)))
+
+# cluster level
+if (print.inline & dim(df.module.avg)[1] > 1){
+  pheatmap::pheatmap(df.module.avg, scale = "column")
+}
+
+
+```
+
+
+
+
+```{r reembed UMAP with modular definitions}
+
+# get GGplot handle for cluster umap
+plt.umap_by_cluster <- cluster.UMAP(so.query, group.by = "seurat_clusters", pt.size = T)
+
+# create copy of original seurat
+so.orig <- so.query
+
+wgcna.reduction <- F # assume T as default always
+
+if (wgcna.reduction){
+  
+  # store WGCNA reductions
+  ME.f.dm <- ME.wgcna
+  colnames(ME.f.dm) <- paste0("ME_", 1:ncol(ME.f.dm))
+  ME.f.dm <- as.matrix(ME.f.dm)
+  so.query[["WGCNA"]] <- CreateDimReducObject(embeddings = ME.f.dm, key = "ME_", assay = DefaultAssay(so.query))
+  
+  # run UMAP on WGCNA modular data
+  so.query <- RunUMAP(so.query, dims = 1:ncol(ME.f.dm), min.dist = 0.75, reduction = "WGCNA", verbose = F)
+  
+  # UMAP using original cluster IDs
+  plt.wgcna.umap <- cluster.UMAP(so.query)
+  
+  # recluster data using new embedding
+  so.v2 <- FindNeighbors(so.query, reduction = "WGCNA", dims = 1:ncol(ME.f.dm), nn.eps = 0.5, verbose = F)
+  so.v2 <- FindClusters(so.v2, resolution = cluster.resolution, n.start = 10, verbose = F)
+  
+  
+  # map new clusters to old embedding
+  df.meta.orig <- so.orig@meta.data
+  df.meta.orig$new.clusters <-  so.v2@meta.data$seurat_clusters
+  so.orig@meta.data <- df.meta.orig
+  
+  plt.wgcna.umap_w <- cluster.UMAP(so.v2)
+  plt.umap_by_cluster_w <- cluster.UMAP(so.orig, group.by = "new.clusters")
+  
+  if (print.inline){
+    cowplot::plot_grid(plt.umap_by_cluster_w + labs(title = "UMAP (PCA)",
+                                                    subtitle = "WGCNA-based clustering"), 
+                       plt.wgcna.umap_w + labs(title = "UMAP (WGCNA)", 
+                                               subtitle = "WGCNA-based clustering"))
+    
+    cowplot::plot_grid(plt.umap_by_cluster + labs(title = "UMAP (PCA)", 
+                                                  subtitle = "PCA-based clustering"), 
+                       plt.wgcna.umap + labs(title = "UMAP (WGCNA)", 
+                                             subtitle = "PCA-based clustering"))
+  }
+  
+}
+
+
+
+```
+
+
+
+
+
+```{r WGCNA - get top hub, fig.width = 15, fig.height = 5.5}
+
+top.hub.df <- NULL
+
+try({
+  top.hub.genes <- chooseTopHubInEachModule(
+    datExpr,
+    colorh = modules.fz.wgcna,
+    omitColors = "grey",
+    power = best.power,
+    type = "signed")
+  
+  top.hub.df <- data.frame(module = names(top.hub.genes), top.hub = as.character(top.hub.genes))
+}, silent = T)
+
+
+imConnect <- intramodularConnectivity(adjMat = a.mat, colors = modules.fz.wgcna, scaleByMax = FALSE)
+imConnect <- bind_cols(data.frame(genes = as.character(rownames(a.mat))), imConnect)
+imConnect$genes <- as.character(imConnect$genes)
+
+df.tf <- geneSets[["AnimalTFDB"]][ ,which.species]
+tf <- unlist(df.tf[complete.cases(df.tf), 1])
+imConnect$transcriptionFactor <- 0
+imConnect$transcriptionFactor[imConnect$genes %in% tf] <- 1
+
+
+plt.TF.logistic <- imConnect %>%
+  ggplot(aes(x = kDiff, y = transcriptionFactor)) + 
+  geom_point() + 
+  geom_smooth(method = "glm", method.args = list(family = "binomial")) + 
+  theme_miko()
+
+imConnect$transcriptionFactor <- factor(imConnect$transcriptionFactor, levels = c(0,1))
+plt.TF.density <- imConnect %>%
+  ggplot(aes(x = kOut, fill  = transcriptionFactor)) + 
+  geom_density(alpha = 0.3) + 
+  theme_miko(legend = T)
+
+
+imConnect$kWithin.rank <- rank(imConnect$kWithin)
+imConnect.TF <- imConnect %>% dplyr::filter(transcriptionFactor == 1)
+imConnect.TF$kWithin.rank <- rank(imConnect.TF$kWithin)
+imConnect.other <- imConnect %>% dplyr::filter(transcriptionFactor == 0)
+imConnect.other$kWithin.rank <- rank(imConnect.other$kWithin)
+
+# label set 1
+which.labels <- grepl("HOX|SOX|GATA|PAX", imConnect.TF$genes)
+imConnect.TF$label1 <- ""
+imConnect.TF$label1[which.labels] <- imConnect.TF$genes[which.labels]
+
+# label set 2
+which.labels <- (imConnect.TF$kWithin.rank > (nrow(imConnect.TF) - 15)) & 
+  (imConnect.TF$kWithin.rank < nrow(imConnect.TF))
+imConnect.TF$label2 <- ""
+imConnect.TF$label2[which.labels] <- imConnect.TF$genes[which.labels]
+
+# label set 3
+which.labels <- (imConnect.other$kWithin.rank > (nrow(imConnect.other) - 15)) & 
+  (imConnect.other$kWithin.rank < nrow(imConnect.other))
+imConnect.other$label3 <- ""
+imConnect.other$label3[which.labels] <- imConnect.other$genes[which.labels]
+
+plt.tf.goi <- imConnect.TF %>%
+  ggplot(aes(x = kWithin.rank, y = kWithin)) + 
+  geom_point() + 
+  ggrepel::geom_text_repel(aes(x = kWithin.rank, y = kWithin, label = label1)) + 
+  theme_miko() + 
+  xlab("Gene Rank") + ylab("Within-Module Connectivity") + 
+  labs(title = "Transcription Factor Connectivity", 
+       subtitle = "within-module connectivity (Selection)")
+
+
+plt.tf.top <- imConnect.TF %>%
+  ggplot(aes(x = kWithin.rank, y = kWithin)) + 
+  geom_point() + 
+  ggrepel::geom_text_repel(aes(x = kWithin.rank, y = kWithin, label = label2)) + 
+  theme_miko() + 
+  xlab("Gene Rank") + ylab("Within-Module Connectivity") + 
+  labs(title = "Transcription Factor Connectivity", 
+       subtitle = "within-module connectivity (Top N)")
+
+plt.other.top <- imConnect.other %>%
+  ggplot(aes(x = kWithin.rank, y = kWithin)) + 
+  geom_point() + 
+  ggrepel::geom_text_repel(aes(x = kWithin.rank, y = kWithin, label = label3)
+                           ) + 
+  theme_miko() + 
+  xlab("Gene Rank") + ylab("Within-Module Connectivity") + 
+  labs(title = "Non Transcription Factor Connectivity", 
+       subtitle = "within-module connectivity (Top N)")
+
+plt.kmeWithin <- cowplot::plot_grid(plt.tf.goi, plt.tf.top, plt.other.top, ncol = 3)
+
+if (print.inline){
+  # fig.width = 12, fig.height = 4
+  print(plt.kmeWithin)
+}
+
+
+```
+
+
+
+
+
+```{r GENERAL - rescore GO enrichments}
+
+results.table.p <- results.table.master.p
+
+results.table.p$fraction.annotated <- results.table.p$Significant/results.table.p$Annotated
+results.table.p$enrichment.ratio <- results.table.p$Significant/results.table.p$Expected
+results.table.p$logp <- -log10(results.table.p$weightFisher)
+
+results.table.p <- results.table.p %>%
+  group_by(module) %>%
+  mutate(fa.norm = fraction.annotated/max(fraction.annotated),
+         er.norm = enrichment.ratio/max(enrichment.ratio),
+         p.norm = logp/max(logp))
+
+results.table.p$euc.dist <- sqrt(((results.table.p$fa.norm)^2) + 
+                                   ((results.table.p$er.norm)^2) + 
+                                   ((results.table.p$p.norm)^2)) 
+
+results.table.p$lab <- F
+
+top.enrich <- results.table.p %>%
+  group_by(module) %>%
+  top_n(5, euc.dist)
+
+
+```
+
+
+
+```{r GENERAL - umap expression plots pval, fig.height=10, fig.width=11, message=FALSE, warning=FALSE}
+
+# initialize variables
+plt.clustermarkers_by_umap <- list()
+gNames <- gNames.list
+available_markers <- c()
+
+u_groups <- getOrderedGroups(so.query)
+
+query_genes_by_group <- data.frame(u_groups)
+
+input.marker.list <- markers_of_interest
+
+# sort genes by group
+for (i in 1:length(markers_of_interest)){
+  query_genes_by_group[ ,ncol(query_genes_by_group)+1] <- rep(markers_of_interest[i], nrow(query_genes_by_group))
+}
+
+
+enrich.results <- results.table.p
+
+# plot top differentially expressed genes per cluster and compare to cluster membership
+for (i in c(1:(length(markers_of_interest)))) {
+  
+  # empty list where plts will be stored
+  all_plts <- list()
+  
+  # 1) UMAP clusters
+  all_plts[[1]]  <-   cluster.UMAP(so.orig, group.by = "seurat_clusters")
+  
+  # 2) UMAP expression
+  cur.marker <- markers_of_interest[i]
+  if (!is.na(cur.marker)) all_plts[[length(all_plts)+1]] <- scExpression.UMAP(so.orig, cur.marker) + 
+    scale_color_viridis_c(option = "B")
+
+  # 3) GO enrichment plot
+  top.n <- 15
+  enrich.results.cur <- enrich.results[enrich.results$module %in% cur.marker, ]
+  
+  if  (!is.null(enrich.results.cur) && (nrow(enrich.results.cur)>0)){
+
+    enrich.results.cur <- enrich.results.cur %>% arrange((weightFisher))  %>% dplyr::top_n(-top.n, (weightFisher))
+    enrich.results.cur$weightFisher <- as.numeric(as.character(enrich.results.cur$weightFisher))
+    enrich.results.cur$logp <-  -log10(enrich.results.cur$weightFisher)
+    enrich.results.cur <- enrich.results.cur %>% dplyr::arrange(desc(logp))
+    enrich.results.cur$Term <- paste(enrich.results.cur$Term, "\n", enrich.results.cur$GO.ID, sep = "")
+    
+    min.x <- min(enrich.results.cur$logp)
+    max.x <- max(enrich.results.cur$logp)
+    buffer.factor <- 0.1*abs(max.x - min.x)
+    min.x <- as.numeric(min.x - buffer.factor)
+    max.x <- as.numeric(max.x + buffer.factor)
+    
+    all_plts[[length(all_plts)+1]] <-  enrich.results.cur %>%
+      ggplot(aes(x = reorder(Term, logp), y = logp, fill = weightFisher)) + 
+      geom_bar(stat = "identity") + coord_flip() + 
+      theme_classic() + 
+      ylab("-log(p)") + xlab("") + ggtitle(paste("GO Enrichment: ", cur.marker, sep = "")) + 
+      geom_hline(yintercept = -log10(0.05), linetype = "dashed")
+  } 
+  
+  # Combine plots
+  top_row <- cowplot::plot_grid(all_plts[[1]], all_plts[[2]])
+  if (nrow(enrich.results.cur)==0){
+    p.all <- top_row
+  } else {
+    p.all <- cowplot::plot_grid(top_row, all_plts[[3]], ncol = 1)
+  }
+  
+  plt.clustermarkers_by_umap[[length(plt.clustermarkers_by_umap)+1]] <- p.all
+  available_markers[length(available_markers)+1] <- markers_of_interest[i]
+  
+  if (print.inline)  print(p.all)
+}
+
+# remove NA entries
+available_markers <- available_markers[!is.na(available_markers)]
+
+# assign names marker names to each plot
+names(plt.clustermarkers_by_umap) <- available_markers
+
+```
+
+
+
+```{r GENERAL - umap expression plots padj, fig.height=10, fig.width=11, message=FALSE, warning=FALSE}
+
+# initialize variables
+plt.clustermarkers_by_umap.padj <- list()
+gNames <- gNames.list
+available_markers <- c()
+
+u_groups <- getOrderedGroups(so.query)
+
+query_genes_by_group <- data.frame(u_groups)
+
+input.marker.list <- markers_of_interest
+
+# sort genes by group
+for (i in 1:length(markers_of_interest)){
+  query_genes_by_group[ ,ncol(query_genes_by_group)+1] <- rep(markers_of_interest[i], nrow(query_genes_by_group))
+}
+
+
+enrich.results <- results.table.master.bh
+
+# plot top differentially expressed genes per cluster and compare to cluster membership
+for (i in c(1:(length(markers_of_interest)))) {
+  
+  # empty list where plts will be stored
+  all_plts <- list()
+  
+  # 1) UMAP clusters
+  all_plts[[1]]  <-  cluster.UMAP(so.orig, group.by = "seurat_clusters")
+
+  # 2) UMAP expression
+  cur.marker <- markers_of_interest[i]
+  if (!is.na(cur.marker)) all_plts[[length(all_plts)+1]] <- scExpression.UMAP(so.orig, cur.marker) + 
+    scale_color_viridis_c(option = "B")
+  
+  # 3) GO enrichment plot
+  top.n <- 15
+  enrich.results.cur <- enrich.results[enrich.results$module %in% cur.marker, ]
+  if (!is.null(enrich.results.cur) && (nrow(enrich.results.cur)>0)){
+    
+    enrich.results.cur <- enrich.results.cur %>% arrange((p.adj))  %>% dplyr::top_n(-top.n, (p.adj))
+    enrich.results.cur$p.adj <- as.numeric(as.character(enrich.results.cur$p.adj))
+    enrich.results.cur$logp <-  -log10(enrich.results.cur$p.adj)
+    enrich.results.cur <- enrich.results.cur %>% dplyr::arrange(desc(logp))
+    enrich.results.cur$Term <- paste(enrich.results.cur$Term, "\n", enrich.results.cur$GO.ID, sep = "")
+    
+    min.x <- min(enrich.results.cur$logp)
+    max.x <- max(enrich.results.cur$logp)
+    buffer.factor <- 0.1*abs(max.x - min.x)
+    min.x <- as.numeric(min.x - buffer.factor)
+    max.x <- as.numeric(max.x + buffer.factor)
+    
+    all_plts[[length(all_plts)+1]] <-  enrich.results.cur %>%
+      ggplot(aes(x = reorder(Term, logp), y = logp, fill = p.adj)) + 
+      geom_bar(stat = "identity") + coord_flip() + 
+      theme_classic() + 
+      ylab("-log(p.adj)") + xlab("") + ggtitle(paste("GO Enrichment: ", cur.marker, sep = "")) + 
+      geom_hline(yintercept = -log10(0.05), linetype = "dashed")
+  } else {
+    next
+  } 
+  
+  # Combine plots
+  top_row <- cowplot::plot_grid(all_plts[[1]], all_plts[[2]])
+  if (nrow(enrich.results.cur)==0){
+    p.all <- top_row
+  } else {
+    p.all <- cowplot::plot_grid(top_row, all_plts[[3]], ncol = 1)
+  }
+  
+  plt.clustermarkers_by_umap.padj[[length(plt.clustermarkers_by_umap.padj)+1]] <- p.all
+  available_markers[length(available_markers)+1] <- markers_of_interest[i]
+  
+  if (print.inline)  print(p.all)
+  # } 
+}
+
+# remove NA entries
+available_markers <- available_markers[!is.na(available_markers)]
+
+# assign names marker names to each plot
+names(plt.clustermarkers_by_umap.padj) <- available_markers
+
+
+```
+
+1) cluster UMAP
+===================================== 
+
+```{r plt.umap_by_c}
+
+
+plt.umap_by_cluster
+# cowplot::plot_grid(plt.umap_by_cluster + ggtitle("UMAP (PCA)\nPCA-based clustering (original)"), 
+#                    plt.wgcna.umap + ggtitle("UMAP (WGCNA)\nPCA-based clustering (original)"))
+
+```
+
+
+
+```{r plt.umap_by_w, fig.width=14, fig.height=5}
+
+### WGCNA-based Clustering
+# cowplot::plot_grid(plt.umap_by_cluster_w + ggtitle("UMAP (PCA)\nWGCNA-based clustering"), 
+#                    plt.wgcna.umap_w + ggtitle("UMAP (WGCNA)\nWGCNA-based clustering"))
+
+```
+
+2) Module Activity
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Heatmap (cluster v1)
+
+```{r Heatmap (cluster v1), fig.width=9}
+
+df.ann <- data.frame(method = (stringr::str_extract(colnames(df.module.avg), "ica|nmf|wgcna")))
+rownames(df.ann) <- colnames(df.module.avg)
+
+if (dim(df.module.avg)[1] > 1){
+  
+  range <- max(abs(df.module.avg));
+  # breaks = seq(-range, range, length.out = 100),
+  
+  pheatmap::pheatmap(df.module.avg, 
+                     annotation_col = df.ann, 
+                     breaks = seq(-range, range, length.out = 100),
+                     main = "Cluster-Specific Module Activity")
+}
+
+                     # color  = viridis::inferno(20),
+
+```
+
+### Heatmap (cluster v2)
+```{r Heatmap (cluster v2), fig.width=9}
+
+try({
+  
+  if (dim(df.module.avg)[1] > 1){
+    # df.module.avg.mod <- df.module.avg
+    # df.module.avg.mod <- as.data.frame(apply(as.matrix(df.module.avg.mod), 1, function(x) x/max(x)))
+    
+     range <- max(abs(df.module.avg));
+  # breaks = seq(-range, range, length.out = 100),
+                            # color  = viridis::inferno(20),
+    pheatmap::pheatmap(df.module.avg, 
+                       scale = "column", 
+                       breaks = seq(-range, range, length.out = 100),
+                       annotation_col = df.ann,
+                       main = "Cluster-Specific Module Activity\nmodule-wise scaling")
+  }
+  
+}, silent = T)
+
+
+```
+
+### Heatmap (cluster v3)
+```{r Heatmap (cluster v3), fig.width=9}
+
+try({
+  if (dim(df.module.avg)[1] > 1){
+    
+    range <- max(abs(df.module.avg));
+    
+    # color  = viridis::inferno(20),
+    pheatmap::pheatmap(df.module.avg, 
+                       breaks = seq(-range, range, length.out = 100),
+                       scale = "row", 
+                       annotation_col = df.ann,
+                       main = "Cluster-Specific Module Activity\ncluster-wise scaling")
+  }
+}, silent = T)
+
+
+```
+
+### Heatmap (cell v1)
+
+```{r Heatmap (cell v1), fig.width=9}
+
+# pheatmap::pheatmap(df.module, show_colnames = T, show_rownames = F, scale = "column")
+
+df.ann <- data.frame(method = (stringr::str_extract(colnames(df.module), "ica|nmf|wgcna")))
+rownames(df.ann) <- colnames(df.module)
+
+if (dim(df.module)[1] > 1){
+                       # color  = viridis::inferno(20),
+  # range <- max(abs(df.module));
+  range <- 1
+  
+  pheatmap::pheatmap(df.module, 
+                     breaks = seq(-range, range, length.out = 100),
+                     annotation_col = df.ann, 
+                     show_rownames = F,
+                     main = "Cell-Level Module Activity\ny: cells, x = modules")
+}
+
+```
+range
+
+
+3) Gene Modules
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### WGCNA 
+```{r kME heatmap module, fig.width=9}
+
+try({
+  gmm.fuz.plt <- gmm.fuz
+  colnames(gmm.fuz.plt) <- gsub("kME", "wgcna.", colnames(gmm.fuz.plt))
+  
+  range <- max(abs(gmm.fuz.plt));
+  
+  pheatmap::pheatmap(gmm.fuz.plt, 
+                     breaks = seq(-range, range, length.out = 100),
+                     show_rownames = F, 
+                     main = "WGCNA Module Fuzzy Membership (kMe)\ny: genes, x = modules")
+  rm(gmm.fuz.plt)
+  # color  = viridis::viridis(20),
+}, silent = T)
+
+
+```
+
+
+### ICA 
+```{r ICA heatmap module, fig.width=9}
+
+try({
+  ica.fuz.merge.df.plt <- ica.fuz.merge.df
+  colnames(ica.fuz.merge.df.plt) <- paste0("ica.", colnames(ica.fuz.merge.df.plt))
+  range <- max(abs(ica.fuz.merge.df.plt));
+  pheatmap::pheatmap(ica.fuz.merge.df.plt, 
+                     breaks = seq(-range, range, length.out = 100),
+                     show_rownames = F, 
+                     main = "ICA Module Loading\ny: genes, x = modules")
+  rm(ica.fuz.merge.df.plt)
+}, silent = T)
+
+
+```
+
+
+### NMF 
+```{r nmf heatmap module, fig.width=9}
+
+try({
+  nmf.fuz.df.plt <- nmf.fuz.df
+  colnames(nmf.fuz.df.plt) <- paste0("nmf.", colnames(nmf.fuz.df.plt))
+  range <- max(abs(nmf.fuz.df.plt));
+  pheatmap::pheatmap(nmf.fuz.df.plt, 
+                     breaks = seq(-range, range, length.out = 100),
+                     show_rownames = F, 
+                     main = "NMF Module Loading\ny: genes, x = modules")
+}, silent = T)
+
+
+```
+
+
+4a) Results I
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r res2a}
+
+out <- NULL
+
+try({
+  
+  out <- lapply(seq_along(plt.clustermarkers_by_umap.padj), function(i) {
+    
+    a1 <- knitr::knit_expand(text = sprintf("### %s\n", names(plt.clustermarkers_by_umap.padj)[i])) # tab header
+    a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=11, fig.height=10}", paste(i, "umap padj"))) # start r chunk
+    a3 <- knitr::knit_expand(text = sprintf("\nprint(plt.clustermarkers_by_umap.padj[[%d]])", i)) 
+    a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+    
+    paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+    
+  })
+  
+}, silent = T)
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+4b) Results II
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r res2b}
+
+# out <- flex.multiTabPlot(plt.clustermarkers_by_umap, "plt.clustermarkers_by_umap", fig.width = 11, fig.height = 5)
+out <- NULL
+
+try({
+  out <- lapply(seq_along(plt.clustermarkers_by_umap), function(i) {
+    
+    a1 <- knitr::knit_expand(text = sprintf("### %s\n", names(plt.clustermarkers_by_umap)[i])) # tab header
+    a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=11, fig.height=10}", paste(i, "umap pval"))) # start r chunk
+    a3 <- knitr::knit_expand(text = sprintf("\nprint(plt.clustermarkers_by_umap[[%d]])", i)) 
+    a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+    
+    paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+    
+  })
+}, silent = T)
+
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+5) GO
+===================================== 
+
+GO enrichement of gene modules. 
+
+Row {.tabset}
+-------------------------------------
+
+
+### Enrichment (p.adj threshold)
+
+```{r flex enrich padj}
+
+try({
+  flex.asDT(results.table.master.bh)
+}, silent = T)
+
+
+```
+
+### Enrichment (p threshold)
+
+```{r flex enrich p}
+try({
+  flex.asDT(results.table.master.p)
+}, silent = T)
+
+```
+
+### Term Similarity Heatmap
+
+```{r, fig.width=10}
+
+  j.mat.term <- jaccardSimilarityMatrix(module.term.list)
+  pheatmap::pheatmap(j.mat.term, 
+                     main = "Term Enrichment Similarity",
+                     color  = viridis::inferno(20),
+                     border_color = NA)
+
+```
+
+6) GSEA
+===================================== 
+
+GSEA enrichement of gene modules, using gene membership as ranking criteria. 
+
+Row {.tabset}
+-------------------------------------
+
+### WGCNA
+
+```{r wgcna gsea enrich}
+
+try({
+
+gse.pathway.wgcna <- gse.pathway.kme.sig
+gse.pathway.wgcna$module <- gsub("kME", "wgcna.", gse.pathway.wgcna$module)
+  datatable(gse.pathway.wgcna, 
+            filter = 'top',
+            extensions = 'Buttons',
+            options = list(pageLength = 50,
+                           dom = 'Bfrtip', 
+                           buttons = c('copy', 'csv', 'pdf')))
+  
+  # rm(gse.pathway.wgcna)
+  
+}, silent = T)
+
+```
+
+### NMF
+
+```{r nmf gsea enrich}
+
+try({
+
+gse.pathway.nmf <- gse.pathway.nmf.sig
+gse.pathway.nmf$module <- paste0("nmf.", gse.pathway.nmf$module)
+  datatable(gse.pathway.nmf, 
+            filter = 'top',
+            extensions = 'Buttons',
+            options = list(pageLength = 50,
+                           dom = 'Bfrtip', 
+                           buttons = c('copy', 'csv', 'pdf')))
+  
+  # rm(gse.pathway.nmf)
+  
+}, silent = T)
+
+
+```
+
+### ICA
+
+```{r ica gsea enrich}
+
+try({
+
+gse.pathway.ica <- gse.pathway.ica.sig
+gse.pathway.ica$module <- paste0("ica", gse.pathway.ica$module)
+  datatable(gse.pathway.ica, 
+            filter = 'top',
+            extensions = 'Buttons',
+            options = list(pageLength = 50,
+                           dom = 'Bfrtip', 
+                           buttons = c('copy', 'csv', 'pdf')))
+  
+  # rm(gse.pathway.ica)
+  
+}, silent = T)
+
+```
+
+7) WGCNA
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Module Similarity
+
+```{r}
+  j.mat.wg <- jaccardSimilarityMatrix(gene.sets = module.wgcna.list, assert.unique = T)
+  pheatmap::pheatmap(j.mat.wg, main = "WGCNA Gene Module Similarities",
+                     color  = viridis::inferno(20))
+
+```
+
+### Venn Diagram
+
+```{r}
+   ggVennDiagram::ggVennDiagram(module.wgcna.list[1:4]) 
+```
+
+
+### Dendrogram
+
+```{r module dendrogram}
+
+plotDendroAndColors(geneTree.wgcna, modules, "Singles", dendroLabels=FALSE, hang=0.03,
+                    addGuide=TRUE, guideHang=0.05, main="Singles")
+
+
+```
+
+### TOM plot
+
+```{r TOM plot generation}
+
+try({
+  cut.height <- 0.75
+  d.mat.scale <- d.mat
+  d.mat.scale[d.mat.scale<cut.height] <- cut.height
+  d.mat.scale <- (1/cut.height)*(d.mat.scale - cut.height)
+  TOMplot(dissim = d.mat.scale, dendro = geneTree.wgcna)
+  rm(d.mat.scale)
+}, silent = T)
+
+
+```
+
+
+### Soft-Thresholding Optimization
+
+```{r sft plots}
+
+sft$optimization.plot + xlab("Soft Power")
+
+```
+
+### Soft-Thresholding Optimization 2
+
+```{r sft plots v2,  fig.width=15, fig.height=10}
+
+# fig.width=15, fig.height=10
+cowplot::plot_grid(plotlist = sft$distribution.plot, ncol = 5)
+
+```
+
+### Variance Explained
+```{r}
+
+print(plt.var.exp + theme_miko())
+
+```
+
+### Distributions
+```{r singles matrices, fig.width=15, fig.height=4}
+par(mfrow = c(1,4))
+hist(datExpr, main = "Expression", xlab = "Expression")
+hist(s.mat[s.mat != 1], main = "Similarity (correlation)", xlab = "Similarity")
+hist(a.mat[a.mat != 1], main = "Adjacency", xlab = "Adjacency")
+hist(w.mat[w.mat != 1], main = "TOM", xlab = "TOM")
+
+
+```
+
+### Hub Connectivity
+```{r clusters matrices, fig.width = 15, fig.height = 5.5}
+print(plt.kmeWithin)
+```
+
+### Membership Distribution
+
+```{r}
+
+plt.member.tally  + theme(axis.text.x = element_text(angle = 35, hjust = 1))
+```
+
+8) ICA
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Module Similarity
+
+```{r}
+  j.mat.ig <- jaccardSimilarityMatrix(gene.sets = ica.module.merge.genes, assert.unique = T)
+  pheatmap::pheatmap(j.mat.ig, main = "ICA Gene Module Similarities",
+                     color  = viridis::inferno(20))
+
+```
+
+### Venn Diagram
+
+```{r}
+   ggVennDiagram::ggVennDiagram(ica.module.genes[1:4]) 
+```
+
+```{r}
+
+  plotDendroAndColors(geneTree.ica, mColorh.ica[,1:5], paste("dpSplt =", 0:4), main = "ICA Module Merge", dendroLabels = F)
+
+```
+
+9) NMF
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Module Similarity
+
+```{r}
+  pheatmap::pheatmap(j.mat.nmf, main = "NMF Gene Module Similarities",
+                     color  = viridis::inferno(20))
+
+```
+
+### Venn Diagram
+
+```{r}
+     ggVennDiagram::ggVennDiagram(nmf.module.genes[1:4]) 
+```
+
+10) GeneList
+===================================== 
+
+```{r module genes}
+
+try({
+  
+  # list to long df
+  module.df <- data.frame(module = names(unlist(master.module.list)),  genes = as.vector(unlist(master.module.list)))
+  
+  # correct module names
+  module.names <- names(master.module.list)
+  module.df$M <- NA
+  for (i in 1:length(module.names)){
+    module.df$M[grepl(module.names[i], module.df$module)] <- module.names[i]
+  }
+  
+  # pivot long to wide df
+  module.df$module <- as.character(module.df$module)
+  module.df$genes <- as.character(module.df$genes)
+  module.df.wide <- module.df %>%
+    select(-module) %>%
+    group_by(M) %>%
+    mutate(row = row_number()) %>%
+    tidyr::pivot_wider(names_from = M, values_from = genes) %>%
+    select(-row)
+  
+  module.df.wide <- as.data.frame(module.df.wide)
+  
+  
+  flex.asDT(module.df.wide)
+  
+}, silent = T)
+
+```
+
+
+11) Connectivity
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Connectivity Table
+
+```{r df.con}
+try({
+  round.which <- c("wi")
+  df.con.1[ ,round.which] <- signif(df.con.1[ ,round.which], 3)
+  flex.asDT(df.con.1)
+}, 
+silent = T)
+```
+
+### Top Hub Genes
+
+```{r top.hub.df}
+try({
+  flex.asDT(top.hub.df)
+}, silent = T)
+
+```
+
+
+### intramodular Connectivity
+```{r imConnect}
+try({
+  
+  round.which <- c("kTotal", "kWithin", "kOut", "kDiff")
+  imConnect[ ,round.which] <- signif(imConnect[ ,round.which], 3)
+  flex.asDT(imConnect)
+}, silent = T)
+```
+
+
+```{r save results}
+
+# try({
+
+
+# Correlation MEasure
+df.log <- addLogEntry("Soft power (singles)", best.power, df.log, "best.power")
+# df.log <- addLogEntry("Soft power (clusters)", best.power.HC, df.log, "best.power.HC")
+
+# assay 
+df.log <- addLogEntry("Seurat Assay", DefaultAssay(so.query), df.log, "DefaultAssay(so.query)")
+
+# N modules detected 
+df.log <- addLogEntry("Detected modules", length(master.module.list), df.log, "length(master.module.list)")
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+
+df.log_Module_24 <- df.log
+
+
+
+```
+
+```{r ph10,  echo = FALSE, eval = TRUE}
+
+try({
+  out1 <- flex.multiTabLogs(module.logs)
+}, silent = T)
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+Log (Module 24)
+===================================== 
+
+```{r table.log_current}
+knitr::kable(df.log_Module_24)
+```
+

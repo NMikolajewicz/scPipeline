@@ -1,0 +1,315 @@
+---
+title: "Module23_Wt_vs_KO_bulkRNA_Analysis"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r load libraries, include=FALSE}
+
+# clear global enviroment
+rm(list = ls())
+
+# initiate timer
+start.time <- proc.time()
+
+# detach("scMiko")
+# detach("package:scMiko", unload=TRUE)
+library(scMiko)
+modulePackages(module.number = 9)
+
+```
+
+
+```{r subset lists}
+
+subset.list <- list(
+  no.subset=data.frame(field = NA,
+                       subgroups = NA),
+  renca.tumor.4000ds.T12=data.frame(field = "seurat_clusters",
+                                    subgroups = c(0,2,3,5,6,7,9,15)),                # Renca Tumor
+  cadiac.p6=data.frame(field = "seurat_clusters",
+                       subgroups = c(0, 3, 4, 5, 9)),                                # cardiac tissue p6
+  cardiac.p10=data.frame(field = "seurat_clusters",
+                         subgroups = c(0,6,8,10,2,3)),                               # cardiac tissue p10
+  p4.gbm.scaled.tumor=data.frame(field = "seurat_clusters",
+                                 subgroups = c(0, 15, 4, 36, 10, 19, 29, 33, 32))   # cardiac tissue p10
+  
+)
+
+
+```
+
+```{r bulkRNA input list}
+
+bulkRNA.list <- list(
+  Renca.Atg12.effect.01 = list(gene = "Atg12",
+                               file = "topTable_RencaATCC_48h_Atg12_Effect.txt",
+                               directory = "bulkRNA Datasets/Limma/01_Renca_Atg12_IFNg/",
+                               format= "limma"),
+    Renca.Jmjd6.effect.01 = list(gene = "Jmjd6",
+                               file = "renca_Jmjd6_ko_effect.txt",
+                               directory = "bulkRNA Datasets/Limma/03_Renca_Jmjd6_IFNg/",
+                               format= "limma"),
+      Renca.01.Atg12.Wt = list(gene = "Atg12",
+                               file = "Renca_01_Atg12_vs_WT.txt",
+                               directory = "bulkRNA Datasets/Limma/All/",
+                               format= "limma"),
+            Renca.02.Atg12.Wt = list(gene = "Atg12",
+                               file = "Renca_02_Atg12_vs_WT.txt",
+                               directory = "bulkRNA Datasets/Limma/All/",
+                               format= "limma"),
+            Renca.04.Fitm2.Wt = list(gene = "Fitm2",
+                               file = "Renca_04_Fitm2_vs_WT.txt",
+                               directory = "bulkRNA Datasets/Limma/All/",
+                               format= "limma")
+)
+
+```
+
+
+```{r parameter specification}
+
+# query.file <- "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata"
+query.file <- "Module2_Renca_cell_nuc_sci_T12_4000ds_Celsius_integrated_240220.Rdata"
+# query.file <- "Module2_Renca_invitro_p2_celcius_090320.Rdata"
+dir.preprocessed <- "Preprocessed Datasets/"
+cluster.resolution <- 0.4
+subset.df <- subset.list[["renca.tumor.4000ds.T12"]]
+
+which.species <- "Mm"
+
+which.bulkRNA <- "Renca.04.Fitm2.Wt"
+
+
+
+print.inline <- F
+
+```
+
+```{r}
+
+bulkRNA.path <- getLoadPath(bulkRNA.list[[which.bulkRNA]][["file"]], bulkRNA.list[[which.bulkRNA]][["directory"]])
+df.br <- read.delim(bulkRNA.path)
+
+```
+
+
+
+```{r import seurat object}
+
+# import and preprocess data
+load(getLoadPath(query.file, dir.preprocessed))
+so.query <- prepSeurat(so)
+rm(so)
+
+```
+
+```{r get clusters and assay}
+
+# get current assay
+current.assay <- DefaultAssay(so.query)
+
+# get cluster
+so.query <- setResolution(so.query, cluster.resolution)
+
+```
+
+```{r subset Seurat object}
+
+# subset data
+so.query <- scMiko::subsetSeurat(so.query, subset.df)
+
+```
+
+
+```{r Analysis log}
+
+df.log <- inititateLog("23, WT vs KO bulkRNA Analysis")
+
+# Query File
+df.log[nrow(df.log)+1, 1] <- as.character("Query File (.Rdata)")
+df.log[nrow(df.log), 2] <- as.character("query.file")
+df.log[nrow(df.log), 3] <- as.character(query.file)
+
+```
+
+
+```{r prep seurat  gene list}
+gNames.list <- prepGeneList(so.query, objects())
+```
+
+```{r prep Expression data}
+so.query <- prepExpression(so.query)
+current.assay <- DefaultAssay(so.query)
+```
+
+
+```{r Ensure genes are represented as symbols}
+
+# convert ENSEBLE to GENE names in Seurat object
+gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]])))
+
+if (gene.rep == "ensembl"){
+  so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list)
+  gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]])))
+}
+
+
+```
+
+```{r}
+
+m23.binarizeExpression.dev <- function(so, query.gene, quantile.upper.threshold = 0.1,quantile.lower.threshold = 0.5,return.plt = F, omit.dropouts = F){
+
+  
+  which.match <- which(rownames(so@assays[[DefaultAssay(so)]]) %in% query.gene)
+
+  df.exp <- data.frame(data = so@assays[[DefaultAssay(so)]]@data[which.match, ],
+                       scale = so@assays[[DefaultAssay(so)]]@scale.data[which.match, ])
+
+  df.exp$cellID <- seq(1, ncol(so@assays[[DefaultAssay(so)]]@data))
+
+  if (omit.dropouts){
+    df.exp.filtered <- df.exp[df.exp$data > median(df.exp$data), ]
+  } else {
+     df.exp.filtered <- df.exp
+  }
+  
+
+  df.exp.filtered$rank <- percent_rank(df.exp.filtered$data)
+
+  df.exp.filtered$expression.grp <- "other"
+  df.exp.filtered$expression.grp[df.exp.filtered$rank > (1-quantile.upper.threshold)] <- "high"
+  df.exp.filtered$expression.grp[df.exp.filtered$rank < (quantile.lower.threshold)] <- "low"
+
+  expression.group <- paste(query.gene, ".Expression", sep  = "")
+  so@meta.data[[expression.group]] <- "other"
+  so@meta.data[[expression.group]][df.exp.filtered$cellID[df.exp.filtered$expression.grp == "high"]] <- "high"
+  so@meta.data[[expression.group]][df.exp.filtered$cellID[df.exp.filtered$expression.grp == "low"]] <- "low"
+
+
+  if (return.plt){
+    plt.hist.filtered <-   df.exp.filtered %>%
+      ggplot(aes(x = data)) +
+      geom_histogram(aes(fill =  df.exp.filtered$expression.grp)) +
+      xlab("Expression") + ggtitle(paste(query.gene, "Expression")) +
+      scale_fill_manual(values = c( "red", 'blue', 'grey') )  +
+      theme_classic()  + labs(fill = "Expression")
+
+    return(plt.hist.filtered)
+  } else {
+    return(so)
+  }
+
+
+}
+
+```
+
+
+```{r binarize expression}
+
+query.gene <- bulkRNA.list[[which.bulkRNA]][["gene"]]
+
+
+if (isGeneAvailable(so.query, query.gene, gNames.list)){
+  
+  plt.hist.filtered <- m23.binarizeExpression.dev(so.query, query.gene, quantile.upper.threshold = 0.2,quantile.lower.threshold = 0.3,return.plt = T, omit.dropouts = F)
+  so.query <- m23.binarizeExpression.dev(so.query, query.gene, quantile.upper.threshold = 0.2,quantile.lower.threshold = 0.3,return.plt = F, omit.dropouts = F)
+  
+  expression.field <- paste(query.gene, ".Expression", sep  = "")
+} else {
+  stop("query gene is not available")
+}
+
+plt.expressionGroups <- cluster.UMAP(so.query,group.by = expression.field, 
+                                     cols = c("tomato", "blue", "grey"), 
+                                     include.labels = F,  
+                                     plot.name = paste(query.gene, "Expression"))
+
+if (print.inline) {
+  print(plt.expressionGroups)
+  print(plt.hist.filtered)
+}
+
+
+
+  
+```
+
+```{r DEG}
+
+  # specify group names
+  # which.cluster <- u.clusters[i]
+  # group1 <- paste(which.cluster, "_", u.groups[1], sep = "")
+  # group2 <- paste(which.cluster, "_", u.groups[2], sep = "")
+  
+  
+  Idents(so.query) <- paste(query.gene, ".Expression", sep  = "")
+  
+  # find group-wise differences (stratified by cluster)
+  df.deg <- FindMarkers(so.query, 
+                        assay = DefaultAssay(so.query),
+                        ident.1 = "low",
+                        ident.2 = "high",
+                        only.pos = F, 
+                        min.pct =0.01,
+                        test.use = "MAST",
+                        logfc.threshold = 0.25,
+                        verbose = F)
+  
+
+```
+
+
+
+```{r compare DEG}
+
+p.threshold <- 0.01
+
+df.deg$genes <- rownames(df.deg)
+df.deg.filtered <- df.deg[df.deg$p_val < p.threshold, ]
+df.deg.filtered <- df.deg
+# df.deg.filtered$pct.delta <- df.deg.filtered$pct.2- df.deg.filtered$pct.1
+
+# df.sc <- df.deg.filtered[ ,c("pct.delta", "genes")]
+df.sc <- df.deg.filtered[ ,c("avg_logFC", "genes")]
+colnames(df.sc) <- c("single", "genes")
+
+df.br.filtered <- df.br[df.br$P.Value < p.threshold, ]
+# df.br.filtered <- df.br
+df.bc <- df.br.filtered[ ,c("logFC", "EntrezGene.ID")]
+colnames(df.bc) <- c("bulk", "genes")
+
+df.all <- merge(df.sc, df.bc, by = "genes")
+
+df.query <- df.all[df.all$genes == query.gene, ]
+
+df.query.long <- pivot_longer(df.query, cols = c("single","bulk"))
+
+df.query.long %>%
+  ggplot(aes(x = name, y = value)) + 
+  geom_bar(stat = "identity") + 
+  ylab("logFC")
+
+
+df.all %>%
+  ggplot(aes(single, bulk)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") + 
+  geom_vline(xintercept = 0, linetype = "dashed") + 
+  geom_hline(yintercept = 0, linetype = "dashed") + 
+  geom_abline(slope = 1, intercept = 0, color = "red")  
+
+
+  # geom_smooth(method = "lm") + 
+# head(df.br)
+# head(df.deg)
+
+```
+
