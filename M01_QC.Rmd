@@ -1148,6 +1148,7 @@ analysis.parameters$save.filename <- paste0(run.id, "_", analysis.parameters$sav
 
 df.log <- addLogEntry("Output Results (.Rdata)", as.character(analysis.parameters$save.filename), df.log, "save.filename")
 df.log <- addLogEntry("Output Directory", as.character(analysis.parameters$save.directory), df.log, "save.directory")
+df.log <- addLogEntry("Output Saved", as.character(analysis.parameters$save.flag), df.log, "save.flag")
 
 # save results to Preprocessed_Datasets/
 save.filename <- paste0(data.path, analysis.parameters$save.directory , analysis.parameters$save.filename)
