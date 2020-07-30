@@ -1041,6 +1041,8 @@ if (analysis.parameters$print.inline){
 ```
 
 
+
+
 ```{r c23 - summary statistics, warning = FALSE}
 
 meta.data <- names(so@meta.data)
@@ -1097,6 +1099,16 @@ for (i in 1:length(meta.names)){
 }
 
 ```
+```{r central log}
+
+# update central log
+run.id <- NULL
+try({
+run.id <-  updateCentralLog(Module = "M01", pdf.flag = save.pdf)
+}, silent = T)
+if (is.null(run.id)) run.id <- ""
+
+```
 
 
 
@@ -1117,6 +1129,8 @@ df.log <- addLogEntry("Unmatched rate lower limit", unmatch.low, df.log, "unmatc
 end.time <- proc.time()
 elapsed.time <- round((end.time - start.time)[[3]], 2)
 df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+df.log <- addLogEntry("User", user, df.log, "user")
 
 df.log_Module_1 <- df.log
 
@@ -1128,6 +1142,32 @@ if ((analysis.parameters$save.flag == TRUE) ){
 
 ```
 
+```{r save PDFs}
+
+save.pdf <- T
+if (save.pdf){
+  
+testplots <- list(
+  QC.violin = list(plot = plt.QC_violin, dim = c(10,5)),
+  QC.scatter = list(plot = plt.QC_scatter, dim = c(12,5)),
+  QC.mito = list(plot = plt.mito_by_bc + theme_miko(legend = T), dim = c(5,5))
+)
+somePDFPath = "test.pdf"
+pdf(file=somePDFPath)  
+
+for (i in 1:length(testplots)){
+
+  print(testplots[[i]]$plot,
+        width = testplots[[i]]$dim[1],
+        height = testplots[[i]]$dim[2])
+} 
+dev.off() 
+
+}
+
+```
+
+
 
 QC Overview
 ===================================== 
@@ -1138,25 +1178,32 @@ Row
 ### QC Measures: Distributions (pre-filtering)
 
 ```{r plt.QC_violin, fig.height= 5, fig.width = 10}
+
 print(plt.QC_violin)
+savePDF(file.name = "M01_QC_violin.pdf", plot.handle = plt.QC_violin, fig.width = 10, fig.height = 5, save.flag = save.pdf)
+
 ```
 
 ### QC Measures: Pairwise Scatterplots (pre-filtering)
 
 ```{r plt.QC_scatter, fig.height= 5, fig.width = 12}
 print(plt.QC_scatter)
+savePDF(file.name = "M01_QC_scatter.pdf", plot.handle = plt.QC_scatter, fig.width = 12, fig.height = 5, save.flag = save.pdf)
 ```
 
 ### Mitochondrial %: Distribution (pre-filtering)
 
 ```{r mt.mito_by_bc}
 print(plt.mito_by_bc + theme_miko(legend = T))
+savePDF(file.name = "M01_mito_by_bc.pdf", plot.handle = plt.mito_by_bc + theme_miko(legend = T), fig.width = 8, fig.height = 5, save.flag = save.pdf)
 ```
 
 ### Cells Recovered: Pre- and Post-Filtering
 
 ```{r plt.filter_pre_post}
 print(plt.filter_pre_post + theme_miko(legend = T))
+savePDF(file.name = "M01_filter_pre_post.pdf", plot.handle = plt.filter_pre_post + theme_miko(legend = T), 
+        fig.width = 5, fig.height = 5, save.flag = save.pdf)
 ```
 
 Row 
@@ -1369,14 +1416,5 @@ knitr::kable(df.log_Module_1)
 
 ```
 
-```{r}
-
-# update central log
-try({
-  updateCentralLog(Module = "M01", pdf.flag = save.pdf)
-}, silent = T)
-
-
-```
 
 
