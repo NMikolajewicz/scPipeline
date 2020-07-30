@@ -1,18 +1,28 @@
 ---
-title: "Module18_Cluster_Optimization"
+title: "Cluster Optimization"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: fill
 editor_options: 
   chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
+      ),
+      output_dir = paste0(data.path, "/HTML_Reports")
+    )
+  })
 ---
 
 
 ```{r setup, include=FALSE}
 
 # clear global enviroment
-rm(list = ls())
+rm(list = setdiff(ls(), c("data.path", "user")))
 
 # initiate timer
 start.time <- proc.time()
@@ -36,13 +46,14 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 dir.preprocessed <- "Preprocessed_Datasets/"
 
 # Query input
-input.file <- "Module16_UHN_0231_filtered_aggr_labeled_290120.RData"
+input.file <- "M01_NM2_R1_test_300720.Rdata"
 
 # Rapid marker finding (logical flag)
 quick_markers <- TRUE 
 
 # specify cluster resolution
-cluster_resolution <- c(0.01, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
+# cluster_resolution <- c(0.01, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
+cluster_resolution <- c(0.01, 0.15, 0.45)
 
 # log fold change threshold
 lfc.threshold <- 0.5
@@ -54,12 +65,12 @@ p.threshold <- 0.01
 print.inline <- FALSE
 
 # Data subsampling
-subsample_factor <- 0.15 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify number of workers (for parallelization)
 n.workers <- list(
-  clustering = 4, # data clustering
-  deg = 6         # DEG analysis
+  clustering = 3, # data clustering
+  deg = 3         # DEG analysis
 )
 
 # which markers to return
@@ -67,6 +78,9 @@ only.pos <- T #
 
 # DEG test
 DEG.test <- "MAST" #options: wilcox, bimod, roc, t, poisson, negbinom, LR, MAST, DESeq2
+
+# save PDF
+save.pdf <- T
 
 
 ```
@@ -86,17 +100,33 @@ df.log <- addLogEntry("DEG test", DEG.test, df.log, "DEG.test")
 df.log <- addLogEntry("Cluster Resolution", cluster_resolution, df.log, "cluster_resolution")
 df.log <- addLogEntry("Subsample Factor", subsample_factor, df.log, "subsample_factor")
 df.log <- addLogEntry("Figures Printed in Notebook", unlist(print.inline), df.log, "print.inline")
+df.log <- addLogEntry("PDF saved", save.pdf, df.log, "save.pdf")
 
 
 ```
 
 
+```{r check input paths}
+
+if (!exists("data.path")) {
+  data.path <- ""
+  warning("data.path not found\n")
+}
+
+if (!exists("user")) {
+  user <- "guest"
+  warning("user not found\n")
+}
+
+```
 
 
 
 ```{r load data}
 # load data
-load(paste(dir.preprocessed, input.file, sep = ""))
+
+if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
+load(paste(data.path, dir.preprocessed, input.file, sep = ""))
 
 so.query <- prepSeurat(so)
 rm(so)
@@ -786,24 +816,42 @@ clust.n <- purrr::map_dbl(query_markers.list, function(x) length(unique(x[["clus
 
 # get number of degs per cluster
 n.deg <- purrr::map(query_markers.list, function(x){
-  df.sum <- x %>%
-    group_by(cluster) %>%
-    summarize(
-      sig.deg = sum(p_val_adj < 0.05)
-    )
+  if (nrow(x) > 0){
+    df.sum <- x %>%
+      group_by(cluster) %>%
+      summarize(
+        sig.deg = sum(p_val_adj < 0.05)
+      )
+  } else {
+    NULL
+  }
+  
 })
 
 # compute deg statistics
 n.deg.summary <- purrr::map(n.deg, function(x){
-  df.sum <- data.frame(
-    min.n = min(x$sig.deg, na.rm = T),
-    max.n = max(x$sig.deg, na.rm = T),
-    mean.n =mean(x$sig.deg, na.rm = T),
-    sd.n = sd(x$sig.deg, na.rm = T),
-    median.n = median(x$sig.deg, na.rm = T),
-    n.clust = length(x$sig.deg)
-  )
+  if (!is.null(x)){
+    df.sum <- data.frame(
+      min.n = min(x$sig.deg, na.rm = T),
+      max.n = max(x$sig.deg, na.rm = T),
+      mean.n =mean(x$sig.deg, na.rm = T),
+      sd.n = sd(x$sig.deg, na.rm = T),
+      median.n = median(x$sig.deg, na.rm = T),
+      n.clust = length(x$sig.deg)
+    )
+  } else {
+    df.sum <- data.frame(
+      min.n = NA,
+      max.n = NA,
+      mean.n = NA,
+      sd.n = NA,
+      median.n = NA,
+      n.clust = NA
+    )
+  }
 })
+
+# which.val <- which(!(lapply(n.deg.summary, is.null)))
 
 df.clust.n <- data.frame(clust.res = clust.res, 
                          n.clust = clust.n,
@@ -845,6 +893,40 @@ if (print.inline){
 }
 ```
 
+```{r central log}
+
+# update central log
+run.id <- NULL
+if (!exists("user")) user <- "guest"
+
+clog.update.success <- F
+try({
+  run.id <-  updateCentralLog(Module = "M18", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
+  clog.update.success <-  T
+}, silent = F)
+if (is.null(run.id))  {
+  warning("Central log update was unsuccessful :(\n")
+  run.id <- paste("M18_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+}
+
+```
+
+
+```{r setup output directories}
+
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+
+# create output directories
+dir.create(output.path)
+dir.create(paste0(output.path, "Tables/"))
+if (save.pdf) dir.create(paste0(output.path, "PDF/"))
+
+```
+
+
+
 UMAP
 ===================================== 
 
@@ -868,6 +950,20 @@ out <- lapply(seq_along(cr_names), function(i) {
 
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
+```{r pdf plt.umap_by_all_clusters }
+
+for (i in 1:length(cr_names)){
+  if ( cr_names[i] == "barcodes"){
+    suffix <- ".pdf"
+  } else {
+    suffix = "resolution.pdf"
+  }
+  plot.name <- paste0("M18_umap_", gsub(".", "_", cr_names[i], fixed = T), suffix)
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name), plot.handle =  plt.umap_by_cluster[[i]], 
+        fig.width = 6, fig.height = 5, save.flag = save.pdf)
+}
+
+```
 
 
 
@@ -907,6 +1003,30 @@ out_heat <- lapply(seq_along(plt.heatmap.parameters), function(i) {
 
 `r paste(knitr::knit(text = paste(out_heat, collapse = '\n')))`
 
+```{r pdf ph3, include = FALSE}
+
+invisible({
+  for (i in 1:length(plt.heatmap.parameters)){
+    
+    plot.name <- paste0("M18_cellHeatmap_", gsub(".", "_", plt.heatmap.parameters[[i]][['cluster.resolution']], fixed = T), "resolution.pdf")
+    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+            plot.handle =  gplots::heatmap.2( plt.heatmap.parameters[[i]][['exp.mat']], labCol= plt.heatmap.parameters[[i]][['lab.col']],
+                                              trace='none', 
+                                              ColSideColors= plt.heatmap.parameters[[i]][['ColSideColors']], 
+                                              breaks = plt.heatmap.parameters[[i]][['breaks']], 
+                                              col= plt.heatmap.parameters[[i]][['col']],
+                                              distfun = function(x) as.dist(1-cor(t(x))),
+                                              labRow = FALSE,
+                                              hclustfun = function(x) hclust(x, method='average'),
+                                              main = paste('resolution: ', cluster_resolution[i], sep = ''),
+                                              xlab = 'Cluster ID'), 
+            fig.width = 13, fig.height = 6, save.flag = save.pdf)
+  }
+})
+
+```
+
+
 Heatmap (cluster-level)
 ===================================== 
 
@@ -944,7 +1064,30 @@ out_heat_cluster <- lapply(seq_along(plt.heatmap.cluster.parameters), function(i
 
 `r paste(knitr::knit(text = paste(out_heat_cluster, collapse = '\n')))`
 
+```{r pdf ph3-cluster, include = FALSE}
 
+invisible({
+  for (i in 1:length(plt.heatmap.cluster.parameters)){
+    
+    plot.name <- paste0("M18_clusterHeatmap_", gsub(".", "_", plt.heatmap.cluster.parameters[[i]][['cluster.resolution']], fixed = T), "resolution.pdf")
+    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+            plot.handle =  gplots::heatmap.2( plt.heatmap.cluster.parameters[[i]][['exp.mat']], 
+                                              labCol= plt.heatmap.cluster.parameters[[i]][['lab.col']],
+                                              trace='none', 
+                                              ColSideColors= plt.heatmap.cluster.parameters[[i]][['ColSideColors']], 
+                                              breaks = plt.heatmap.cluster.parameters[[i]][['breaks']], 
+                                              col= plt.heatmap.cluster.parameters[[i]][['col']],
+                                              distfun = function(x) as.dist(1-cor(t(x))),
+                                              labRow = FALSE,
+                                              hclustfun = function(x) hclust(x, method='average'),
+                                              main = paste("resolution: ",plt.heatmap.cluster.parameters[[i]][['cluster.resolution']], sep = ''), 
+                                              xlab = 'Cluster ID'), 
+            fig.width = 13, fig.height = 6, save.flag = save.pdf)
+  } 
+})
+
+
+```
 
 Silhouette
 ===================================== 
@@ -970,6 +1113,16 @@ out <- lapply(seq_along(sil.plot), function(i) {
 
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
+```{r pdf plt.Silhouette }
+
+for (i in 1:length(sil.plot)){
+  plot.name <- paste0("M18_silhouette_", gsub(".", "_", names(sil.list)[i], fixed = T), "resolution.pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name), plot.handle =  sil.plot[[i]], 
+        fig.width = 5, fig.height = 5, save.flag = save.pdf)
+}
+
+```
+
 Metrics
 ===================================== 
 
@@ -983,6 +1136,10 @@ Row {.tabset}
 
 cowplot::plot_grid(plt.silw.line, plt.clust.n, plt.deg.n, ncol = 3)
 
+savePDF(file.name = paste0(output.path, "PDF/", "M18_resolution_evaluation_metrics.pdf"), 
+        plot.handle =  cowplot::plot_grid(plt.silw.line, plt.clust.n, plt.deg.n, ncol = 3), 
+        fig.width = 16, fig.height = 4, save.flag = save.pdf)
+
 ```
 
 ### Silhouette Summary
@@ -990,6 +1147,9 @@ cowplot::plot_grid(plt.silw.line, plt.clust.n, plt.deg.n, ncol = 3)
 
 print(plt.silw.dep)
 
+savePDF(file.name = paste0(output.path, "PDF/", "M18_resolution_vs_silwidth.pdf"), 
+        plot.handle = plt.silw.dep, 
+        fig.width = 5, fig.height = 5, save.flag = save.pdf)
 
 ```
 
@@ -1031,7 +1191,15 @@ out_heat <- lapply(seq_along(top_markers_wide_res.list), function(i) {
 
 `r paste(knitr::knit(text = paste(out_heat, collapse = '\n')))`
 
+```{r csv cm1}
 
+for (i in 1:length(top_markers_wide_res.list)){
+  table.name <- paste0("markerList_", gsub(".", "_", names(top_markers_wide_res.list)[i], fixed = T), "resolution.csv")
+    write.csv(top_markers_wide_res.list[[i]], file = paste0(output.path, "Tables/", table.name), 
+    row.names = F) 
+}
+
+```
 
 Cluster Markers (2)
 ===================================== 
@@ -1069,6 +1237,16 @@ out_heat <- lapply(seq_along(top_markers_res.list), function(i) {
 
 `r paste(knitr::knit(text = paste(out_heat, collapse = '\n')))`
 
+```{r csv cm2}
+
+for (i in 1:length(top_markers_res.list)){
+  table.name <- paste0("markerStatistics_", gsub(".", "_", names(top_markers_res.list)[i], fixed = T), "resolution.csv")
+    write.csv(top_markers_res.list[[i]], file = paste0(output.path, "Tables/", table.name), 
+    row.names = F) 
+}
+
+```
+
 ```{r save analysis log and Rdata results, message=FALSE, warning=FALSE}
 
 # Run time
@@ -1077,6 +1255,10 @@ elapsed.time <- round((end.time - start.time)[[3]], 2)
 df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
 df.log[nrow(df.log), 2] <- as.character("elapsed.time")
 df.log[nrow(df.log), 3] <- as.character(elapsed.time)
+
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
 
 df.log_Module_18 <- df.log
 
@@ -1114,5 +1296,27 @@ knitr::kable(df.log_Module_18)
 
 ```
 
+```{r save analysis log as csv}
+
+try({
+  write.csv(df.log_Module_18, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+    row.names = F)  
+}, silent = T)
+
+```
+
+```{r merge pdfs, include = FALSE}
+
+# combine pdfs into single binder
+if (save.pdf){
+  
+  pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+  pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+  
+  pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+}
+
+
+```
 
 
