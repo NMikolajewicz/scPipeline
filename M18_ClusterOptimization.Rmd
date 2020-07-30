@@ -124,7 +124,7 @@ if (!exists("user")) {
 
 ```{r load data}
 # load data
-
+warning("Importing data...")
 if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
 load(paste(data.path, dir.preprocessed, input.file, sep = ""))
 
@@ -1103,7 +1103,6 @@ out <- lapply(seq_along(sil.plot), function(i) {
   a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE}", paste("sil.plt", i, sep = ""))) # start r chunk
   a3 <- knitr::knit_expand(text = sprintf("\nprint(sil.plot[[ names(sil.list)[%d]]])",i)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-  
   paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
   
 })
