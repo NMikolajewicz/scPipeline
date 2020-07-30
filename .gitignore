@@ -26,6 +26,7 @@ vignettes/*.pdf
 *.knit.md
 # R Environment Variables
 .Renviron
+.Rprofile
 Gene_Sets
 Marker Datasets
 Preprocessed_Datasets
