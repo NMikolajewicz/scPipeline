@@ -1487,7 +1487,7 @@ Log
 knitr::kable(df.log_Module_1)
 
 ```
-```{r}
+```{r save analysis log as csv}
 
 try({
   write.csv(df.log_Module_1, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
