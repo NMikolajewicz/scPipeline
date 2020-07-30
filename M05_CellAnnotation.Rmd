@@ -1,48 +1,44 @@
 ---
-title: "Module5_cell_annotation"
+title: "Cell Annotation"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: fill
 editor_options: 
   chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
+      ),
+      output_dir = paste0(data.path, "/HTML_Reports")
+    )
+  })
 ---
 
 
 
 ```{r setup, include=FALSE}
 
-# last update: 18.03.20
-
 # clear global enviroment
-rm(list = ls())
+rm(list = setdiff(ls(), c("data.path", "user")))
 
 # initiate timer
 start.time <- proc.time()
 
 # List of packages to load
-packages2load <- c("Seurat", "GSVA", 
+packages2load <- c("Seurat", "GSVA", "scMiko",
                    "plyr", "dplyr", "tidyr", "reshape2", "preprocessCore", "stringr", "RColorBrewer", "ggplot2", "gridExtra", 
                    "DT", "flexdashboard", "ggpmisc", "ggExtra", "grid", "ggrepel", "future", 
                    "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "tm", "homologene", "plotly", "parallel", "doParallel", "foreach", "quantreg")
 
 # load packages
-lapply(packages2load, library, character.only = TRUE)
-
-library(scMiko)
+invisible(lapply(packages2load, library, character.only = TRUE))
 
 ```
 
-
-
-```{r check available input files}
-
-show.available.files <- FALSE
-if (show.available.files){
-  list.files("Preprocessed_Datasets/")
-}
-
-```
 
 
 ```{r analysis specifications}
@@ -54,15 +50,15 @@ dir.reference <- "Reference_Datasets/"
 # Query input
 # input.file <- "pilot8_sci_summary_AB.RData"
 # input.file <- "Module1_p7_mesoderm_110620.Rdata"
-input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
 
 # specify reference genesets
-which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", "cancerSEA", "immune.signatures", "immuneSubtype", "GBM")
-# which.references <- c("MCA_50", "GBM")
-# , "TRRUSTv2_Hs_reg"
+#which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", "cancerSEA", "immune.signatures", "immuneSubtype", "GBM")
+which.references <- c("MCA_50", "GBM")
+
 # specify cluster resolution
-cluster.resolution <- 0.45 # OPTIONAL; range 0 to inf (default = 1)
+cluster.resolution <- 0.15 # OPTIONAL; range 0 to inf (default = 1)
 
 so.input.species <- "Mm" # REQUIRED; Hs, Mm
 
@@ -81,74 +77,49 @@ n.workers <- list(
 #logical indicating whether to generate gene expression dot plots (computationally intensive)
 show.gene.exp <- T 
 
+# save PDF
+save.pdf <- T
+
 ```
 
 
 ```{r specify input references}
 
-# all references
-all.references <- data.frame(names = c("MCA_50", "MCA_100", "Zhang_2019", "internal.Mm.neuro", "GBM", 
-                                       "GL261", "GBM_DEG", "internal.Mm.renca", "Panglao.Hs", "Panglao.Mm", 
-                                       "VastDB", "neural.dif.HH", "cycling.seurat", 
-                                       "TRRUSTv2_Mm", "TRRUSTv2_Hs", "TRRUSTv2_Mm_reg", "TRRUSTv2_Hs_reg",
-                                       "Kidney_Healthy_Mm", "Integrated_Renca_res0_6", "muscle.signatures", "immune.signatures", "cancerSEA", "immuneSubtype"),
-                             type = c("csv", "csv", "csv", "internal", "csv", "internal", 
-                                      "csv", "internal", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv", "csv"),
-                             formats = c("symbol","symbol", "symbol", NA, "symbol", NA, "symbol", NA, 
-                                         "symbol", "symbol", "symbol", "symbol", "symbol", "symbol", 
-                                         "symbol", "symbol", "symbol", "symbol", "symbol", "symbol","symbol", "symbol", "symbol"),
-                             species = c("Mm", "Mm", "Hs", "Mm", "Hs", "Mm", "Hs", "Mm", "Hs", 
-                                         "Mm", "Mm", "Mm", "Hs", "Mm", "Hs", "Mm", "Hs", "Mm", "Mm", "Mm","Hs", "Hs", "Hs"),
-                             samples = c(NA, NA, NA, "N2A, CGR8", NA, "GL261", NA, "Renca", NA, NA, NA, NA, NA, NA, NA, NA, NA,NA, NA,NA,NA,NA, NA),
-                             files = c("VALID_Module4_mouse_cell_atlas_SYMBOL_v3_top50.csv",
-                                       "VALID_Module4_mouse_cell_atlas_SYMBOL_v4_top100.csv",
-                                       "VALID_Module4_Zhang2019_Hs_cellmarkers_SYMBOLS_131219.csv",
-                                       "VALID_Module4_ReferenceSet_Mm_241119.Rdata",
-                                       "VALID_GBM_meta_module_genes_SYMBOL.csv",
-                                       "VALID_ReferenceSet_GL261.RData",
-                                       "VALID_GBM_Neftel_DEG_cancer_vs_normal_SYMBOL.csv",
-                                       "VALID_Module4_ReferenceSet_Mm_241119.Rdata",
-                                       "VALID_Panglao_referenceSets_Hs_300120_SYMBOLS.csv",
-                                       "VALID_Panglao_referenceSets_Mm_300120_SYMBOLS.csv",
-                                       "VALID_ReferenceSet_VastDB_Mm_261119_SYMBOLS.csv",
-                                       "VALID_NeuralDifferentiation_HH_Mm_040220_SYMBOLS.csv",
-                                       "VALID_cyclingGenes_seurat_Hs_040220_SYMBOLS.csv",
-                                       "VALID_TRRUSTv2_Mm_140220.csv",
-                                       "VALID_TRRUSTv2_Hs_140220.csv",
-                                       "VALID_TRRUSTv2_Mm_regulation_140220.csv",
-                                       "VALID_TRRUSTv2_Hs_regulation_140220.csv",
-                                       "VALID_Kidney_Healthy_Mm_PMID29622724_230220.csv",
-                                       "VALID_Renca_tumor_integrated_res0_6_Mm_230220.csv",
-                                       "VALID_pangleo_zhang_MCA_SYMBOL_forMuscle_180320.csv",
-                                       "VALID_immuneSignatures_Nirmal_2018_SYMBOLS_170320.csv",
-                                       "VALID_CancerSEA_HS_270320.csv",
-                                       "VALID_Thorsson2018_tumorImmuneSubtypes_260420.csv"))
+# import geneset path file
+all.references <- read.csv("M05_genesets.csv")
 
 # get input references
 query.references <- all.references[all.references$names %in% which.references, ]
-
-# get csv reference specifications
-csv_ref_available <- "csv" %in% query.references$type
-csv_input <- as.list(as.vector(query.references$files[query.references$type %in% "csv"]))
-names(csv_input) <- as.vector(query.references$names[query.references$type %in% "csv"])
-csv_input_format <- as.vector(query.references$formats[query.references$type %in% "csv"])
-
-
+csv_input <- as.list(as.vector(query.references$files))
+names(csv_input) <- as.vector(query.references$names)
 
 ```
 
+```{r check input paths}
+
+if (!exists("data.path")) {
+  data.path <- ""
+  warning("data.path not found\n")
+}
+
+if (!exists("user")) {
+  user <- "guest"
+  warning("user not found\n")
+}
+
+```
 
 ```{r load data}
 
 # load query dataset
-load(paste(dir.preprocessed, input.file, sep = ""));
+warning("Importing data...")
+if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
+load(paste(data.path, dir.preprocessed, input.file, sep = ""));
 
 so.query <- prepSeurat(so)
 rm(so)
 
 current.assay <- DefaultAssay(so.query)
-
-
 
 ```
 
@@ -191,7 +162,7 @@ df.log <- addLogEntry("Default Assay", current.assay, df.log, "current.assay")
 df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
 df.log <- addLogEntry("Subsample Factor", subsample_factor, df.log, "subsample_factor")
 df.log <- addLogEntry("Input species", so.input.species, df.log, "so.input.species")
-df.log <- addLogEntry("Top N Markers per Cluster", "", df.log, 50)
+df.log <- addLogEntry("PDF saved", save.pdf, df.log, "save.pdf")
 
 ```
 
@@ -204,7 +175,7 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 ```
 
 
-```{r cluster results}
+```{r cluster results, warning = FALSE}
 
 # plot umap by cluster
 plt.umap_by_cluster <- DimPlot(so.query, reduction = "umap", group.by = "seurat_clusters", label = TRUE)  + 
@@ -337,7 +308,7 @@ plot.cluster_composition_alt <- function(df.cluster_annotations, other_threshold
 
 
 
-```{r cluster composition by barcode}
+```{r cluster composition by barcode, warning = FALSE}
 
 # get barcode labels and clusters
 cluster_membership <- as.vector(so.query@meta.data[["seurat_clusters"]])
@@ -445,35 +416,34 @@ gs.list <- list()
 # get available genes
 av.genes <- rownames(so.query)
 
-if (csv_ref_available){
-  for (i in 1:length(csv_input)){
-    # get set name
-    csv.label <- names(csv_input)[i]
-    
-    # import and prep data
-    signatures.symbol[[csv.label]] <- prepGeneSet(gs.file = csv_input[i], 
-                                                  gs.dir = "Reference_Datasets/", 
-                                                  gs.species = so.input.species, 
-                                                  gs.available.genes = av.genes)
-    
-    # get gene set statistics
-    df.gs.statistics <- bind_rows(df.gs.statistics, 
-                                  data.frame(
-                                    set = csv.label,
-                                    annotation = names( signatures.symbol[[csv.label]]),
-                                    n.genes = unlist(lapply(signatures.symbol[[csv.label]], function(x) length(x)))
-                                  ))
-    df.gs.statistics$annotation <- rmvCSVprefix(df.gs.statistics$annotation)
-    
-    # store list in df for flex output
-    gs.list[[csv.label]] <- namedList2wideDF( signatures.symbol[[csv.label]])
-    
-    if (!is.null( signatures.symbol[[csv.label]])){
-      cur.sig <- signatures.symbol[[csv.label]]
-      signatures.symbol[[csv.label]] <- cur.sig
-    } else {next}
-  }
+for (i in 1:length(csv_input)){
+  # get set name
+  csv.label <- names(csv_input)[i]
+  
+  # import and prep data
+  signatures.symbol[[csv.label]] <- prepGeneSet(gs.file = csv_input[i], 
+                                                gs.dir = paste0(data.path, "Reference_Datasets/"), 
+                                                gs.species = so.input.species, 
+                                                gs.available.genes = av.genes)
+  
+  # get gene set statistics
+  df.gs.statistics <- bind_rows(df.gs.statistics, 
+                                data.frame(
+                                  set = csv.label,
+                                  annotation = names( signatures.symbol[[csv.label]]),
+                                  n.genes = unlist(lapply(signatures.symbol[[csv.label]], function(x) length(x)))
+                                ))
+  df.gs.statistics$annotation <- rmvCSVprefix(df.gs.statistics$annotation)
+  
+  # store list in df for flex output
+  gs.list[[csv.label]] <- namedList2wideDF( signatures.symbol[[csv.label]])
+  
+  if (!is.null( signatures.symbol[[csv.label]])){
+    cur.sig <- signatures.symbol[[csv.label]]
+    signatures.symbol[[csv.label]] <- cur.sig
+  } else {next}
 }
+
 
 ```
 
@@ -505,17 +475,7 @@ rcnames.2d <- function (score.mat, exp.mat, sig){
 ```
 
 
-```{r standardize scores}
-
-# standardize.scores <- function(df.long, which.field){
-#   df <- as.data.frame(df.long)
-#   df[ ,which.field] <- (df[ ,which.field] - mean(df[ ,which.field])) / (sd(df[ ,which.field]))
-#   return(df)
-# }
-
-```
-
-```{r}
+```{r DEG analysis}
 
 # DEG analysis
   deg.gene.a <- FindAllMarkers(so.query, 
@@ -543,8 +503,6 @@ df.lfc.wide <- bind_rows(df.lfc.wide, df.lfc.missing)
 df.lfc.wide <- df.lfc.wide[match(all.genes, df.lfc.wide$gene), ]
 df.lfc.wide[is.na(df.lfc.wide)] <- 0
 df.lfc.wide <- as.data.frame(df.lfc.wide)
-# rownames(df.lfc.wide) <- df.lfc.wide$gene
-# df.lfc.wide <- df.lfc.wide %>% dplyr::select(-c("gene"))
 
 df.pd <- deg.gene.a[ ,c("gene", "cluster", "pct.dif")]
 df.pd.wide  <- pivot_wider(df.pd, names_from = "cluster", values_from = "pct.dif")
@@ -556,32 +514,6 @@ df.pd.wide <- bind_rows(df.pd.wide, df.pd.missing)
 df.pd.wide <- df.pd.wide[match(all.genes, df.pd.wide$gene), ]
 df.pd.wide[is.na(df.pd.wide)] <- 0
 df.pd.wide <- as.data.frame(df.pd.wide)
-# rownames(df.pd.wide) <- df.pd.wide$gene
-# df.pd.wide <- df.pd.wide %>% dplyr::select(-c("gene"))
-
-```
-
-```{r random gene sets}
-
-# get gene size range side
-# min.set <- min(df.gs.statistics$n.genes, na.rm = T)
-# max.set <- max(df.gs.statistics$n.genes, na.rm = T)
-# set.vector <- round(c(seq(0, 100, by = 10), seq(120, 300, by = 20), seq(400, 1000, by = 30), seq(2000, 10000, by = 1000)))
-# set.vector <- set.vector[set.vector > 0]
-# # set.vector <- set.vector[set.vector > min.set]
-# set.vector <- set.vector[set.vector < max.set]
-# 
-# gene.names <- rownames(so.query)
-# 
-# random.sets <- list()
-# 
-# for (i in 1:length(set.vector)){
-#   set.name <- paste0("R", set.vector[i])
-#   random.sets[[set.name]] <- sample(gene.names, set.vector[i])
-# }
-# 
-# # add random set to signature scores
-# signatures.symbol <- c(signatures.symbol, list(random = random.sets))
 
 ```
 
@@ -929,11 +861,11 @@ df.n.gene <- unique(df.n.gene[ ,c("ref.set", "cell", "n.genes.total", "n.genes.a
 ```
 
 
-```{r null dist functions}
+```{r data wrangle}
 
 # compare null to results
 
-null.distribution <- function(score.list){
+wrangleHelper <- function(score.list){
   h1.h0.merge <- NULL
   for (i in 1:length(score.list)){
     cur.h1 <-  format.results(score.list[[i]], "H1") 
@@ -947,81 +879,45 @@ null.distribution <- function(score.list){
   return(h1.h0.merge)
 }
 
-```
+df.dist.expr <- wrangleHelper(expr.score.list)
+df.dist.gsva <- wrangleHelper(e.score.list)
+df.dist.per <- wrangleHelper(per.score.list)
+# df.dist.mod <- wrangleHelper(mod.score.list)
+df.dist.logfc <- wrangleHelper(logfc.score.list)
+df.dist.pd <- wrangleHelper(pd.score.list)
 
-
-```{r null dist tables}
-
-df.dist.expr <- null.distribution(expr.score.list)
-df.dist.gsva <- null.distribution(e.score.list)
-df.dist.per <- null.distribution(per.score.list)
-# df.dist.mod <- null.distribution(mod.score.list)
-df.dist.logfc <- null.distribution(logfc.score.list)
-df.dist.pd <- null.distribution(pd.score.list)
 
 ```
 
 
-```{r}
-
-box.cox <- function(x, parms=c(1,0)) {
-  lambda <- parms[1]
-  offset <- parms[2]
-  if (lambda==0) log(x+offset) else ((x+offset)^lambda - 1)/lambda
-}
-threepoint <- function(x, y, ladder=c(1, 1/2, 1/3, 0, -1/2, -1)) {
-  # x and y are length-three samples from a dataset.
-  dx <- diff(x)
-  f <- function(parms) (diff(diff(box.cox(y, parms)) / dx))^2
-  fit <- nlm(f, c(1,0))
-  parms <- fit$estimate #$
-  lambda <- ladder[which.min(abs(parms[1] - ladder))]
-  if (lambda==0) offset = 0 else {
-    do <- diff(range(y))
-    offset <- optimize(function(x) f(c(lambda, x)), 
-                       c(max(-min(x), parms[2]-do), parms[2]+do))$minimum    
-  }
-  c(lambda, offset)
-}
-
-```
-
-
-
-```{r}
+```{r variance stabilizing score transform}
 
 
 
 
 vstScoreThreshold.v2  <- function(x, y, label, set, percentile.threshold = 0.98, quantile.norm = F){
-
+  
   # purpose: scale and normalize gene set scores 
   # step 1: loess-centering
   #     - ensures that data not biased and that no outliers skew score distributions
   # step 2: variance-stabilizing transform based on quantile regression
   #
   # output: normalized and scaled geneset scores 
-
-# loess-centering
-
+  
+  # loess-centering
+  
   df <- data.frame(x = x, x.log = log(x), y = y,
                    annotation = label, ref.set = set)
   
   u.set <- unique(df$ref.set)
   for (i in 1:length(unique(u.set))){
-     error.loess.mean <- loess(y ~ x.log , df[df$ref.set %in% u.set[i], ])
-  pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$ref.set %in% u.set[i]]), se = TRUE)[["fit"]]
-  df$y.centered[df$ref.set %in% u.set[i]] <-  df$y[df$ref.set %in% u.set[i]] - pred
+    error.loess.mean <- loess(y ~ x.log , df[df$ref.set %in% u.set[i], ])
+    pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$ref.set %in% u.set[i]]), se = TRUE)[["fit"]]
+    df$y.centered[df$ref.set %in% u.set[i]] <-  df$y[df$ref.set %in% u.set[i]] - pred
     
     
   }
   
-#   parms <- threepoint(y[i3], temperature[i3])
-# x <- box.cox(temperature, parms)
- # log1p(x)+ log1p(x) - x
-  # exp(-x) +log1p(x) - x
-  # log1p(x) - sqrt(x) - x
-  # quantile regression
   if (quantile.norm){
     rqfit <- rq(y.centered ~ log1p(x) - sqrt(x) - x, data = df, tau = percentile.threshold)
     # rqfit <- rq("y.centered ~ log(x) - x", data = df, tau = percentile.threshold)
@@ -1034,49 +930,47 @@ vstScoreThreshold.v2  <- function(x, y, label, set, percentile.threshold = 0.98,
     df$color[df$sig ] <- "tomato"
     
     plt.vstScore2 <- df %>%
-  ggplot(aes(x, y.centered)) +
-  geom_point() +
-  geom_smooth() +
-  geom_quantile(formula = y ~ log1p(x) - sqrt(x) - x, quantiles = percentile.threshold, linetype = "dashed", color = "tomato", size = 1) +
-  theme_miko()
+      ggplot(aes(x, y.centered)) +
+      geom_point() +
+      geom_smooth() +
+      geom_quantile(formula = y ~ log1p(x) - sqrt(x) - x, quantiles = percentile.threshold, linetype = "dashed", color = "tomato", size = 1) +
+      theme_miko()
     
     plt.vstScore <- df %>%
-  ggplot(aes(x, z.sig)) + 
-  geom_point() + 
-  geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
-  geom_hline(yintercept = 2.575, color = "tomato", linetype = "dashed") + 
-  theme_miko()
+      ggplot(aes(x, z.sig)) + 
+      geom_point() + 
+      geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
+      geom_hline(yintercept = 2.575, color = "tomato", linetype = "dashed") + 
+      theme_miko()
     
   } else {
     df$ratio   <- df$y.centered
     df$residuals   <- df$y.centered
     df$z.sig  <- (df$y.centered - mean(df$y.centered )) / sd(df$y.centered )
     
-plt.vstScore <- df %>%
-  ggplot(aes(x, z.sig)) + 
-  geom_point() + 
-  geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
-  geom_hline(yintercept = 2.575, color = "tomato", linetype = "dashed") + 
-  theme_miko()
-
-plt.vstScore2 <- NULL
+    plt.vstScore <- df %>%
+      ggplot(aes(x, z.sig)) + 
+      geom_point() + 
+      geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
+      geom_hline(yintercept = 2.575, color = "tomato", linetype = "dashed") + 
+      theme_miko()
+    
+    plt.vstScore2 <- NULL
   }
-
-
-
+  
   list(
     results = df,
     plot = plt.vstScore,
     plot.trans = plt.vstScore2
   )
-
+  
 }
 
 ```
 
 
 
-```{r}
+```{r score processing, warning = FALSE}
 
 # process scores
 vst.exp.list <- vstScoreThreshold.v2(x = df.dist.expr$n.genes.available, y = df.dist.expr$ratio, 
@@ -1210,7 +1104,6 @@ for (i in 1:length(annotations)){
 
 ```{r wordclouds}
 
-
 sig.thresh <- 2.575
 vst.merge.cloud <- vst.merge.final
 vst.merge.cloud$sig.lenient <- F
@@ -1264,8 +1157,9 @@ vst.merge.lenient <- vst.merge.final[vst.merge.cloud$sig.lenient, ]
 
 ```
 
-```{r deg evaluation}
+```{r deg evaluation, warning = FALSE}
 
+# Find fraction of DEGs present in each geneset ##########################################
 
 deg.gene.sub <- deg.gene.a[(deg.gene.a$p_val < 0.05) & (deg.gene.a$avg_logFC > 0), ]
 
@@ -1279,7 +1173,6 @@ deg.list <- deg.gene.sub %>%
 deg.list <- apply(deg.list[ ,"genes"], 1, function(x) unlist(x))
 names(deg.list) <- paste0("c", seq(0, length(deg.list)-1))
 
-# collapse.set <- c(lapply(signatures.symbol, function(x) (x)))
 collapse.set <- c()
 for (i in 1:length(signatures.symbol)){
   collapse.set <- c(collapse.set, signatures.symbol[[i]])
@@ -1304,21 +1197,16 @@ top.terms <- unique(df.top.deg$annotation)
 df.fct.deg.hm <- df.fct.deg[df.fct.deg.wide$annotation %in% top.terms, ]
 
 if (print.inline){
-  # deg.gene.sub
+
   pheatmap::pheatmap(df.fct.deg.hm, 
                      main = "Fraction of DEGs present in Genesets\n x: cluster; y: annotation; z: DEG fraction",
                      color = viridis::inferno(10))
 }
 
-
 ```
 
 
 ```{r plot signature gene expressions, message=FALSE, warning=FALSE, fig.width = 10, fig.height = 10}
-
-# only plot sort list of putative gene sets. 
-# pred.results.st.final
-
 
 all.signatures.list <- list()
 
@@ -1413,7 +1301,7 @@ if (show.gene.exp){
 ```
 
 
-```{r compute percentiles}
+```{r prep matrix for expression heatmap}
 
 # use only variable features (other wise gene matrix too large for html file)
 var.features <- so.query@assays[[DefaultAssay(so.query)]]@var.features
@@ -1469,46 +1357,50 @@ df.exp.scale.v4.long <- pivot_longer(df.exp.scale.v4, colnames(df.exp.scale.v4))
 mean.val <- mean(df.exp.scale.v4.long$value, na.rm = T)
 std.val <- sd(df.exp.scale.v4.long$value, na.rm = T)
 
-
-
 mat.exp.scale.v4 <- as.matrix(df.exp.scale.v4)
 cur.cluster.id <- colnames(mat.exp.scale.v4)
 
-# cluster colors
-qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
-col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
-cols <- sample(col_vector, length(cur.cluster.id))
 
-# heatmap colors
-hmcol <- colorRampPalette(brewer.pal(9, "RdBu"))(100)
+```
+```{r central log}
 
-scale.min = -2
-scale.max = 2 
+# update central log
+run.id <- NULL
+if (!exists("user")) user <- "guest"
 
-if (print.inline){
-  gplots::heatmap.2( mat.exp.scale.v4, labCol= colnames(mat.exp.scale.v4),
-                     trace="none", 
-                     col= rev(hmcol),
-                     ColSideColors= cols, 
-                     breaks = c(min(mat.exp.scale.v4), 
-                                seq(scale.min, scale.max, by = ((scale.max-scale.min)/98)), max(mat.exp.scale.v4)),
-                     distfun = function(x) as.dist(1-cor(t(x))),
-                     hclustfun = function(x) hclust(x, method="average"),
-                     main = "Gene Exp Matrix",
-                     labRow = F,
-                     xlab = "Cluster ID")
-  
+clog.update.success <- F
+try({
+  run.id <-  updateCentralLog(Module = "M05", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
+  clog.update.success <-  T
+}, silent = F)
+if (is.null(run.id))  {
+  warning("Central log update was unsuccessful :(\n")
+  run.id <- paste("M05_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
 }
-
 
 ```
 
+
+```{r setup output directories}
+
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+
+# create output directories
+dir.create(output.path)
+dir.create(paste0(output.path, "Tables/"))
+if (save.pdf) dir.create(paste0(output.path, "PDF/"))
+
+```
 
 cluster UMAP
 ===================================== 
 
 ```{r plt.umap_by_c}
 print(plt.umap_by_cluster)
+savePDF(file.name = paste0(output.path, "PDF/", "M05_umap_cluster.pdf"), plot.handle = plt.umap_by_cluster, 
+        fig.width = 7, fig.height = 5, save.flag = save.pdf)
 ```
 
 
@@ -1521,6 +1413,8 @@ Row {data-height=600}
 ### Barcode Identities
 ```{r plt.umap_by_barcode}
 print(plt.umap_by_barcode)
+savePDF(file.name = paste0(output.path, "PDF/", "M05_umap_barcode.pdf"), plot.handle = plt.umap_by_barcode, 
+        fig.width = 7, fig.height = 5, save.flag = save.pdf)
 ```
 
 Row {.tabset}
@@ -1529,6 +1423,8 @@ Row {.tabset}
 ### Cluster Composition (Barcodes)
 ```{r plt.cluster_composition_barcodes, fig.width=13, fig.height=4}
 print(plt.cluster_composition_barcodes)
+savePDF(file.name = paste0(output.path, "PDF/", "M05_cluster_composition_barplot.pdf"), plot.handle = plt.cluster_composition_barcodes, 
+        fig.width = 13, fig.height = 4, save.flag = save.pdf)
 ```
 
 ### Cluster Composition (Table)
@@ -1552,10 +1448,12 @@ Prior to thresholding, scores were preprocessed using 1) variance-stabilizing tr
 Row {.tabset}
 -------------------------------------
 
-### Scores Distributions
+### Annotation Scores
 ```{r Score Distributions, fig.width=12, fig.height=6, warning = F, message=F}
 
 print(plt.score.thresholds)
+savePDF(file.name = paste0(output.path, "PDF/", "M05_annotation_scores.pdf"), plot.handle = plt.score.thresholds, 
+        fig.width = 12, fig.height = 6, save.flag = save.pdf)
 
 ```
 
@@ -1563,6 +1461,8 @@ print(plt.score.thresholds)
 ```{r Score Distributions v2, fig.width=12, fig.height=6, warning = F, message=F}
 
 print(plt.score.thresholds.resids)
+savePDF(file.name = paste0(output.path, "PDF/", "M05_vst_scores.pdf"), plot.handle = plt.score.thresholds.resids, 
+        fig.width = 12, fig.height = 6, save.flag = save.pdf)
 
 ```
 
@@ -1571,6 +1471,8 @@ print(plt.score.thresholds.resids)
 ```{r Gene-Set Size Relation, fig.width=8, fig.height=7, warning = F, message=F}
 
 print(plt.rank.cor)
+savePDF(file.name = paste0(output.path, "PDF/", "M05_score_correlations.pdf"), plot.handle = plt.rank.cor, 
+        fig.width = 8, fig.height = 7, save.flag = save.pdf)
 
 ```
 
@@ -1589,8 +1491,6 @@ Row {.tabset}
 
 ```{r lenient filter tab,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
 
-# pred.results.scale.final.v2
-
 datatable(vst.merge.lenient, 
           filter = 'top',
           extensions = 'Buttons',
@@ -1598,7 +1498,15 @@ datatable(vst.merge.lenient,
                          dom = 'Bfrtip', 
                          buttons = c('copy', 'csv', 'pdf')))
 
+
+#for (i in 1:length(top_markers_wide_res.list)){
+#  table.name <- paste0("markerList_", gsub(".", "_", names(top_markers_wide_res.list)[i], fixed = T), "resolution.csv")
+write.csv(vst.merge.lenient, file = paste0(output.path, "Tables/", "annotation_scores_significant.csv"), 
+          row.names = F) 
+
+
 ```
+
 
 ### Scores (no filter)
 
@@ -1610,6 +1518,9 @@ datatable(vst.merge.final,
           options = list(pageLength = 50,
                          dom = 'Bfrtip', 
                          buttons = c('copy', 'csv', 'pdf')))
+
+write.csv(vst.merge.final, file = paste0(output.path, "Tables/", "annotation_scores_all.csv"), 
+          row.names = F) 
 
 ```
 
@@ -1648,6 +1559,20 @@ out_word <- lapply(seq_along(u.cl), function(i) {
 
 `r paste(knitr::knit(text = paste(out_word, collapse = '\n')))`
 
+```{r pdf Clouds,include = FALSE}
+
+for (i in 1:length(u.cl)){
+  plot.name <- paste0("M05_wordcloud_", u.cl[i] ,".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+          plot.handle =  wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[i], ]$cell, 
+                                              freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[i], ]$composite)*50), min.freq = 0,
+                                              max.words=30, random.order=FALSE, rot.per=0, scale = c(1.5, .2),
+                                              colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[i], ]$color, ordered.colors = T), 
+          fig.width = 5, fig.height = 5, save.flag = save.pdf)
+}
+
+```
+
 
 Word Clouds (Tissue)
 ===================================== 
@@ -1678,7 +1603,6 @@ out_word <- lapply(seq_along(u.cl), function(i) {
   paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
   
 })
-# vst.merge.subset$gen
 
 ```
 
@@ -1700,6 +1624,8 @@ Top annotation for each cluster is shown.
 ```{r plt.deg.mod.1}
 
 print(plt.deg.mod.1)
+savePDF(file.name = paste0(output.path, "PDF/", "M05_differential_genesets_1.pdf"), plot.handle = plt.deg.mod.1, 
+        fig.width = 7, fig.height = 5, save.flag = save.pdf)
 ```
 
 ### Differential Scores 2
@@ -1709,6 +1635,9 @@ Top N annotations are shown.
 ```{r plt.deg.mod.2}
 
 print(plt.deg.mod.2)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M05_differential_genesets_2.pdf"), plot.handle = plt.deg.mod.2, 
+        fig.width = 7, fig.height = 5, save.flag = save.pdf)
 ```
 
 ### DEG Table
@@ -1722,6 +1651,9 @@ datatable(deg.mod.final,
                          dom = 'Bfrtip',
                          buttons = c('copy', 'csv', 'pdf')))
 
+write.csv(deg.mod.final, file = paste0(output.path, "Tables/", "differential_genesets_statistics.csv"), 
+          row.names = F) 
+
 ```
 
 Differential Genes
@@ -1732,12 +1664,22 @@ Row {.tabset}
 
 ### Fraction of differential genes in each geneset
 
-```{r, fig.width = 10, fig.height=8}
+```{r fdgg, fig.width = 10, fig.height=8}
 
-  pheatmap::pheatmap(df.fct.deg.hm, 
-                     main = "Fraction of DEGs present in Genesets\n x: cluster; y: annotation; z: DEG fraction",
-                     color = viridis::inferno(10))
-  
+plt.hm.genedeg <- ggplotify::as.ggplot(  pheatmap::pheatmap(df.fct.deg.hm, 
+                                                            main = "Fraction of DEGs present in Genesets\n x: cluster; y: annotation; z: DEG fraction",
+                                                            color = viridis::inferno(10)))
+
+```
+
+```{r pdf fdgg}
+
+try({
+savePDF(file.name = paste0(output.path, "PDF/", "M05_fraction_DEG_in_genesets.pdf"), 
+        plot.handle = plt.hm.genedeg, 
+        fig.width = 10, fig.height = 8, save.flag = save.pdf)
+}, silent = T)
+
 ```
 
 ### DEG Table
@@ -1755,14 +1697,10 @@ datatable(deg.gene.sub,
                          dom = 'Bfrtip',
                          buttons = c('copy', 'csv', 'pdf')))
 
-
+write.csv(deg.gene.sub, file = paste0(output.path, "Tables/", "differential_genes_statistics.csv"), 
+          row.names = F) 
   
 ```
-
-
-
-
-
 
 Gene Expression 
 ===================================== 
@@ -1775,18 +1713,19 @@ Row {.tabset}
 ```{r exp mat, warning = F, message = F}
 
 try({
-  # mat.exp.scale.v4[is.na(mat.exp.scale.v4)] <- 0
-  gplots::heatmap.2( mat.exp.scale.v4, labCol= colnames(mat.exp.scale.v4),
-                     trace="none", 
-                     col= rev(hmcol),
-                     ColSideColors= cols, 
-                     breaks = seq(-3, 3, by = ((6)/100)),
-                     distfun = function(x) as.dist(1-cor(t(x))),
-                     hclustfun = function(x) hclust(x, method="complete"),
-                     main = "Gene Exp Matrix",
-                     labRow = F,
-                     xlab = "Cluster ID")
+plt.hm <- ggplotify::as.ggplot( pheatmap::pheatmap(mat.exp.scale.v4,  breaks = seq(-3, 3, by = ((6)/100)), 
+                   main = "Gene Expression Matrix\nrows=clusters, cols=genes, z=expression", show_rownames = F))
+}, silent = T)
 
+
+```
+
+```{r pdf heat}
+
+try({
+  savePDF(file.name = paste0(output.path, "PDF/", "M05_expression_heatmap.pdf"), 
+          plot.handle = plt.hm, 
+          fig.width = 10, fig.height = 8, save.flag = save.pdf)
 }, silent = T)
 
 ```
@@ -1803,6 +1742,9 @@ datatable(mat.exp.scale.v4,
           options = list(pageLength = 50,
                          dom = 'Bfrtip', 
                          buttons = c('copy', 'csv', 'pdf')))
+
+write.csv(mat.exp.scale.v4, file = paste0(output.path, "Tables/", "cluster_gene_expression.csv"), 
+          row.names = T) 
 
 ```
 
@@ -1857,6 +1799,18 @@ if (show.gene.exp){
 
 `r paste(knitr::knit(text = paste(out.sig, collapse = '\n')))`
 
+
+```{r pdf dotplots,include = FALSE}
+
+for (i in 1:length(plt.expression.dotplot)){
+  plot.name <- paste0("M05_dotplot_", names(plt.expression.dotplot)[i] ,".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+          plot.handle =  plt.expression.dotplot[[i]], 
+          fig.width = 10, fig.height = 10, save.flag = save.pdf)
+}
+
+```
+
 Gene Sets
 ===================================== 
 
@@ -1872,6 +1826,9 @@ datatable(df.gs.statistics,
           options = list(pageLength = 50,
                          dom = 'Bfrtip', 
                          buttons = c('copy', 'csv', 'pdf')))
+
+write.csv(df.gs.statistics, file = paste0(output.path, "Tables/", "geneset_summary.csv"), 
+          row.names = F) 
 ```
 
 ```{r res4, echo = FALSE, eval = TRUE, message=TRUE, warning=FALSE}
@@ -1881,6 +1838,16 @@ out <- flex.multiTabTables(gs.list, "gs.list")
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
 
+```{r save genelists}
+
+for (i in 1:length(gs.list)){
+  table.name <- paste0("genelist_", names(gs.list)[i], ".csv")
+  write.csv(gs.list[[1]], file = paste0(output.path, "Tables/",table.name), 
+          row.names = F) 
+}
+```
+
+
 
 ```{r save analysis log and Rdata results}
 
@@ -1888,6 +1855,10 @@ out <- flex.multiTabTables(gs.list, "gs.list")
 end.time <- proc.time()
 elapsed.time <- round((end.time - start.time)[[3]], 2)
 df.log <- addLogEntry("Run Time (s)", (elapsed.time), df.log, "elapsed.time")
+
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
 
 df.log_Module_5 <- df.log
 
@@ -1926,4 +1897,27 @@ knitr::kable(df.log_Module_5)
 
 ```
 
+
+```{r save analysis log as csv}
+
+try({
+  write.csv(df.log_Module_5, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+    row.names = F)  
+}, silent = T)
+
+```
+
+```{r merge pdfs, include = FALSE}
+
+# combine pdfs into single binder
+if (save.pdf){
+  
+  pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+  pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+  
+  pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+}
+
+
+```
 
