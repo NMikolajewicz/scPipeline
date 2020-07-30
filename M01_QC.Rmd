@@ -11,7 +11,7 @@ knit: (function(inputFile, encoding) {
     rmarkdown::render(input = inputFile,
       encoding = encoding,
       output_file = paste0(
-        xfun::sans_ext(inputFile), '_', format(Sys.Date(), "%d%m%y"),user, '.html'
+        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
       ),
       output_dir = paste0(data.path, "/HTML_Reports")
     )
@@ -35,9 +35,6 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 ```
 
 
-
-
-
 ```{r c2 - parameter_specification}
 
 # specify parameters
@@ -46,8 +43,8 @@ analysis.parameters <- analysisParameters(
   which.strata = c("GBM"),
   organism.filter.flag = F,                             
   organism.include = c("Mm"),
-  save.flag = F,                                                              # OPTIONAL; logical (default = T)  # save results
-  save.filename = "Module1_integration_Test.Rdata",
+  save.flag = T,                                                              # OPTIONAL; logical (default = T)  # save results
+  save.filename = "test_300720.Rdata", # note that prefix containing module number and run ID is appended to save file. 
   save.directory = "Preprocessed_Datasets/",
   cluster.resolution = 1,
   gene.upperlimit = 9000,
@@ -57,7 +54,7 @@ analysis.parameters <- analysisParameters(
   do.additional.reduction = F
 )
 
-save.pdf <- F
+save.pdf <- T
 n.workers <- list(
   normScale = 2
 )
@@ -190,42 +187,33 @@ if (input.type == 1){
   df.log <- addLogEntry("Input TPM Matrix", input_data, df.log, "input_data")
 }
 
-df.log <- addLogEntry("Output Results (.Rdata)", analysis.parameters$save.filename, df.log, "analysis.parameters$save.filename")
-df.log <- addLogEntry("Output Directory", analysis.parameters$save.directory, df.log, "analysis.parameters$save.directory")
 
-df.log <- addLogEntry("gene/cell Upper Limit (N/cell)", analysis.parameters$gene.upperlimit, df.log, "analysis.parameters$gene.upperlimit")
-df.log <- addLogEntry("gene/cell Lower Limit (N/cell)", analysis.parameters$gene.lowerlimit, df.log, "analysis.parameters$gene.lowerlimit")
+df.log <- addLogEntry("gene/cell Upper Limit (N/cell)", as.character(analysis.parameters$gene.upperlimit), df.log, "gene.upperlimit")
+df.log <- addLogEntry("gene/cell Lower Limit (N/cell)", as.character(analysis.parameters$gene.lowerlimit), df.log, "gene.lowerlimit")
 
 df.log <- addLogEntry("Filtered by unmatched reads", 
-                      analysis.parameters$unmatched.rate.filter.flag, df.log, "analysis.parameters$unmatched.rate.filter.flag")
+                      as.character(analysis.parameters$unmatched.rate.filter.flag), df.log, "unmatched.rate.filter.flag")
 
-df.log <- addLogEntry("Mitochondrial Content Upper Limit (%/cell)", analysis.parameters$mt.upperlimit, df.log, "analysis.parameters$mt.upperlimit")
+df.log <- addLogEntry("Mitochondrial Content Upper Limit (%/cell)", as.character(analysis.parameters$mt.upperlimit), df.log, "mt.upperlimit")
 
 if (analysis.parameters$subsample_factor == 1){subsampled <- FALSE} else {subsampled <- TRUE}
 df.log <- addLogEntry("Data Subsampled", subsampled, df.log, "subsampled")
 
-df.log <- addLogEntry("Cluster Resolution", analysis.parameters$cluster.resolution, df.log, "analysis.parameters$cluster.resolution")
-df.log <- addLogEntry("Filtered by organism", analysis.parameters$organism.filter.flag, df.log, "analysis.parameters$organism.filter.flag")
+df.log <- addLogEntry("Cluster Resolution", as.character(analysis.parameters$cluster.resolution), df.log, "cluster.resolution")
+df.log <- addLogEntry("Filtered by organism", as.character(analysis.parameters$organism.filter.flag), df.log, "organism.filter.flag")
 
 if (analysis.parameters$organism.filter.flag) {
-  df.log <- addLogEntry("Species Included", analysis.parameters$organism.include, df.log, "analysis.parameters$organism.include")
+  df.log <- addLogEntry("Species Included", as.character(analysis.parameters$organism.include), df.log, "organism.include")
 }
 
-df.log <- addLogEntry("Number of Workers", n.workers$normScale, df.log, "n.workers$normScale")
-df.log <- addLogEntry("Max Memory (Gb)", max.memory, df.log, "max.memory")
+df.log <- addLogEntry("Number of Workers", as.character(n.workers$normScale), df.log, "normScale")
+df.log <- addLogEntry("Max Memory (Gb)", as.character(max.memory), df.log, "max.memory")
 
 if (!is.na(which.strata)) {
-  df.log[nrow(df.log)+1, 1] <- as.character("Barcode(s) Included")
-  df.log[nrow(df.log), 2] <- as.character("which.strata")
-  if (length(which.strata) > 1){
-    df.log[nrow(df.log), 3] <- paste(which.strata, collapse=", ")
-  } else {
-    df.log[nrow(df.log), 3] <- as.character(which.strata)
-  }
+  df.log <- addLogEntry("Barcode(s) Included", which.strata, df.log, "which.strata")
 }
 
-df.log <- addLogEntry("Variables regressed out", analysis.parameters$vars2regress, df.log, "analysis.parameters$vars2regress")
-df.log <- addLogEntry("Experiment Identifier", pilot_input, df.log, "pilot_input")
+df.log <- addLogEntry("Variables regressed out", as.character(analysis.parameters$vars2regress), df.log, "vars2regress")
 df.log <- addLogEntry("Input Species", all_input_organisms, df.log, "all_input_organisms")
 
 ```
@@ -1103,16 +1091,23 @@ for (i in 1:length(meta.names)){
 
 # update central log
 run.id <- NULL
+if (!exists("user")) user <- "guest"
+
+clog.update.success <- F
 try({
-run.id <-  updateCentralLog(Module = "M01", pdf.flag = save.pdf)
-}, silent = T)
-if (is.null(run.id)) run.id <- ""
+  run.id <-  updateCentralLog(Module = "M01", input.data = which.data, input.subset = which.strata, pdf.flag = save.pdf)
+  clog.update.success <-  T
+}, silent = F)
+if (is.null(run.id))  {
+  warning("Central log update was unsuccessful :(\n")
+  run.id <- paste("M01_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+}
 
 ```
 
 
 
-```{r analysis log and save results}
+```{r analysis log}
 
 # Normalization Method #
 if (normalization_method_ps == "NFS"){
@@ -1130,40 +1125,38 @@ end.time <- proc.time()
 elapsed.time <- round((end.time - start.time)[[3]], 2)
 df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
 df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+
 df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
+
+
+
+```
+
+```{r output path and save results}
+
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+
+# create output directories
+dir.create(output.path)
+dir.create(paste0(output.path, "Tables/"))
+if (save.pdf) dir.create(paste0(output.path, "PDF/"))
+
+analysis.parameters$save.filename <- paste0(run.id, "_", analysis.parameters$save.filename)
+
+df.log <- addLogEntry("Output Results (.Rdata)", as.character(analysis.parameters$save.filename), df.log, "save.filename")
+df.log <- addLogEntry("Output Directory", as.character(analysis.parameters$save.directory), df.log, "save.directory")
+
+# save results to Preprocessed_Datasets/
+save.filename <- paste0(data.path, analysis.parameters$save.directory , analysis.parameters$save.filename)
 
 df.log_Module_1 <- df.log
-
-save.filename <- paste(analysis.parameters$save.directory , analysis.parameters$save.filename, sep = "")
-
 if ((analysis.parameters$save.flag == TRUE) ){
   save(so, gNames.list, df.log_Module_1, file = save.filename)
 }
 
-```
-
-```{r save PDFs}
-
-save.pdf <- T
-if (save.pdf){
-  
-testplots <- list(
-  QC.violin = list(plot = plt.QC_violin, dim = c(10,5)),
-  QC.scatter = list(plot = plt.QC_scatter, dim = c(12,5)),
-  QC.mito = list(plot = plt.mito_by_bc + theme_miko(legend = T), dim = c(5,5))
-)
-somePDFPath = "test.pdf"
-pdf(file=somePDFPath)  
-
-for (i in 1:length(testplots)){
-
-  print(testplots[[i]]$plot,
-        width = testplots[[i]]$dim[1],
-        height = testplots[[i]]$dim[2])
-} 
-dev.off() 
-
-}
 
 ```
 
@@ -1180,7 +1173,8 @@ Row
 ```{r plt.QC_violin, fig.height= 5, fig.width = 10}
 
 print(plt.QC_violin)
-savePDF(file.name = "M01_QC_violin.pdf", plot.handle = plt.QC_violin, fig.width = 10, fig.height = 5, save.flag = save.pdf)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M01_QC_violin.pdf"), plot.handle = plt.QC_violin, fig.width = 10, fig.height = 5, save.flag = save.pdf)
 
 ```
 
@@ -1188,21 +1182,24 @@ savePDF(file.name = "M01_QC_violin.pdf", plot.handle = plt.QC_violin, fig.width 
 
 ```{r plt.QC_scatter, fig.height= 5, fig.width = 12}
 print(plt.QC_scatter)
-savePDF(file.name = "M01_QC_scatter.pdf", plot.handle = plt.QC_scatter, fig.width = 12, fig.height = 5, save.flag = save.pdf)
+savePDF(file.name = paste0(output.path, "PDF/", "M01_QC_scatter.pdf"), plot.handle = plt.QC_scatter, fig.width = 12, fig.height = 5, save.flag = save.pdf)
+
 ```
 
 ### Mitochondrial %: Distribution (pre-filtering)
 
 ```{r mt.mito_by_bc}
 print(plt.mito_by_bc + theme_miko(legend = T))
-savePDF(file.name = "M01_mito_by_bc.pdf", plot.handle = plt.mito_by_bc + theme_miko(legend = T), fig.width = 8, fig.height = 5, save.flag = save.pdf)
+savePDF(file.name = paste0(output.path, "PDF/", "M01_mito_by_bc.pdf"), 
+        plot.handle = plt.mito_by_bc + theme_miko(legend = T), fig.width = 8, fig.height = 5, save.flag = save.pdf)
+
 ```
 
 ### Cells Recovered: Pre- and Post-Filtering
 
 ```{r plt.filter_pre_post}
 print(plt.filter_pre_post + theme_miko(legend = T))
-savePDF(file.name = "M01_filter_pre_post.pdf", plot.handle = plt.filter_pre_post + theme_miko(legend = T), 
+savePDF(file.name = paste0(output.path, "PDF/", "M01_filter_pre_post.pdf"), plot.handle = plt.filter_pre_post + theme_miko(legend = T), 
         fig.width = 5, fig.height = 5, save.flag = save.pdf)
 ```
 
@@ -1213,18 +1210,24 @@ Row
 
 ```{r plt.pre_post_norm}
 print(plt.pre_post_norm)
+savePDF(file.name = paste0(output.path, "PDF/", "M01_pre_post_norm.pdf"), plot.handle = plt.pre_post_norm, 
+        fig.width = 5, fig.height = 5, save.flag = save.pdf)
 ```
 
 ### UMI per cell
 
 ```{r plt.UMI_per_cell}
 print(plt.UMI_per_cell + theme_miko(legend = T))
+savePDF(file.name = paste0(output.path, "PDF/", "M01_UMI_per_cell.pdf"), plot.handle = plt.UMI_per_cell + theme_miko(legend = T), 
+        fig.width = 5, fig.height = 5, save.flag = save.pdf)
 ```
 
 ### Genes per cell
 
 ```{r plt.genes_per_cell}
 print(plt.genes_per_cell + theme_miko(legend = T))
+savePDF(file.name = paste0(output.path, "PDF/", "M01_genes_per_cell.pdf"), plot.handle = plt.genes_per_cell + theme_miko(legend = T), 
+        fig.width = 5, fig.height = 5, save.flag = save.pdf)
 ```
 
 
@@ -1232,6 +1235,8 @@ print(plt.genes_per_cell + theme_miko(legend = T))
 
 ```{r plt.variable_genes}
 print(plt.variable_genes)
+savePDF(file.name = paste0(output.path, "PDF/", "M01_variable_genes.pdf"), plot.handle = plt.variable_genes, 
+        fig.width = 5, fig.height = 5, save.flag = save.pdf)
 ```
 
 Row 
@@ -1260,17 +1265,33 @@ Row {.tabset}
 
 ### QC (mT)
 
-```{r plt QC ranks mT, fig.width = 15, fig.height = 5}
-ggpubr::ggarrange(plt.gene.umi.mito, plt.umi.rank.mito, plt.gene.rank.mito, plt.mt.rank.mito, ncol = 4) 
+```{r plt QC ranks mT, fig.width = 15, fig.height = 4}
+ cowplot::plot_grid(plt.gene.umi.mito, plt.umi.rank.mito, plt.gene.rank.mito, plt.mt.rank.mito, ncol = 4) 
+
+savePDF(file.name = paste0(output.path, "PDF/", "M01_QC_mt_ranks.pdf"), 
+        plot.handle =  cowplot::plot_grid(plt.gene.umi.mito, plt.umi.rank.mito, plt.gene.rank.mito, plt.mt.rank.mito, ncol = 4), 
+        fig.width = 15, fig.height = 5, save.flag = save.pdf)
+
 ```
 
 ### QC (unmatched rate)
 
-```{r plt QC ranks uR, fig.width=17, fig.height = 10}
+```{r plt QC ranks uR, fig.width=12, fig.height = 7}
 
 try({
-  ggpubr::ggarrange(plt.umi.rank.match, plt.gene.rank.match, plt.mt.rank.match,
+  cowplot::plot_grid(plt.umi.rank.match, plt.gene.rank.match, plt.mt.rank.match,
                     plt.unmatch.umi, plt.gene.umi.match, plt.umatch.rank,ncol = 3, nrow = 2) 
+
+}, silent = T)
+
+```
+```{r}
+try({
+  savePDF(file.name = paste0(output.path, "PDF/", "M01_QC_unmatchedRate_ranks.pdf"), 
+        plot.handle =   cowplot::plot_grid(plt.umi.rank.match, plt.gene.rank.match, plt.mt.rank.match,
+                    plt.unmatch.umi, plt.gene.umi.match, plt.umatch.rank,ncol = 3, nrow = 2) , 
+        fig.width = 17, fig.height = 10, save.flag = save.pdf)
+  
 }, silent = T)
 
 ```
@@ -1279,7 +1300,9 @@ try({
 
 ```{r QC venn, fig.width=5, fig.height = 5}
 try({
- plot(plt.filter.venn) 
+  plot(plt.filter.venn) 
+  savePDF(file.name = paste0(output.path, "PDF/", "M01_venn_filter.pdf"), plot.handle =  plot(plt.filter.venn)  , 
+          fig.width = 5, fig.height = 5, save.flag = save.pdf)
 }, silent = T)
 ```
 
@@ -1294,24 +1317,46 @@ Row {.tabset}
 
 ```{r, fig.width=12, fig.height=5}
 print(plt.umap.combo)
+  savePDF(file.name =paste0(output.path, "PDF/", "M01_umap.pdf"), plot.handle =  plt.umap.combo, 
+          fig.width = 12, fig.height = 5, save.flag = save.pdf)
+  
 ```
 
 ### TSNE
 
 ```{r, fig.width=12, fig.height=5}
+
 print(plt.tsne.combo)
+if (!is.null(plt.tsne.combo)){
+    savePDF(file.name = paste0(output.path, "PDF/", "M01_tsne.pdf"), plot.handle =  plt.tsne.combo, 
+          fig.width = 12, fig.height = 5, save.flag = save.pdf)
+}
+
 ```
 
 ### PCA
 
 ```{r, fig.width=12, fig.height=5}
+
 print(plt.pca.combo)
+
+if (!is.null(plt.pca.combo)){
+    savePDF(file.name = paste0(output.path, "PDF/", "M01_pca.pdf"), plot.handle =  plt.pca.combo, 
+          fig.width = 12, fig.height = 5, save.flag = save.pdf)
+}
 ```
 
 ### ICA
 
 ```{r, fig.width=12, fig.height=5}
+
 print(plt.ica.combo)
+
+if (!is.null(plt.ica.combo)){
+    savePDF(file.name = paste0(output.path, "PDF/", "M01_ica.pdf"), plot.handle =  plt.ica.combo, 
+          fig.width = 12, fig.height = 5, save.flag = save.pdf)
+}
+
 ```
 
 PCA 
@@ -1322,15 +1367,26 @@ Row
 
 ### PCA
 
-```{r plt.PCA}
-grid.arrange(plt.scree1, plt.scree2, ncol=2)
+```{r plt.PCA, fig.width=8, fig.height = 4}
+
+cowplot::plot_grid(plt.scree1, plt.scree2, ncol=2)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M01_scree.pdf"), plot.handle =  cowplot::plot_grid(plt.scree1, plt.scree2, ncol=2), 
+        fig.width = 8, fig.height = 4, save.flag = save.pdf)
+
 ```
 
 QC UMAPs
 ===================================== 
 
 ```{r UMAP QC plots, fig.width=12, fig.height=6}
+
 plt.umap.qc
+
+savePDF(file.name = paste0(output.path, "PDF/", "M01_QC_umap.pdf"), plot.handle =  plt.umap.qc, 
+        fig.width = 12, fig.height = 6, save.flag = save.pdf)
+
+
 ```
 
 QC by subgroups (pre-filtering)
@@ -1340,7 +1396,12 @@ Row {data-height=700}
 -----------------------------------------------------------------------
 
 ```{r plt.violin_by_subgroup, fig.height= 5, fig.width = 12}
+
 print(plt.violin_by_subgroup)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M01_violin_by_subgroup.pdf"), plot.handle =  plt.violin_by_subgroup, 
+        fig.width = 12, fig.height = 5, save.flag = save.pdf)
+
 ```
 
 Row {.tabset}
@@ -1377,6 +1438,9 @@ Cell Cycle
 
 try({
   print(plt.cc)
+  savePDF(file.name = paste0(output.path, "PDF/", "M01_cell_cycle.pdf"), plot.handle =  plt.cc, 
+        fig.width = 14, fig.height = 4, save.flag = save.pdf)
+  
 }, silent = T)
 
 ```
@@ -1405,8 +1469,15 @@ Variable Genes
 if (!is.null(df.var.meta)){
   flex.asDT(df.var.meta)
 }
+
 ```
 
+```{r save variable gene table}
+if (!is.null(df.var.meta)){
+  write.csv(df.var.meta, file = paste0(output.path, "Tables/", "variableGenes.csv"), 
+    row.names = F)
+}
+```
 
 Log
 ===================================== 
@@ -1415,6 +1486,27 @@ Log
 knitr::kable(df.log_Module_1)
 
 ```
+```{r}
 
+try({
+  write.csv(df.log_Module_1, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+    row.names = F)  
+}, silent = T)
+
+```
+
+```{r merge pdfs, include = FALSE}
+
+# combine pdfs into single binder
+if (save.pdf){
+  
+  pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+  pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+  
+  pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+}
+
+
+```
 
 
