@@ -18,7 +18,7 @@ Single-cell RNA seq analysis pipeline. Developed for Moffat Lab.
 4.	Create Github account using same email as above.
     * https://github.com. 
 6.	Create SSH key which will allow you to link to online git repository. 
-    * Navigate tools > global options… > GIT/SVN > create RSA key...
+    * In Rstudio, navigate tools > global options… > GIT/SVN > create RSA key...
 7.	Connect local Rproject to GitHub repo
     * *In Terminal*: `git remote add origin https://github.com/NMikolajewicz/scPipeline.git`
 8.	Pull scPipeline from GitHub repo (all files from repo are downloaded)
@@ -40,12 +40,9 @@ Single-cell RNA seq analysis pipeline. Developed for Moffat Lab.
 
 ## Getting latest version of scPipeline 
 To get the latest version of all the analysis modules maintained on scPipeline, pull them from the GIT repository and override the current version present in your local repository. NOTE: This is a destructive process, so if you would like to retain changes made locally, either rename or move the scripts to a directory outside of the local scPipeline repository. 
-
-Assuming the remote repository is origin, and you are interested in master:
     * *In Terminal*: `git fetch origin`
     * *In Terminal*: `git reset --hard origin/master`
-
 This tells it to fetch the commits from the remote repository, and position your working copy to the tip of its master branch.
 All your local commits not common to the remote will be gone.
-    * If there is an error indicating that another GIT process is running in this repository, open the .git directory and delete the index.lock file.
+    * If there is an error indicating that another GIT process is running in this repository, open the .git directory and delete the 'index.lock' file.
 
