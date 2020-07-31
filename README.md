@@ -49,6 +49,13 @@ This tells it to fetch the commits from the remote repository, and position your
 All your local commits not common to the remote will be gone.
 * If there is an error indicating that another GIT process is running in this repository, open the .git directory and delete the 'index.lock' file.
 
+### 1.4 scPipeline checklist
+scPipelineCheck.Rmd performs a check to ensure the .Rprofile is correctly specified, and that all the downstream data directories can be found. 
+
+1. Open `scPipelineCheck.Rmd`
+2. Press `knit' to generate checklist report. 
+
+
 ## 2. Module Overview
 
 ### M00 scRNAseq Tutorial
