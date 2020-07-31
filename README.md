@@ -13,15 +13,15 @@ Single-cell RNA seq analysis pipeline. Developed for Moffat Lab.
         +	OS X: http://git-scm.com/download/mac
 4.	Configure GIT to your user
     *	Navigate to Terminal tab (next to console) in new RStudio session (in scPipeline Project)
-        +	git config --global user.name "YOUR FULL NAME"
-        +	git config --global user.email "YOUR EMAIL ADDRESS"
+        +	`git config --global user.name "YOUR FULL NAME"`
+        +	`git config --global user.email "YOUR EMAIL ADDRESS"`
     *	(You can check if you’re set up correctly by running git config --global --list.)
 5.	Create an account on GitHub, ⦁	https://github.com. Use the same email address as above.
 6.	Create SSH key which will allow you to link to online git repository. Navigate tools > global options… > GIT/SVN > create RSA key…
 7.	Connect local Rproject to GitHub repo
-`git remote add origin https://github.com/NMikolajewicz/scPipeline.git`
+    * `git remote add origin https://github.com/NMikolajewicz/scPipeline.git`
 8.	Pull scPipeline from GitHub repo (all files form repo are downloaded)
-`git pull origin master`
+    * `git pull origin master`
     * If error occurs, likely due to conflict with local .gitignore - delete this local file (same directory as scPipeline) and try again. 
 
 ## Setting up .Rprofile
