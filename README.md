@@ -2,25 +2,25 @@
 Single-cell RNA seq analysis pipeline. Developed for Moffat Lab. 
 
 ## Setting up local scPipeline Repository
-*	Open Rstudio
-*	Navigtate file > New Project… > New Directory > New Project
-*	Create new Project:
+1.	Open Rstudio
+2.	Navigtate file > New Project… > New Directory > New Project
+3.	Create new Project:
 *	Directory Name: scPipeline
 *	Create Project as subdirectory: ~
 *	Check “Create a git repository”
   +	Note. Must have GIT installed on you local computer. 
   +	Windows: http://git-scm.com/download/win
   +	OS X: http://git-scm.com/download/mac
-*	Configure GIT to your user
+4.	Configure GIT to your user
 *	Navigate to Terminal tab (next to console) in new RStudio session (in scPipeline Project)
   +	git config --global user.name "YOUR FULL NAME"
   +	git config --global user.email "YOUR EMAIL ADDRESS"
 *	(You can check if you’re set up correctly by running git config --global --list.)
-*	Create an account on GitHub, ⦁	https://github.com. Use the same email address as above.
-*	Create SSH key which will allow you to link to online git repository. Navigate tools > global options… > GIT/SVN > create RSA key…
-*	Connect local Rproject to GitHub repo
+5.	Create an account on GitHub, ⦁	https://github.com. Use the same email address as above.
+6.	Create SSH key which will allow you to link to online git repository. Navigate tools > global options… > GIT/SVN > create RSA key…
+7.	Connect local Rproject to GitHub repo
   +	git remote add origin https://github.com/NMikolajewicz/scPipeline.git
-*	Pull scPipeline from GitHub repo (all files form repo are downloaded)
+8.	Pull scPipeline from GitHub repo (all files form repo are downloaded)
   +	git pull origin master
   +	If error occurs, likely due to conflict with local .gitignore - delete this local file (same directory as scPipeline) and try again. 
 
