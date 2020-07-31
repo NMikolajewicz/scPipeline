@@ -3,14 +3,14 @@ Single-cell RNA seq analysis pipeline. Developed for Moffat Lab.
 
 ## Setting up local scPipeline Repository
 1.	Open Rstudio
-2.	Navigtate file > New Project… > New Directory > New Project
+2.	Navigate file > New Project… > New Directory > New Project
 3.	Create new Project:
-*	Directory Name: scPipeline
-*	Create Project as subdirectory: ~
-*	Check “Create a git repository”
-  +	Note. Must have GIT installed on you local computer. 
-  +	Windows: http://git-scm.com/download/win
-  +	OS X: http://git-scm.com/download/mac
+    *	Directory Name: scPipeline
+    *	Create Project as subdirectory: ~
+    *	Check “Create a git repository”
+        +	Note. Must have GIT installed on you local computer. 
+        +	Windows: http://git-scm.com/download/win
+        +	OS X: http://git-scm.com/download/mac
 4.	Configure GIT to your user
 *	Navigate to Terminal tab (next to console) in new RStudio session (in scPipeline Project)
   +	git config --global user.name "YOUR FULL NAME"
