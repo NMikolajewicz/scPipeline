@@ -53,7 +53,7 @@ All your local commits not common to the remote will be gone.
 scPipelineCheck.Rmd performs a check to ensure the .Rprofile is correctly specified, and that all the downstream data directories can be found. 
 
 1. Open `scPipelineCheck.Rmd`
-2. Press `knit' to generate checklist report. 
+2. Press `knit` to generate checklist report. 
 
 
 ## 2. Module Overview
