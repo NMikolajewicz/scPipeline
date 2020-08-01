@@ -106,23 +106,13 @@ df.log <- addLogEntry("PDF saved", save.pdf, df.log, "save.pdf")
 ```
 
 
-```{r check input paths}
-
-if (!exists("data.path")) {
-  data.path <- ""
-  warning("data.path not found\n")
-}
-
-if (!exists("user")) {
-  user <- "guest"
-  warning("user not found\n")
-}
-
-```
-
-
-
 ```{r load data}
+
+
+if (!exists("data.path") & !exists("user")) {
+  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+}
+
 # load data
 warning("Importing data...")
 if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
