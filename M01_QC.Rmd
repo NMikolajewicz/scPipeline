@@ -65,6 +65,10 @@ max.memory <- 200 # numeric, in terms of Gb (set to 100 for cluster)
 
 ```{r get input data paths}
 
+if (!exists("data.path") & !exists("user")) {
+  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+}
+
 # get input data files paths
 inputDataSpecification <- function(inputs = "M01_inputs.csv", subsets = "M01_subsets.csv"){
   

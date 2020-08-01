@@ -48,10 +48,7 @@ dir.preprocessed <- "Preprocessed_Datasets/"
 dir.reference <- "Reference_Datasets/"
 
 # Query input
-# input.file <- "pilot8_sci_summary_AB.RData"
-# input.file <- "Module1_p7_mesoderm_110620.Rdata"
 input.file <- "M01_NM2_R1_test_300720.Rdata"
-# input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
 
 # specify reference genesets
 #which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", "cancerSEA", "immune.signatures", "immuneSubtype", "GBM")
@@ -95,21 +92,12 @@ names(csv_input) <- as.vector(query.references$names)
 
 ```
 
-```{r check input paths}
-
-if (!exists("data.path")) {
-  data.path <- ""
-  warning("data.path not found\n")
-}
-
-if (!exists("user")) {
-  user <- "guest"
-  warning("user not found\n")
-}
-
-```
 
 ```{r load data}
+
+if (!exists("data.path") & !exists("user")) {
+  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+}
 
 # load query dataset
 warning("Importing data...")
@@ -1498,9 +1486,6 @@ datatable(vst.merge.lenient,
                          dom = 'Bfrtip', 
                          buttons = c('copy', 'csv', 'pdf')))
 
-
-#for (i in 1:length(top_markers_wide_res.list)){
-#  table.name <- paste0("markerList_", gsub(".", "_", names(top_markers_wide_res.list)[i], fixed = T), "resolution.csv")
 write.csv(vst.merge.lenient, file = paste0(output.path, "Tables/", "annotation_scores_significant.csv"), 
           row.names = F) 
 
