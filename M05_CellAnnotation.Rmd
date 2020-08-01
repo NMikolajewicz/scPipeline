@@ -48,16 +48,18 @@ dir.preprocessed <- "Preprocessed_Datasets/"
 dir.reference <- "Reference_Datasets/"
 
 # Query input
-input.file <- "M01_NM2_R1_test_300720.Rdata"
+# input.file <- "M01_NM2_R1_test_300720.Rdata"
+input.file <- "Module1_p7_mesoderm_110620.Rdata"
+# input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 
 # specify reference genesets
-#which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", "cancerSEA", "immune.signatures", "immuneSubtype", "GBM")
-which.references <- c("MCA_50", "GBM")
+which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", "cancerSEA", "immune.signatures", "immuneSubtype", "GBM")
+# which.references <- c("MCA_50", "GBM")
 
 # specify cluster resolution
 cluster.resolution <- 0.15 # OPTIONAL; range 0 to inf (default = 1)
 
-so.input.species <- "Mm" # REQUIRED; Hs, Mm
+so.input.species <- "Hs" # REQUIRED; Hs, Mm
 
 # Data subsampling
 subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
@@ -68,7 +70,7 @@ print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 
 # specify number of workers for parallelization
 n.workers <- list(
-  scoring = 3
+  scoring = 6
 )
 
 #logical indicating whether to generate gene expression dot plots (computationally intensive)
@@ -107,6 +109,11 @@ load(paste(data.path, dir.preprocessed, input.file, sep = ""));
 so.query <- prepSeurat(so)
 rm(so)
 
+# slim down so
+#so.query@assays[["RNA"]] <- NULL
+#so.query@graphs[["integrated_nn"]] <- NULL
+invisible(gc())
+
 current.assay <- DefaultAssay(so.query)
 
 ```
@@ -136,7 +143,8 @@ if (exists("subset.df")){
 ```{r prep gene list}
 
 # prep gene list
-gNames.list <- prepGeneList(so.query, objects())
+try({gNames.list <- prepGeneList(so.query, objects())}, silent = T)
+
 
 ```
 
@@ -364,6 +372,7 @@ prepGeneSet <- function(gs.file, gs.dir, gs.species, gs.available.genes){
   gs.long <- pivot_longer(gs.data, colnames(gs.data))
   colnames(gs.long) <- c("set", "genes")
   gs.long$set <- rmvCSVprefix(gs.long$set)
+  gs.long$genes <- as.character(gs.long$genes)
   
   # get correct speices
   if (gs.species == "Hs"){
@@ -371,6 +380,8 @@ prepGeneSet <- function(gs.file, gs.dir, gs.species, gs.available.genes){
   } else if (gs.species == "Mm"){
     gs.long$genes <- firstup(gs.long$genes)
   }
+  
+  gs.long <- gs.long[complete.cases(gs.long), ]
   
   # trim white space
   gs.long$genes <- trimws(as.character(gs.long$genes))
@@ -403,6 +414,13 @@ gs.list <- list()
 
 # get available genes
 av.genes <- rownames(so.query)
+
+# get correct speices
+if (so.input.species == "Hs"){
+  av.genes <-  toupper(av.genes) 
+} else if (so.input.species == "Mm"){
+  av.genes <-  firstup(av.genes) 
+}
 
 for (i in 1:length(csv_input)){
   # get set name
@@ -442,7 +460,7 @@ format.results <- function(scores, score.name){
   reformated.scores <- as.data.frame(scores)
   reformated.scores$cell <- rownames(reformated.scores)
   reformated.scores.long <- pivot_longer(reformated.scores, colnames(reformated.scores)[1:(length(colnames(reformated.scores))-1)])
-  reformated.scores.long$cluster.prediction <- paste(reformated.scores.long$cell, "-", reformated.scores.long$name, sep = "")
+  reformated.scores.long$cluster.prediction <- paste(reformated.scores.long$cell, "-c", reformated.scores.long$name, sep = "")
   reformated.scores.long <- reformated.scores.long[ ,c("cluster.prediction", "value")]
   colnames(reformated.scores.long) <- c("cluster.prediction", score.name)
   
@@ -466,42 +484,117 @@ rcnames.2d <- function (score.mat, exp.mat, sig){
 ```{r DEG analysis}
 
 # DEG analysis
-  deg.gene.a <- FindAllMarkers(so.query, 
-                             assay = DefaultAssay(so.query),
-                             slot = "data",
-                             only.pos = F, 
-                             min.pct = 0,
-                             test.use = "MAST",
-                             logfc.threshold = 0.15, 
-                             max.cells.per.ident = 200,
-                             return.thresh = 1, #1 ensures all genes are returned
-                             verbose = F)
 
-deg.gene.a$pct.dif <- deg.gene.a$pct.1 - deg.gene.a$pct.2
+#################################################################################
+# PARALLEL IMPLEMENTATION OF FINDALLMARKERS
+# findAllMarkers.Parallel <- function(object, n.workers, ...){
+#   
+# }
 
+do.deg <- F
 
-# reformat data
-df.logfc <- deg.gene.a[ ,c("gene", "cluster", "avg_logFC")]
-df.lfc.wide  <- pivot_wider(df.logfc, names_from = "cluster", values_from = "avg_logFC")
-all.genes <- rownames(so.query)
-which.missing <-all.genes[!(all.genes %in% df.lfc.wide$gene)] 
-df.lfc.missing <- data.frame(gene = which.missing, matrix(0, nrow = length(which.missing), ncol = ncol(df.lfc.wide)-1))
-colnames(df.lfc.missing) <- c("gene", colnames(df.lfc.wide)[2:ncol(df.lfc.wide)])
-df.lfc.wide <- bind_rows(df.lfc.wide, df.lfc.missing)
-df.lfc.wide <- df.lfc.wide[match(all.genes, df.lfc.wide$gene), ]
-df.lfc.wide[is.na(df.lfc.wide)] <- 0
-df.lfc.wide <- as.data.frame(df.lfc.wide)
+if (do.deg){
+  
+  
+  if (n.workers$deg == 1){
+    deg.gene.a <- FindAllMarkers(so.query,
+                                 assay = DefaultAssay(so.query),
+                                 slot = "data",
+                                 only.pos = F,
+                                 min.pct = 0,
+                                 test.use = "MAST",
+                                 logfc.threshold = 0.15,
+                                 max.cells.per.ident = 200,
+                                 return.thresh = 1, #1 ensures all genes are returned
+                                 verbose = F)
+  } else {
+    
+    # helper function to set BPParam
+    safeBPParam <- function(nworkers) {
+      if (.Platform$OS.type=="windows") {
+        BiocParallel::SnowParam(nworkers)
+      } else {
+        BiocParallel::MulticoreParam(nworkers)
+      }
+    }
+    
+    # get number of unique clusters
+    M <- length(unique(so.query@meta.data$seurat_clusters))
+    N <- M-1
+    
+    # get optimal BPParam setup
+    if (n.workers$deg > M) n.workers$deg <- M
+    nw <- safeBPParam(n.workers$deg)
+    
+    # find marker wrapper function
+    FindMarker.wrapper <- function(object, x){
+      Seurat::FindMarkers(object, ident.1 = x, only.pos = F, min.pct = 0, test.use = "MAST",
+                          logfc.threshold = 0.15, max.cells.per.ident = 200)
+    }
+    
+    # run parallelized implementation of find markers
+    deg.gene.par <- BiocParallel::bplapply(0:N, object = so.query, FUN = FindMarker.wrapper, BPPARAM = nw)
+    
+    # retrieve results
+    deg.gene.a <- NULL
+    for (i in 1:length(deg.gene.par)){
+      deg.gene.par[[i]]$cluster <- i-1
+      deg.gene.par[[i]]$gene <- rownames(deg.gene.par[[i]])
+      deg.gene.a <- bind_rows(deg.gene.a.unpack, deg.gene.par[[i]])
+    }
+    
+    rm(deg.gene.par)
+    invisible(gc())
+  }
+  
+  
+}
 
-df.pd <- deg.gene.a[ ,c("gene", "cluster", "pct.dif")]
-df.pd.wide  <- pivot_wider(df.pd, names_from = "cluster", values_from = "pct.dif")
-all.genes <- rownames(so.query)
-which.missing <-all.genes[!(all.genes %in% df.pd.wide$gene)] 
-df.pd.missing <- data.frame(gene = which.missing, matrix(0, nrow = length(which.missing), ncol = ncol(df.pd.wide)-1))
-colnames(df.pd.missing) <- c("gene", colnames(df.pd.wide)[2:ncol(df.pd.wide)])
-df.pd.wide <- bind_rows(df.pd.wide, df.pd.missing)
-df.pd.wide <- df.pd.wide[match(all.genes, df.pd.wide$gene), ]
-df.pd.wide[is.na(df.pd.wide)] <- 0
-df.pd.wide <- as.data.frame(df.pd.wide)
+##################################################################################
+
+ef.mat <- as.matrix(so.query@assays[[DefaultAssay(so.query)]]@data)
+sc.meta <- so.query@meta.data[["seurat_clusters"]]
+u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
+
+logfc.mat <- matrix(nrow = nrow(so.query), ncol = length(u.clust))
+pct.mat <- matrix(nrow = nrow(so.query), ncol = length(u.clust))
+e.mat <- matrix(nrow = nrow(so.query), ncol = length(u.clust))
+f.mat <- matrix(nrow = nrow(so.query), ncol = length(u.clust))
+for (i in 1:length(u.clust)){
+  which.cells <- sc.meta %in% u.clust[i]
+  
+  # log expression
+  e1 <- log(rowMeans(expm1(x = ef.mat[, which.cells])) + 1)
+  e.mat[ ,i] <- e1
+  
+  # logfc
+  e2 <- log(rowMeans(expm1(x = ef.mat[, !which.cells])) + 1)
+  logfc.mat[ ,i] <- e1 - e2
+  
+  # expressing fraction
+  f1 <- rowMeans(ef.mat[, which.cells] > 0)
+  f.mat[ ,i] <- f1
+  
+  # pct difference
+  f2 <- rowMeans(ef.mat[, !which.cells] > 0)
+  pct.mat[ ,i] <- f1-f2
+  
+}
+
+colnames(e.mat) <- colnames(logfc.mat) <-  colnames(f.mat) <-  colnames(pct.mat) <- u.clust
+rownames(e.mat) <- rownames(logfc.mat) <-  rownames(f.mat) <-  rownames(pct.mat) <- rownames(ef.mat)
+
+df.lfc.wide <- data.frame(gene = rownames(ef.mat), data.frame(logfc.mat)); colnames(df.lfc.wide) <- c("gene", u.clust)
+df.pd.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(pct.mat)); colnames(df.pd.wide) <- c("gene", u.clust)
+df.e.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(e.mat)); colnames(df.e.wide) <- c("gene", u.clust)
+df.f.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(f.mat)); colnames(df.f.wide) <- c("gene", u.clust)
+
+df.lfc.long <- pivot_longer(df.lfc.wide, colnames(df.lfc.wide)[2:ncol(df.lfc.wide)]); 
+df.pd.long <- pivot_longer(df.pd.wide, colnames(df.pd.wide)[2:ncol(df.pd.wide)])
+df.e.long <- pivot_longer(df.e.wide, colnames(df.e.wide)[2:ncol(df.e.wide)])
+df.f.long <- pivot_longer(df.f.wide, colnames(df.f.wide)[2:ncol(df.f.wide)])
+
+colnames(df.lfc.long) <- colnames(df.pd.long) <- colnames(df.e.long) <- colnames(df.f.long) <- c("gene", "cluster", "value")
 
 ```
 
@@ -525,35 +618,9 @@ dot.comp.scale.list <- list()
 dot.mod.scale.list <- list()
 dot.per.scale.list <- list()
 
-# remove duplicate gene names
-which.duplicate <- duplicated(rownames(so.query))
-so.query <- so.query[!which.duplicate, ]
-which.duplicate <- duplicated( rownames(so.query@assays[[DefaultAssay(so.query)]]@scale.data))
-so.query@assays[[DefaultAssay(so.query)]]@scale.data <- so.query@assays[[DefaultAssay(so.query)]]@scale.data[!which.duplicate, ]
-
-# Compute observed and null expression matrices (cluster-level averages)
-Idents(so.query) <- "seurat_clusters"
-df.exp.scale <- AverageExpression(object = so.query, use.scale = T, assays = DefaultAssay(so.query))[[1]]
-colnames(df.exp.scale) <- paste("c", colnames(df.exp.scale), sep = "")
-
-# cast expression data as matrix
-exp.mat.scale.processed <- as.matrix(df.exp.scale)
-
-# get avg expression / fraction
-exp.mat <- avgGroupExpression(so.query, which.data = "data", which.center = "mean")
-per.mat <- avgGroupExpression(so.query, which.data = "data", which.center = "fraction")
-exp.mat.long <- pivot_longer(exp.mat, colnames(exp.mat)[2:ncol(exp.mat)])
-exp.mat.long$cluster <- as.numeric(gsub("c", "",exp.mat.long$name))
-exp.mat.long$cluster <- factor(exp.mat.long$cluster, levels = unique(exp.mat.long$cluster)[order(unique(exp.mat.long$cluster))])
-per.mat.long <- pivot_longer(per.mat, colnames(per.mat)[2:ncol(per.mat)])
-per.mat.long$cluster <- as.numeric(gsub("c", "",per.mat.long$name))
-per.mat.long$cluster <- factor(per.mat.long$cluster, levels = unique(per.mat.long$cluster)[order(unique(per.mat.long$cluster))])
-rm(exp.mat); rm(per.mat);
-
 # initiate score lists
 e.score.list <- list()
 expr.score.list <- list()
-# mod.score.list <- list()
 per.score.list <- list()
 logfc.score.list <- list()
 pd.score.list <- list()
@@ -566,6 +633,8 @@ doParallel::registerDoParallel(cl)
 
 # iterate through each gene signature list
 score.results <- foreach(i = 1:length(signatures.symbol), .packages = c("scMiko", "Seurat", "dplyr", "purrr", "GSVA"))  %dopar% {
+  # for (i in 1:length(signatures.symbol)){
+  
   
   # initiate score data frames
   e.score <- NULL
@@ -587,152 +656,123 @@ score.results <- foreach(i = 1:length(signatures.symbol), .packages = c("scMiko"
   
   #####################
   # calculate gene-expression percentage (per scores) and Avg Exp scores (expr scores)
-  per.score <- matrix(nrow = length(sig), ncol = ncol(exp.mat.scale.processed))
-  expr.score <- matrix(nrow = length(sig), ncol = ncol(exp.mat.scale.processed))
-  logfc.score <- matrix(nrow = length(sig), ncol = ncol(exp.mat.scale.processed))
-  pctdif.score <- matrix(nrow = length(sig), ncol = ncol(exp.mat.scale.processed))
+  per.score <- matrix(nrow = length(sig), ncol = length(u.clust))
+  expr.score <- matrix(nrow = length(sig), ncol =length(u.clust))
+  logfc.score <- matrix(nrow = length(sig), ncol = length(u.clust))
+  pctdif.score <- matrix(nrow = length(sig), ncol = length(u.clust))
   
-  
-  for (j in 1:length(sig)){
+  if (length(sig) > 0){
     
-    per.dot.score <- NULL
-    per.dot.null <- NULL
-    if (sum(rownames(exp.mat.scale.processed) %in% sig[[j]]) > 0){
-      # get features for current signature
-      cur.features <- unique(rownames(exp.mat.scale.processed)[rownames(exp.mat.scale.processed) %in% sig[[j]]])
+    for (j in 1:length(sig)){
       
-      # get geneset size
-      n.genes.total <- length(sig[[j]])
-      n.genes.available <- length(cur.features)
-      df.n.gene <- bind_rows(df.n.gene, data.frame(ref.set = which.sig,
-                                                   cell = names(sig)[j],
-                                                   n.genes.total = n.genes.total,
-                                                   n.genes.available, n.genes.available))
-      
-      per.mat.sub <- per.mat.long[per.mat.long$genes %in% cur.features, ]
-      exp.mat.sub <- exp.mat.long[exp.mat.long$genes %in% cur.features, ]
-      df.lfc.sub <- df.lfc.wide[(df.lfc.wide$gene) %in% cur.features, ] %>% dplyr::select(-c("gene"))
-      df.pd.sub <- df.pd.wide[(df.pd.wide$gene) %in% cur.features, ] %>% dplyr::select(-c("gene"))
-      
-      per.exp <- as.vector(per.mat.sub %>% group_by(cluster) %>% summarize(mean.per= mean(value, na.rm = T)))
-      per.score[j,] <- as.vector(per.exp$mean.per)
-      
-      # avg expression (observed)
-      av.exp <- as.vector(exp.mat.sub %>% group_by(cluster) %>% summarize(mean.exp= mean(value, na.rm = T)))
-      expr.score[j,] <- as.vector(av.exp$mean.exp)
-      
-      # avg logFC and pd (observed)
-      logfc.score[j,] <-colMeans(df.lfc.sub)
-      pctdif.score[j,] <-colMeans(df.pd.sub)
-      
-    } else {
-      per.score[j,] <- 0
-      expr.score[j,] <- 0
-      logfc.score[j,] <- 0
-      pctdif.score[j,] <- 0
+      per.dot.score <- NULL
+      per.dot.null <- NULL
+      if (sum(rownames(ef.mat) %in% sig[[j]]) > 0){
+        # get features for current signature
+        cur.features <- unique(rownames(ef.mat)[rownames(ef.mat) %in% sig[[j]]])
+        
+        # get geneset size
+        n.genes.total <- length(sig[[j]])
+        n.genes.available <- length(cur.features)
+        df.n.gene <- bind_rows(df.n.gene, data.frame(ref.set = which.sig,
+                                                     cell = names(sig)[j],
+                                                     n.genes.total = n.genes.total,
+                                                     n.genes.available, n.genes.available))
+        
+        per.mat.sub <- df.pd.long[df.pd.long$gene %in% cur.features, ]
+        exp.mat.sub <- df.e.long[df.e.long$gene %in% cur.features, ]
+        lfc.mat.sub <- df.lfc.long[df.lfc.long$gene %in% cur.features, ]
+        pct.mat.sub <- df.pd.long[df.pd.long$gene %in% cur.features, ]
+        
+        per.exp <- as.vector(per.mat.sub %>% group_by(cluster) %>% summarize(mean.per= mean(value, na.rm = T)))
+        per.score[j,] <- as.vector(per.exp$mean.per)
+        
+        # avg expression (observed)
+        av.exp <- as.vector(exp.mat.sub %>% group_by(cluster) %>% summarize(mean.exp= mean(value, na.rm = T)))
+        expr.score[j,] <- as.vector(av.exp$mean.exp)
+        
+        pd.exp <- as.vector(pct.mat.sub %>% group_by(cluster) %>% summarize(mean.exp= mean(value, na.rm = T)))
+        pctdif.score[j,] <- as.vector(pd.exp$mean.exp)
+        
+        lfc.exp <- as.vector(lfc.mat.sub %>% group_by(cluster) %>% summarize(mean.exp= mean(value, na.rm = T)))
+        logfc.score[j,] <- as.vector(lfc.exp$mean.exp)
+        
+      } else {
+        per.score[j,] <- 0
+        expr.score[j,] <- 0
+        logfc.score[j,] <- 0
+        pctdif.score[j,] <- 0
+      }
     }
-  }
+    
+    per.score <- rcnames.2d(per.score, e.mat, sig)
+    expr.score <- rcnames.2d(expr.score, e.mat, sig)
+    logfc.score <- rcnames.2d(logfc.score, e.mat, sig)
+    pctdif.score <- rcnames.2d(pctdif.score, e.mat, sig)
+    
+    ###############################
+    # calculate GSVA scores
+    e.score <- gsva(expr = e.mat, gset.idx.list = sig , method = "zscore",verbose = F)
+    
+    ##################################
+    # store results 
+    
+    list(
+      exp = expr.score,
+      gsva = e.score,
+      per = per.score,
+      logfc = logfc.score,
+      pd =pctdif.score,
+      sc = expr.score,
+      df.n.gene = df.n.gene
+    )
+    
+    
+  } else {
+    list(
+      exp = NULL,
+      gsva = NULL,
+      per = NULL,
+      logfc = NULL,
+      pd =NULL,
+      sc = NULL,
+      df.n.gene = NULL
+    )
+  } 
   
-  per.score <- rcnames.2d(per.score, exp.mat.scale.processed, sig)
-  expr.score <- rcnames.2d(expr.score, exp.mat.scale.processed, sig)
-  logfc.score <- rcnames.2d(logfc.score, exp.mat.scale.processed, sig)
-  pctdif.score <- rcnames.2d(pctdif.score, exp.mat.scale.processed, sig)
-  
-  #######################
-  # calculate module scores (Mod scores)
-  # mod.score  <- matrix(nrow = length(sig), ncol = ncol(exp.mat.scale.processed))
-
-  # iterate through each input file
-  # mod.results <- list()
-  # for (j in 1:length(sig)){
-  #   
-  #   if (sum(rownames(exp.mat.scale.processed) %in% sig[[j]]) > 0){
-  #     cur.features <- list(unique(rownames(exp.mat.scale.processed)[rownames(exp.mat.scale.processed) %in% sig[[j]]]))
-  #     so.mod <- AddModuleScore(so.query, cur.features, name = "cur.sig",
-  #                              ctrl = 50,
-  #                              nbin = 5)
-  #     
-  #     cur.mode.scores <- data.frame(scores = so.mod@meta.data[["cur.sig1"]], clusters = cluster.membership) %>%
-  #       group_by(clusters) %>%
-  #       summarize(mean.score = mean(scores)) 
-  #     
-  #     mod.results[[names(sig)[j]]] <- list(
-  #       mod.score = as.numeric(t(as.vector(cur.mode.scores))["mean.score", ]),
-  #       mod.cell.score =  so.mod@meta.data[["cur.sig1"]])
-  #     
-  #     mod.score[j,] <- as.numeric(t(as.vector(cur.mode.scores))["mean.score", ])
-  #     
-  #     
-  #   } else {
-  #     mod.results[[names(sig)[j]]] <-  list(
-  #       mod.score = NULL,
-  #       mod.cell.score = NULL
-  #     )
-  #     mod.score[j,] <- 0
-  #   }
-  # }
-  # 
-  # sc.mod.score <-  purrr::map_dfc(mod.results, "mod.cell.score")
-  #   rownames(sc.mod.score) <- colnames(so.query)
-  # colnames(sc.mod.score) <- names(sig)
-  # 
-  #     # remove baggage
-  # rm(mod.results); rm(so.mod)
-  # 
-  # # reformat and store Mod scores
-  # mod.score <- rcnames.2d(mod.score, exp.mat.scale.processed, sig)
-
-  ###############################
-  # calculate GSVA scores
-  e.score <- gsva(exp.mat.scale.processed, sig, verbose = F)
-
-  ##################################
-  # store results 
-  
-  list(
-    exp = expr.score,
-    gsva = e.score,
-    per = per.score,
-    # mod = mod.score,
-    logfc = logfc.score,
-    pd =pctdif.score,
-    sc = expr.score,
-    df.n.gene = df.n.gene
-  )
 } 
 
-  # stop workers
-  parallel::stopCluster(cl)
-  
-  
-  df.n.gene <- NULL
-  # unpack results
-  for (i in 1:length(signatures.symbol)){
-     which.sig <- names(signatures.symbol)[i]
-       sig <- signatures.symbol[[which.sig]] 
+# stop workers
+parallel::stopCluster(cl)
+
+df.n.gene <- NULL
+# unpack results
+for (i in 1:length(signatures.symbol)){
+  which.sig <- names(signatures.symbol)[i]
+  sig <- signatures.symbol[[which.sig]] 
   
   # clean lists
   list.lengths <- unlist(lapply(sig, length))
   sig <- sig[list.lengths >= min.geneset.size]
   
+  if (length(sig) == 0) next
   
-     e.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$gsva, exp.mat.scale.processed, sig)
-     expr.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$exp, exp.mat.scale.processed, sig)
-     # mod.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$mod, exp.mat.scale.processed, sig)
-     per.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$per, exp.mat.scale.processed, sig)
-     pd.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$pd, exp.mat.scale.processed, sig)
-     logfc.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$logfc, exp.mat.scale.processed, sig)
-     sc.mod.score.list[[which.sig]] <- score.results[[i]]$sc
-     df.n.gene <-  bind_rows(df.n.gene, score.results[[i]]$df.n.gene)
-  }
-  
+  e.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$gsva, e.mat, sig)
+  expr.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$exp, e.mat, sig)
+  per.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$per, e.mat, sig)
+  pd.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$pd, e.mat, sig)
+  logfc.score.list[[which.sig]] <- rcnames.2d(score.results[[i]]$logfc, e.mat, sig)
+  sc.mod.score.list[[which.sig]] <- score.results[[i]]$sc
+  df.n.gene <-  bind_rows(df.n.gene, score.results[[i]]$df.n.gene)
+}
+
 
 ```
 
 ```{r DEG analysis using module scores}
 
 # get cell-level annotation scores 
-e.mat <- getExpressionMatrix(so.query, which.data = "data")
+# e.mat <- getExpressionMatrix(so.query, which.data = "data")
 sc.mod.all <- NULL
 sig.names.all <- c()
 for (i in 1:length(signatures.symbol)){
@@ -745,10 +785,12 @@ for (i in 1:length(signatures.symbol)){
   list.lengths <- unlist(lapply(sig, length))
   sig <- sig[list.lengths >= min.geneset.size]
   
+  if (length(sig) == 0) next
+  
   for (j in 1:length(sig)){
     sig.name <- names(sig)[j]
     sig.features <- sig[[sig.name]]
-    sc.mod.all <-  rbind(sc.mod.all, colMeans(e.mat[rownames(e.mat) %in% sig.features, ]))
+    sc.mod.all <-  rbind(sc.mod.all, colMeans(ef.mat[rownames(ef.mat) %in% sig.features, ]))
     sig.names.all[length(sig.names.all) + 1] <- sig.name
   }
 }
@@ -757,7 +799,7 @@ for (i in 1:length(signatures.symbol)){
 rownames(sc.mod.all) <- sig.names.all
 
 # get rid of baggage
-rm(e.mat)
+# rm(e.mat)
 
 sc.mod.all <- as.data.frame(t(sc.mod.all))
 rownames(sc.mod.all) <- colnames(so.query)
@@ -962,17 +1004,17 @@ vstScoreThreshold.v2  <- function(x, y, label, set, percentile.threshold = 0.98,
 
 # process scores
 vst.exp.list <- vstScoreThreshold.v2(x = df.dist.expr$n.genes.available, y = df.dist.expr$ratio, 
-                                  label = df.dist.expr$pred, set = df.dist.expr$ref.set, quantile.norm = T)
+                                     label = df.dist.expr$pred, set = df.dist.expr$ref.set, quantile.norm = T)
 vst.gsva.list <- vstScoreThreshold.v2(x = df.dist.gsva$n.genes.available, y = df.dist.gsva$ratio, 
-                                   label = df.dist.gsva$pred, set = df.dist.gsva$ref.set, quantile.norm = T)
+                                      label = df.dist.gsva$pred, set = df.dist.gsva$ref.set, quantile.norm = T)
 vst.per.list <- vstScoreThreshold.v2(x = df.dist.per$n.genes.available, y = df.dist.per$ratio, 
-                                  label = df.dist.per$pred, set = df.dist.per$ref.set, quantile.norm = T)
+                                     label = df.dist.per$pred, set = df.dist.per$ref.set, quantile.norm = T)
 # vst.mod.list <- vstScoreThreshold.v2(x = df.dist.mod$n.genes.available, y = df.dist.mod$ratio, 
-                                  # label = df.dist.mod$pred, set = df.dist.mod$ref.set, quantile.norm = T)
+# label = df.dist.mod$pred, set = df.dist.mod$ref.set, quantile.norm = T)
 vst.logfc.list <- vstScoreThreshold.v2(x = df.dist.logfc$n.genes.available, y = df.dist.logfc$ratio, 
-                                  label = df.dist.logfc$pred, set = df.dist.logfc$ref.set, quantile.norm = T)
+                                       label = df.dist.logfc$pred, set = df.dist.logfc$ref.set, quantile.norm = T)
 vst.pd.list <- vstScoreThreshold.v2(x = df.dist.pd$n.genes.available, y = df.dist.pd$ratio, 
-                                  label = df.dist.pd$pred, set = df.dist.pd$ref.set, quantile.norm = T)
+                                    label = df.dist.pd$pred, set = df.dist.pd$ref.set, quantile.norm = T)
 
 
 # merge results
@@ -1015,12 +1057,12 @@ plt.vstComposite <- vst.merge %>%
 
 # pooled plot
 plt.score.thresholds.resids <- cowplot::plot_grid(vst.exp.list$plot.trans + labs(title = "Expression") + ylab("Residuals"),
-                                           vst.gsva.list$plot.trans  + labs(title = "GSVA") + ylab("Residuals"),
-                                           vst.per.list$plot.trans  + labs(title = "Expression Fraction") + ylab("Residuals"),
-                                           # vst.mod.list$plot.trans  + labs(title = "Modular Score") + ylab("Residuals"),
-                                           vst.logfc.list$plot.trans  + labs(title = "log FC") + ylab("Residuals"),
-                                           vst.pd.list$plot.trans  + labs(title = "Pct Differences") + ylab("Residuals"),
-                                           ncol = 3)
+                                                  vst.gsva.list$plot.trans  + labs(title = "GSVA") + ylab("Residuals"),
+                                                  vst.per.list$plot.trans  + labs(title = "Expression Fraction") + ylab("Residuals"),
+                                                  # vst.mod.list$plot.trans  + labs(title = "Modular Score") + ylab("Residuals"),
+                                                  vst.logfc.list$plot.trans  + labs(title = "log FC") + ylab("Residuals"),
+                                                  vst.pd.list$plot.trans  + labs(title = "Pct Differences") + ylab("Residuals"),
+                                                  ncol = 3)
 
 plt.score.thresholds <- cowplot::plot_grid(vst.exp.list$plot + labs(title = "Expression") + ylab("z-scores"),
                                            vst.gsva.list$plot  + labs(title = "GSVA") + ylab("z-scores"),
@@ -1059,31 +1101,33 @@ vst.merge.final$cv.comp <- signif(apply(vst.merge.final[ ,c("exp","gsva","per","
 ```{r annotate tissue types}
 
 cell.types <- list(stem = "stem|germ|pluripotent|fetal|placent|Multipotent", 
-  endothelial = "endothelial", 
-  epithelial = "epithelial|Pulmonary.alveolar|ciliated|henle|proximal.tubule|distal.tubul|Urothelial.cells", 
-  hepatic = "liver|hepato|hepatic|cholangio", 
-  endoderm = "endoderm",
-  renal = "renal|kidney|distal.tubul|proximal.tubule|henle|Juxtaglomerula|Urothelial.cells",
-  neural = "neural|neuro|purkinje|lens|Retzius|photorecep|Pyramidal|Retinal.ganglion|Retinal|Science.Ex|Science.In",
-  myelin = "schwann|oligodendro",
-  brain = "schwann|oligodendro|glia|microgli|neural|neuro|purkinje|lens|astrocy|Retzius|photorecep|Pyramidal|Retinal.ganglion|Retinal|Science.Ex|Science.In",
-  mesenchymal = "fibroblast|osteo|chondro|mesench|keratinocyte|myofibro|connective|Jaw|tooth|notocho|adipo",
-  skin = "keratin|melano",
-  mesoderm = "mesoderm",
-  cancer = "cancer",
-  myeloid = "monocyte|macrophage|dendritic|microgli|myeloid",
-  lymphocyte = "T.cell|T.regulato|B.cells|Lymphoid|white.blood|NK|Thymocytes|memory",
-  muscle = "myocyte|myoblast|muscle",
-  blood = "T.cell|T.regulato|B.cells|Lymphoid|white.blood|monocyte|macrophage|dendritic|erythro|megakaryo|neutro|basophil|platelet|Hematopoietic|mast",
-  progenitor = "progeni",
-  immune = "CD8|CD4|T.regulato|B.cells|Lymphoid|white.blood|monocyte|macrophage|dendritic|microgli|neutrophi|natural.killer|killer|basophil|NK|Thymocytes|memory|mast",
-  cardiac = "cardio|cardiac|aorta")
+                   endothelial = "endothelial", 
+                   epithelial = "epithelial|Pulmonary.alveolar|ciliated|henle|proximal.tubule|distal.tubul|Urothelial.cells", 
+                   hepatic = "liver|hepato|hepatic|cholangio", 
+                   endoderm = "endoderm",
+                   renal = "renal|kidney|distal.tubul|proximal.tubule|henle|Juxtaglomerula|Urothelial.cells",
+                   neural = "neural|neuro|purkinje|lens|Retzius|photorecep|Pyramidal|Retinal.ganglion|Retinal|Science.Ex|Science.In",
+                   myelin = "schwann|oligodendro",
+                   brain = "schwann|oligodendro|glia|microgli|neural|neuro|purkinje|lens|astrocy|Retzius|photorecep|Pyramidal|Retinal.ganglion|Retinal|Science.Ex|Science.In",
+                   mesenchymal = "fibroblast|osteo|chondro|mesench|keratinocyte|myofibro|connective|Jaw|tooth|notocho|adipo",
+                   skin = "keratin|melano",
+                   mesoderm = "mesoderm",
+                   cancer = "cancer",
+                   myeloid = "monocyte|macrophage|dendritic|microgli|myeloid",
+                   lymphocyte = "T.cell|T.regulato|B.cells|Lymphoid|white.blood|NK|Thymocytes|memory",
+                   muscle = "myocyte|myoblast|muscle",
+                   blood = "T.cell|T.regulato|B.cells|Lymphoid|white.blood|monocyte|macrophage|dendritic|erythro|megakaryo|neutro|basophil|platelet|Hematopoietic|mast",
+                   progenitor = "progeni",
+                   immune = "CD8|CD4|T.regulato|B.cells|Lymphoid|white.blood|monocyte|macrophage|dendritic|microgli|neutrophi|natural.killer|killer|basophil|NK|Thymocytes|memory|mast",
+                   cardiac = "cardio|cardiac|aorta")
 
 annotations <- vst.merge.final$cell.type
 
 for (i in 1:length(annotations)){
   ann <- toupper(annotations[i])
-  vst.merge.final$gen[i] <- paste(names(which(purrr::map_dbl(cell.types, function(x) grepl(toupper(x), ann, fixed = F, perl = T)) == 1)), collapse = ", ")
+  vst.merge.final$gen[i] <- paste(names(which(purrr::map_dbl(cell.types, 
+                                                             function(x) grepl(toupper(x), ann, fixed = F, perl = T)) == 1)), 
+                                  collapse = ", ")
 }
 
 ```
@@ -1099,18 +1143,18 @@ vst.merge.cloud$sig.lenient[vst.merge.cloud$exp > sig.thresh |
                               vst.merge.cloud$gsva > sig.thresh |
                               vst.merge.cloud$per > sig.thresh | 
                               vst.merge.cloud$logfc > sig.thresh | 
-                               vst.merge.cloud$pd > sig.thresh] <- T
+                              vst.merge.cloud$pd > sig.thresh] <- T
 
-             # vst.merge.cloud$mod > sig.thresh | 
+# vst.merge.cloud$mod > sig.thresh | 
 
 vst.merge.cloud$sig.stringent <- F
 vst.merge.cloud$sig.stringent[vst.merge.cloud$exp > sig.thresh & 
-                              vst.merge.cloud$gsva > sig.thresh &
-                              vst.merge.cloud$per > sig.thresh & 
-                              vst.merge.cloud$logfc > sig.thresh & 
-                               vst.merge.cloud$pd > sig.thresh] <- T
+                                vst.merge.cloud$gsva > sig.thresh &
+                                vst.merge.cloud$per > sig.thresh & 
+                                vst.merge.cloud$logfc > sig.thresh & 
+                                vst.merge.cloud$pd > sig.thresh] <- T
 
-                              # vst.merge.cloud$mod > sig.thresh & 
+# vst.merge.cloud$mod > sig.thresh & 
 
 vst.merge.cloud$color <- "grey"
 vst.merge.cloud$color[vst.merge.cloud$sig.lenient] <- "orange"
@@ -1149,7 +1193,7 @@ vst.merge.lenient <- vst.merge.final[vst.merge.cloud$sig.lenient, ]
 
 # Find fraction of DEGs present in each geneset ##########################################
 
-deg.gene.sub <- deg.gene.a[(deg.gene.a$p_val < 0.05) & (deg.gene.a$avg_logFC > 0), ]
+deg.gene.sub <- df.lfc.long[(df.pd.long$value > 0.3) & (df.lfc.long$value > 1) & (df.f.long$value > 0.3), ]
 
 deg.list <- deg.gene.sub %>%
   arrange(cluster) %>%
@@ -1176,16 +1220,16 @@ df.fct.deg.wide <- df.fct.deg
 df.fct.deg.wide$annotation <- rownames(df.fct.deg)
 df.fct.deg.long <- pivot_longer(df.fct.deg.wide, cols = colnames(df.fct.deg))
 
-df.top.deg <- df.fct.deg.long %>%
+df.top.deg <- (df.fct.deg.long %>%
   group_by(name) %>%
-  top_n(5, value)
+  arrange(-value))[c(1:20), ]
 
 top.terms <- unique(df.top.deg$annotation)
 
 df.fct.deg.hm <- df.fct.deg[df.fct.deg.wide$annotation %in% top.terms, ]
 
 if (print.inline){
-
+  
   pheatmap::pheatmap(df.fct.deg.hm, 
                      main = "Fraction of DEGs present in Genesets\n x: cluster; y: annotation; z: DEG fraction",
                      color = viridis::inferno(10))
@@ -1289,67 +1333,24 @@ if (show.gene.exp){
 ```
 
 
-```{r prep matrix for expression heatmap}
-
-# use only variable features (other wise gene matrix too large for html file)
+```{r prep matrix for expression heatmap, include = FALSE}
+agg.mat <- aggGroupExpression(so.query, which.data = "scale")
 var.features <- so.query@assays[[DefaultAssay(so.query)]]@var.features
+agg.mat <- agg.mat[agg.mat$genes %in% var.features, ]
+agg.mat <- agg.mat[!duplicated(agg.mat$genes), ]
+rownames(agg.mat) <- agg.mat$genes
+agg.mat <- agg.mat %>% dplyr::select(-c("genes"))
 
-if (length(var.features) == 0) {
-  so.query <- FindVariableFeatures(so.query)
-  var.features <- so.query@assays[[DefaultAssay(so.query)]]@var.features
+  plt.hm <- ggplotify::as.ggplot(pheatmap::pheatmap(agg.mat, show_rownames = F,
+                   main = "Expression Matrix\nx=clusters, y=genes, z=expression", scale = "row"))
+
+if (print.inline){
+  print(plt.hm)
 }
-var.feature.representation <- checkGeneRep(gNames.list, var.features)
-
-# potential gene name manipulation here
-df.exp.scale.v2 <- as.data.frame(signif(df.exp.scale, 3))
-rownames(df.exp.scale.v2) <- make.names(rownames(exp.mat.scale.processed), unique = T)
-
-# get available meta-features
-try({
-  available.meta.features <- so.query@assays[["RNA"]]@meta.features 
-}, silent = T)
-if (!exists("available.meta.features")) available.meta.features <- NULL
-
-
-if (var.feature.representation == "ensembl"){
-  if (all(colnames(available.meta.features) %in% c("ENSEMBL", "SYMBOL"))){
-    av.ens <- as.character(available.meta.features$ENSEMBL)
-    av.sym <- as.character(available.meta.features$SYMBOL)
-    var.features.ens <- var.features
-    var.features.sym <-  av.sym[av.ens %in% var.features.ens]
-  } else {
-    var.features.sym <- as.vector(gNames.list)[(as.vector(names(gNames.list))) %in% (var.features.ens)]
-  }
-} else if ((var.feature.representation == "symbol")) {
-  var.features.sym <- var.features
-}
-
-# filter data to include variable features only
-match.ind <- rownames(exp.mat.scale.processed) %in% var.features.sym
-df.exp.scale.v3 <- df.exp.scale.v2[match.ind ,]
-rownames(df.exp.scale.v3) <- rownames(df.exp.scale.v2)[match.ind]
-
-# get mean and sd of all expression values
-df.exp.scale.v3.long <- pivot_longer(df.exp.scale.v3, colnames(df.exp.scale.v3))
-mean.val <- mean(df.exp.scale.v3.long$value, na.rm = T)
-std.val <- sd(df.exp.scale.v3.long$value, na.rm = T)
-
-# standardize values
-df.exp.scale.v4 <- df.exp.scale.v3 %>%
-  mutate_each(funs((.-mean.val)/std.val))
-df.exp.scale.v4 <- signif(df.exp.scale.v4, 3) 
-rownames(df.exp.scale.v4) <- rownames(df.exp.scale.v3) 
-
-# verify standardization
-df.exp.scale.v4.long <- pivot_longer(df.exp.scale.v4, colnames(df.exp.scale.v4))
-mean.val <- mean(df.exp.scale.v4.long$value, na.rm = T)
-std.val <- sd(df.exp.scale.v4.long$value, na.rm = T)
-
-mat.exp.scale.v4 <- as.matrix(df.exp.scale.v4)
-cur.cluster.id <- colnames(mat.exp.scale.v4)
 
 
 ```
+
 ```{r central log}
 
 # update central log
@@ -1660,31 +1661,84 @@ plt.hm.genedeg <- ggplotify::as.ggplot(  pheatmap::pheatmap(df.fct.deg.hm,
 ```{r pdf fdgg}
 
 try({
-savePDF(file.name = paste0(output.path, "PDF/", "M05_fraction_DEG_in_genesets.pdf"), 
-        plot.handle = plt.hm.genedeg, 
-        fig.width = 10, fig.height = 8, save.flag = save.pdf)
+  savePDF(file.name = paste0(output.path, "PDF/", "M05_fraction_DEG_in_genesets.pdf"), 
+          plot.handle = plt.hm.genedeg, 
+          fig.width = 10, fig.height = 8, save.flag = save.pdf)
 }, silent = T)
 
 ```
 
-### DEG Table
+
+
+### Expression Table
 
 ```{r, fig.width = 10, fig.height=8}
 
 
-deg.gene.sub[ ,c("p_val", "avg_logFC", "p_val_adj")] <- signif(deg.gene.sub[ ,c("p_val", "avg_logFC", "p_val_adj")], 3)
-deg.gene.sub <- deg.gene.sub[ ,c("gene", "cluster", "avg_logFC", "pct.1", "pct.2", "pct.dif", "p_val", "p_val_adj")]
-deg.gene.sub$cluster <- paste0("c", deg.gene.sub$cluster )
-datatable(deg.gene.sub,
+df.e.wide[, c(2:ncol(df.e.wide))] <- apply(df.e.wide[, c(2:ncol(df.e.wide))], 2, signif, 3)
+df.e.wide.var <- df.e.wide[df.e.wide$gene %in% var.features, ]
+datatable(df.e.wide.var,
           filter = 'top',
           extensions = 'Buttons',
           options = list(pageLength = 50,
                          dom = 'Bfrtip',
                          buttons = c('copy', 'csv', 'pdf')))
 
-write.csv(deg.gene.sub, file = paste0(output.path, "Tables/", "differential_genes_statistics.csv"), 
+write.csv(df.e.wide.var, file = paste0(output.path, "Tables/", "expression_table.csv"), 
           row.names = F) 
-  
+```
+### LFC Table
+
+```{r, fig.width = 10, fig.height=8}
+
+df.lfc.wide[, c(2:ncol(df.lfc.wide))] <- apply(df.lfc.wide[, c(2:ncol(df.lfc.wide))], 2, signif, 3)
+df.lfc.wide.var <- df.lfc.wide[df.lfc.wide$gene %in% var.features, ]
+datatable(df.lfc.wide.var,
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip',
+                         buttons = c('copy', 'csv', 'pdf')))
+
+write.csv(df.lfc.wide, file = paste0(output.path, "Tables/", "lfc_table.csv"), 
+          row.names = F) 
+
+```
+
+### Expression Fraction Table
+
+```{r, fig.width = 10, fig.height=8}
+
+
+df.f.wide[, c(2:ncol(df.f.wide))] <- apply(df.f.wide[, c(2:ncol(df.f.wide))], 2, signif, 3)
+df.f.wide.var <- df.f.wide[df.f.wide$gene %in% var.features, ]
+datatable(df.f.wide.var,
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip',
+                         buttons = c('copy', 'csv', 'pdf')))
+
+write.csv(df.f.wide, file = paste0(output.path, "Tables/", "expressing_fraction_table.csv"), 
+          row.names = F) 
+```
+
+### Expression Fraction Difference Table
+
+```{r, fig.width = 10, fig.height=8}
+
+
+df.pd.wide[, c(2:ncol(df.pd.wide))] <- apply(df.pd.wide[, c(2:ncol(df.pd.wide))], 2, signif, 3)
+df.pd.wide.var <- df.pd.wide[df.pd.wide$gene %in% var.features, ]
+datatable(df.pd.wide.var,
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip',
+                         buttons = c('copy', 'csv', 'pdf')))
+
+write.csv(df.pd.wide, file = paste0(output.path, "Tables/", "expressing_fraction_difference_table.csv"), 
+          row.names = F) 
 ```
 
 Gene Expression 
@@ -1698,8 +1752,7 @@ Row {.tabset}
 ```{r exp mat, warning = F, message = F}
 
 try({
-plt.hm <- ggplotify::as.ggplot( pheatmap::pheatmap(mat.exp.scale.v4,  breaks = seq(-3, 3, by = ((6)/100)), 
-                   main = "Gene Expression Matrix\nrows=clusters, cols=genes, z=expression", show_rownames = F))
+  print(plt.hm)
 }, silent = T)
 
 
@@ -1709,27 +1762,9 @@ plt.hm <- ggplotify::as.ggplot( pheatmap::pheatmap(mat.exp.scale.v4,  breaks = s
 
 try({
   savePDF(file.name = paste0(output.path, "PDF/", "M05_expression_heatmap.pdf"), 
-          plot.handle = plt.hm, 
+          plot.handle = (plt.hm), 
           fig.width = 10, fig.height = 8, save.flag = save.pdf)
 }, silent = T)
-
-```
-
-### Table
-
-Cluster-specific scaled gene expression
-
-```{r exp mat table, warning = F, message = F}
-
-datatable(mat.exp.scale.v4, 
-          filter = 'top',
-          extensions = 'Buttons',
-          options = list(pageLength = 50,
-                         dom = 'Bfrtip', 
-                         buttons = c('copy', 'csv', 'pdf')))
-
-write.csv(mat.exp.scale.v4, file = paste0(output.path, "Tables/", "cluster_gene_expression.csv"), 
-          row.names = T) 
 
 ```
 
@@ -1828,7 +1863,7 @@ out <- flex.multiTabTables(gs.list, "gs.list")
 for (i in 1:length(gs.list)){
   table.name <- paste0("genelist_", names(gs.list)[i], ".csv")
   write.csv(gs.list[[1]], file = paste0(output.path, "Tables/",table.name), 
-          row.names = F) 
+            row.names = F) 
 }
 ```
 
@@ -1887,7 +1922,7 @@ knitr::kable(df.log_Module_5)
 
 try({
   write.csv(df.log_Module_5, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
-    row.names = F)  
+            row.names = F)  
 }, silent = T)
 
 ```
@@ -1899,10 +1934,9 @@ if (save.pdf){
   
   pdf.list <- list.files (path = paste0(output.path, "PDF/") )
   pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
-  
+  pdf.list <- pdf.list[validUTF8(pdf.list)]
   pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
 }
-
 
 ```
 
