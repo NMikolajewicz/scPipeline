@@ -82,7 +82,8 @@ subgroup <- "no.subset"
 default.species <- "Mm" # if multple species are detected in input, only then default is used. 
 
 dir.preprocessed <- "Preprocessed_Datasets/"
-query.file <- "M01_NM2_R1_test_300720.Rdata"
+# query.file <- "M01_NM2_R1_test_300720.Rdata"
+# query.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 
 # print figures inline
 print.inline <- F
