@@ -1,0 +1,10 @@
+﻿subset,field,subgroups
+no.subset,NA,NA
+renca.tumor.4000ds.T12,seurat_clusters,"0,2,3,5,6,7,9,15"
+cadiac.p6,seurat_clusters,"0, 3, 4, 5, 9"
+cardiac.p10,seurat_clusters,"0,6,8,10,2,3"
+p4.gbm.scaled.tumor,seurat_clusters,"0, 15, 4, 36, 10, 19, 29, 33, 32"
+invivo.screen.NSG,Condition,NSG
+invivo.screen.BALB,Condition,BALB
+tumor.emt6.invivo,seurat_clusters,"1,2,3"
+p7.meso,seurat_clusters,"0,1,2,3,4,5,6,7"

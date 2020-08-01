@@ -1,0 +1,13 @@
+﻿term,id
+cardiolipin,R-HSA-1482798
+mito.genome.stability,GO:0000002
+phospholipid.metabolism,R-HSA-1483257
+cristae.formation,GO:0042407
+innate.immune,R-HSA-3134975
+hypoxia.Mm,R-MMU-1234174
+TNFR1.NFkappaB.signaling,R-MMU-5357956
+Activation.NFkappaB.Bcell,R-MMU-1169091
+IFNg.response,GO:0034341
+IFNa.response,GO:0035455
+IFNb.response,GO:0035456
+autophagy,GO:0006914
