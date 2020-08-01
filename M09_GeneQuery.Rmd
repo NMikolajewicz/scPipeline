@@ -1,294 +1,196 @@
 ---
-title: "Module9_Query_Marker_Exploration"
+title: "Gene Query Analysis"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: fill
 editor_options: 
   chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
+      ),
+      output_dir = paste0(data.path, "/HTML_Reports")
+    )
+  })
 ---
 
 
 ```{r load libraries, include=FALSE}
 
 # clear global enviroment                          
-rm(list = ls())
+rm(list = setdiff(ls(), c("data.path", "user")))
 
 # initiate timer
 start.time <- proc.time()
 
 # load packages
-library(scMiko)
-# modulePackages(module.number = 9)
-      packages2load <- c("Seurat", "plyr", "dplyr", "tidyr", "reshape2", "RColorBrewer", "gridExtra",
-                         "DT", "flexdashboard", "ggpmisc", "ggExtra", "grid", "ggrepel", "ddpcr",
-                         "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "plotly", "ggplot2", "reactome.db", "schex")
+packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", "gridExtra",
+                   "DT", "flexdashboard", "ggpmisc", "ggExtra", "future", "foreach", "doParallel",
+                   "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "ggplot2", "reactome.db", "schex")
 
-      # load packages
-      lapply(packages2load, library, character.only = TRUE)
+# load packages
+invisible(lapply(packages2load, library, character.only = TRUE))
 
 ```
 
-
-```{r pre-prepared Gene_Sets}
-
-# Type 1 genesets
-gene.sets.type1 <- list(
-  misc.query1 = c("CD274", "PTP4A2", "Sox2"),
-  coinhib.ligands = c("cd80", "cd86", "cd274", "pdcd1lg2", "clec4g", "lgals9", "ptdss2", "hmgb1",  "pvr", "nectin2"),
-  coinhib.receptors = c("Ctla4",  "pdcd1",  "lag3", "havcr3", "tigit", "vsir", "tim3"),
-  cd133 = c("PROM1"),
-  sex.specific = c("RPS4Y1", "EIF1AY", "DDX3Y", "KDM5D", "XIST", "Eif2s3y"), # Staedtler et al 2013 
-  gbm.markers = c("PDGFRA", "CDK4", "EGFR", "NF1"),
-  Fitm2 = "Fitm2",
-  barbara.set = c("Qpct", "Qpctl", "cd47", "sirpa"),
-  STARD = c("STAR", "PCTP", "STARD3", "STARD4", "STARD5", "STARD6", "STARD7", "STARD8", "STARD9", "STARD10", "COL4A3BP", "DLC1", "STARD13", 'ACOT11', "ACOT12"),
-  Neutrophil = c("Il1b","Cxcl2","S100a9","Csf3r","Hcar2", "G0s2","Ccl3","Slfn4","Srgn","S100a8","Cd300lf","Plaur","Mxd1","Ccrl2","Hdc","Plek","Il1f9", "Alcam", "Nfkbia"),
-  CEG = c("B2m", "Ifngr1", "Jak2", "Socs1", "Tap1", "Tap2", "Tapbp", "Adar"),
-  TAZ = c("TAZ"),
-  tnf.signalling = c("Tnfrsf1a", "Tnfrsf1b", "Tnfaip3"),
-  TAZ.negGIN = c("HTRA2", "CCDC51", "IMMP2L", "ATP5L", "TSC2", "OSGEPL1", "EIF2AK1", "TMEM70", "TSC1", "KIAA0141", "FASTKD2", "CHCHD3", "TIMM8A", "TIMM8B", "SHMT2", "C6orf203", "BRD2", "ADNP", "AGPAT5"),
-  TAZ.posGIN = c("TAZ", "STARD7", "C4orf29", "CNOT2", "CLPP", "CNOT3", "KCTD5", "NF2", "KDM1A", "USP14", "DDX6", "DPH1", "DBF4", "CSK", "MTF2", "RALGAPB", "KDM5C", "DPH2", "HEXIM1", "INPP4A"),
-  TAZ.PGP.posGIN = c("TAZ", "CLPP", "PTEN", "MEAF6", "USP14", "HEXIM1", "SLC25A1", "CSK", "RALGAPB", "LCMT1", "KCTD5", "DDX6", "DHX35", "FASN", "IER3IP1", "MTF2", "LARP7", "ZFP36L2", "L3MBTL3", "CSDE1", "CLPX", "PIK3R2", "PDHA1", "ARIH2", "RPRD2", "PPP2R4", "LDHB", "MDH2", "SAMD1"), 
-  TAZ.PGP.negGIN = c("OSGEPL1", "FASTKD2", "ACO2", "TMEM70", "IMMP2L", "SHMT2", "NME6", "CCDC51", "SURF1", "TACO1", "C7orf55", "SLFN11", "RHOA", "HMBS", "BRD2", "PFKM", "MTIF3", "MRPL41", "MPDU1", "ATIC", "MTHFD1L", "VDAC1", "MORC2", "GNA13", "PCYT2", "FDFT1", "STT3A", "CHCHD3", "FPGS", "IDH3A", "NSUN3", "TIMM8B", "C6orf136", "C14orf2", "METAP1D", "MTHFS", "TXNDC17", "EMC3"),
-  Ptprz1 = c("Ptprz1"),
-  Gpnmb = c("GPNMB"),
-  autophagy = c("Atg3", "Atg5", "Atg7", "Atg9a", "Atg10", "Atg12", "Atg14", "Atg101"),
-  top.invivo.sensitizers.omitBlackBrown = c("Det1", "Jak2", "Irf1", "Jak1", "Stat1", "Ikbkb", "Atg5", "Ist1", "Atg3", "Ifngr2", "Atg10", "Atg12", "Atg7", "Emc6", "Klf16", "Ifngr1", "Atg14", "Ago2", "Cd274", "Dcp1a", "Med23", "Armc9", "Acad9"),
-  top.invivo.suppressors = c("Brpf1", "Men1", "Rce1", "Srsf7", "Sarnp", "Jmjd6", "Tnrc6c", "Kmt2a", "Ppp1ca", "Dnttip1"),
-  top.invivo.sensitizers.all = c("Dot1l", "Tmem127", "Irf1", "Jak1", "Ifnar2", "Med16", "Sestd1", "Stat2", "Irf9", "Ist1", "Cul3", "Atg3", "Ifngr2", "Itsn1", "Atg10", "Tapbp", "Atg7", "Klf16", "Ifngr1", "Susd6", "Atg14", "Ago2", "Dcp1a", 'Hspa13', "Chchd6", "Armc9", "Acad9"),
-  top.invivo.ctl = c("Brpf1", "Men1", "Rce1", "Srsf7", "Sarnp", "Jmjd6", "Tnrc6c", "Kmt2a", "Ppp1ca", "Dnttip1", "Dot1l", "Tmem127", "Irf1", "Jak1", "Ifnar2", "Med16", "Sestd1", "Stat2", "Irf9", "Ist1", "Cul3", "Atg3", "Ifngr2", "Itsn1", "Atg10", "Tapbp", "Atg7", "Klf16", "Ifngr1", "Susd6", "Atg14", "Ago2", "Dcp1a", 'Hspa13', "Chchd6", "Armc9", "Acad9"),
-  mesoderm = c("CD34", "SOX4", "SOX11", "DOT1L", "CDX2", "ZDHHC17", "TADA2B", "MIB1", "SUPT20H", "PLA2G12A", "IRX2", "SMAD1", "PHB2", "PHF6", "TGFBR2", "LRP6", "CREBBP", "EMC9", "B3GNT9", "DBR1", "OBFC1", "MFAP1", "ARAP1", "SHQ1", "USP37", "STK11", "C12orf49"),
-  FZD = c("FZD2", "FZD7", "CD34", "SOST"),
-  mechanoWnt = c("CD34", "FZD2", "FZD7", "SOST", "LRRC8C", "MTSS1", "PLVAP", "PTPRB", "RHOJ", "F2RL2", "CXorf36", "ADGRL4", "SAMSN1"),
-  cd34 = c("CD34", "CXorf36"),
-  cd34.topcor = c("CXorf36", "PECAM1", "NOTCH4", "RAMP2", "RHOJ", "CDH5", "F2RL2", "ADGRL4", "PTPRB", "AFAP1L1", "MEF2C", "LINC01594", "LRRC8C", "MTSS1", "MRC1", "GDPD5", "PLEKHG1", "RASGRP3", "PLVAP", "ST8SIA4"),
-  fzd2.topcor = c("FZD2", "NXPE1", "TRAF3IP3", "KCNU1", "IL19", "MIR7978", "AC007193.8", "TMEM212", "AC069257.6", "DLK2", "LY6G5C", "HSPD1P6", "SLC39A2", "HOXA4", "FEV", "PCDHB7", "PRRT1", "CPLX1", "FAM66A", "AKR1C2", "FOXC2"),
-  fzd7.topcor = c("FZD7", "MATN1", "CXCL16", "LRG1", "MINCR", "FAM21EP", "MOB3C", "AC005863.2", "APOL6", "KCNU1", "PIGCP1", "DNAH10OS", "LINC01023", "PANO1", "LINC01202", "SLC6A12", "LYG2", "C9orf172", "TEX13D", "DHRS2", "VPREB3"),
-  cd70 = c("CD70")
-)
-
-
-
-
-
-
-
-
-
-# Type 2 genesets
-gene.sets.type2 <- list(
-  coreCTL.subset = list(file = "corCTLgenes_subset.csv",
-                        directory =  "Gene_Sets/",
-                        prefix.label = "", # only if module is T
-                        module = F),
-  coreCTL = list(file = "corCTLgenes.csv",
-                 directory =  "Gene_Sets/",
-                 prefix.label = "", # only if module is T
-                 module = F),
-  coreCTL.sensitizer = list(file = "corCTLgenes_sensitizer.csv",
-                            directory =  "Gene_Sets/",
-                            prefix.label = "", # only if module is T
-                            module = F),
-  coreCTL.suppressor = list(file = "corCTLgenes_suppressor.csv",
-                            directory =  "Gene_Sets/",
-                            prefix.label = "", # only if module is T
-                            module = F),
-  zhang.renca = list(file = "VALID_Module4_Zhang2019_Hs_cellmarkers_SYMBOLS_forRenca_160320.csv",
-                     directory =  "Reference_Datasets/",
-                     prefix.label = "", # only if module is T
-                     module = T),
-  panglao.renca = list(file = "VALID_Panglao_referenceSets_Mm_SYMBOLS_forRenca_160320.csv",
-                       directory =  "Reference_Datasets/",
-                       prefix.label = "", # only if module is T
-                       module = T),
-  coreCTL.grouped = list(file = "coreCTL_grouped_CR_160320.csv",
-                         directory =  "Gene_Sets/",
-                         prefix.label = "", # only if module is T
-                         module = T),
-  bulkRNA.cytokine = list(file = "Renca_B16_MC38_TNFa_IFN_DEG_180320.csv",                   
-                          directory =  "Gene_Sets/",
-                          prefix.label = "", # only if module is T
-                          module = T),
-  muscle.signature = list(file = "VALID_pangleo_zhang_MCA_SYMBOL_forMuscle_180320.csv",
-                          directory =  "Reference_Datasets/",
-                          prefix.label = "", # only if module is T
-                          module = T),
-  coreCTL.subtypes = list(file = "coreCTL_suppressor_sensitizer_subtypes_180320.csv",
-                          directory =  "Gene_Sets/",
-                          prefix.label = "", # only if module is T
-                          module = T),
-  autophagy = list(file = "autophagy_geneSet_NM_190320.csv",
-                   directory =  "Gene_Sets/",
-                   prefix.label = "", # only if module is T
-                   module = T),
-  wgcna.first = list(file = "wgcna_firstpass_300320.csv",
-                                        directory =  "Gene_Sets/",
-                   prefix.label = "", # only if module is T
-                   module = T),
-  immune.TF = list(file = "VALID_TRRUSTv2_Mm_regulation_immuneSubset_090420.csv",
-                       directory =  "Reference_Datasets/",
-                       prefix.label = "", # only if module is T
-                       module = T),
-    p7.mesoMarker = list(file = "p7_mesoMarkers_250620.csv",
-                       directory =  "Gene_Sets/",
-                       prefix.label = "", # only if module is T
-                       module = F),
-  p7.mesoMarker.HH= list(file = "HHtestMeso_200716.csv",
-                         directory = "Gene_Sets/",
-                         prefix.label = "",
-                         module = F)
-)
-
-
-# GO/Reactome Annotations
-#annotation.list <- searchAnnotations("autoph", species = "Mm")
-gene.sets.type5 <- list(
-  cardiolipin = c("R-HSA-1482798"),
-  mito.genome.stability = c("GO:0000002"),
-  phospholipid.metabolism = c("R-HSA-1483257"),
-  cristae.formation = c("GO:0042407"),
-  innate.immune = c("R-HSA-3134975"),
-  hypoxia.Mm = c("R-MMU-1234174"),
-  TNFR1.NFkappaB.signaling = "R-MMU-5357956",
-  Activation.NFkappaB.Bcell = "R-MMU-1169091",
-  IFNg.response = "GO:0034341",
-  IFNa.response = "	GO:0035455",
-  IFNb.response = "GO:0035456",
-  autophagy = "GO:0006914"
-)
-
-```
-
-
-
-```{r subset lists}
-
-subset.list <- list(
-  no.subset=data.frame(field = NA,
-                       subgroups = NA),
-  renca.tumor.4000ds.T12=data.frame(field = "seurat_clusters",
-                                    subgroups = c(0,2,3,5,6,7,9,15)),                # Renca Tumor, res = 0.4
-  cadiac.p6=data.frame(field = "seurat_clusters",
-                       subgroups = c(0, 3, 4, 5, 9)),                                # cardiac tissue p6
-  cardiac.p10=data.frame(field = "seurat_clusters",
-                         subgroups = c(0,6,8,10,2,3)),                               # cardiac tissue p10
-  p4.gbm.scaled.tumor=data.frame(field = "seurat_clusters",
-                                 subgroups = c(0, 15, 4, 36, 10, 19, 29, 33, 32)),   # GBM tumor only, res = 1
-    invivo.screen.NSG=data.frame(field = "Condition",
-                                 subgroups = c("NSG")),   # cardiac tissue p10
-      invivo.screen.BALB=data.frame(field = "Condition",
-                                 subgroups = c("BALB")),   # cardiac tissue p10
-  tumor.emt6.invivo = data.frame(field = "seurat_clusters",
-                                 subgroups = c(1,2,3)),
-  p7.meso = data.frame(field = "seurat_clusters",
-                                 subgroups = c(0,1,2,3,4,5,6,7))
-  
-)
-
-
-```
 
 ```{r parameter specification}
 
 
 
-# specify input
-which.input <- data.frame(
+# specify gene query
+which.input <- list(
+  
   # gene list input format options:
-  #   1: gene.sets.type1 
-  #   2: gene.sets.type2; .csv file
+  #   0: Manual input; vector of genes (e.g., which.gene.set = c("cd70", "cd34"))
+  #   1: M09_type1_queries.csv; gene.sets.type1 
+  #   2: M09_type2_queries.csv; gene.sets.type2; .csv file
   #   3: cluster DEG
   #   4: top N cluster markers
-  #   5: GO/Reactome genesets
+  #   5: M09_type3_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
-  query_input_format = 1,
+  query_input_format = 2,
+  do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
-  which.gene.set = "cd70" # character
+  which.gene.set = c("immune.TF") # character
 )
-
+#c("P2RY2", "P2RX7", "P2RY1", "P2RY6")
 
 #############################
 
 # specify which results to show
 which.results <- data.frame(
-  dot.expression = T,     # recommended
-  umap.expression = T,    # computationally intensive (for large genesets)
-  umap.deg.only =T,       # if umap.expression == T, show only DEG (p<0.05)
-  query.correlation = T,  # recommended
-  gsea = T,               # computationally intensive (for large seurat datasets)
-  gsea.threshold = 2 ,     # 1: padj < 0.05; 2: p<0.01 & |NES| > 1; 3: top 3 pathways (sorted by NES)
+  umap.top.n =10,       # plot top n markers (by DEG analysis). NA if all. 
+  cor.top.n = 70,
+  gsea.top.n = 20,
+  gsea.threshold = 2 ,     # 1: padj < 0.1; 2: p<0.01 & |NES| > 1; 3: top 3 pathways (sorted by NES)
   annotation.db = "Bader",    # Reactome, GO, Bader
   ontology = c("BP"),         # "BP", "MF", "CC"
-  include.all.gsea= T,     # computationally intensive (if F, p<0.05 cutoff is used)
-  umap.gsea = T,           # computationally intensive (if T, get umap pathays; only if gsea = T)
-  dot.gsea = T,
   do.hex = T               # specify whether to generate hex UMAPs (schex package)
 )
 
-
 cluster.resolution <- 0.15
-subset.df <- subset.list[["no.subset"]] # NA specified as "no.subset"
 
+# specify subgroup provided in M00_subgroups.csv; subgroup <- "no.subgroup" to include all data
+subgroup <- "no.subset"
 
-
-default.species <- "Hs" # if multple species are detected in input, only then default is used. 
-# Further stratiy data (optional); set field entry to NA if no running
-stratify.df <- data.frame(field = NA,
-                          subgroups = NA)
-# 
-
-query.file <- "Module1_M16_M27_UHN_240620.RData"
-# query.file <- "Module1_p7_mesoderm_110620.Rdata"
-# query.file <- "Module1_p4_p8_GL261_CDsubset_180620.Rdata"
-# query.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
-# query.file <- "Module2_Renca_cell_nuc_sci_T12_4000ds_Celsius_integrated_240220.Rdata"
-# query.file <- "Module1_UHN_0231_filtered_aggr_labled_290120.Rdata"
+default.species <- "Mm" # if multple species are detected in input, only then default is used. 
 
 dir.preprocessed <- "Preprocessed_Datasets/"
+query.file <- "M01_NM2_R1_test_300720.Rdata"
 
-print.inline <- T
+# print figures inline
+print.inline <- F
 
+# n workers
+n.workers <- list(
+  gsea = 15
+)
+
+
+# save PDF
+save.pdf <- T
+
+
+```
+
+```{r import appropriate csv files}
+
+if (which.input$query_input_format==1){
+  gene.sets.type1 <- read.csv("M09_type1_queries.csv", header = TRUE)
+  colnames(gene.sets.type1) <- rmvCSVprefix(colnames(gene.sets.type1))
+} else if (which.input$query_input_format==2){
+  gene.sets.type2.df <- read.csv("M09_type2_queries.csv", header = TRUE)
+  colnames(gene.sets.type2.df) <- rmvCSVprefix(colnames(gene.sets.type2.df))
+  gene.sets.type2 <- list()
+  for (i in 1:nrow(gene.sets.type2.df)){
+    gene.sets.type2[[gene.sets.type2.df$name[i]]] <- list(file = gene.sets.type2.df$file[i],
+                                           directory = gene.sets.type2.df$directory[i],
+                                           # prefix.label = gene.sets.type2.df$prefix.label[i],
+                                           module = gene.sets.type2.df$module[i])
+  }
+} else if (which.input$query_input_format==5){
+  gene.sets.type5 <- read.csv("M09_type5_queries.csv", header = TRUE)
+  colnames(gene.sets.type5) <- rmvCSVprefix(colnames(gene.sets.type5))
+}
+
+if (!exists("subgroup")) subgroup <- "no.subset"
+subset.input <- read.csv("M00_subgroups.csv", header = TRUE)
+colnames(subset.input) <- rmvCSVprefix(colnames(subset.input))
+
+subset.list <- list()
+for (i in 1:nrow(subset.input)){
+  subset.list[[subset.input$subset[i]]] <- data.frame(
+    field = subset.input$field[i],
+    subgroups =  stringr::str_trim(unlist(strsplit(subset.input$subgroups[i], ","))) 
+  )
+  if (!is.na(subset.input$field[i]) && subset.input$field[i] == "seurat_clusters"){
+    subset.list[[subset.input$subset[i]]]$subgroups <- as.numeric(subset.list[[subset.input$subset[i]]]$subgroups)
+  }
+}
+
+subset.df <- subset.list[["no.subset"]] # NA specified as "no.subset"
+```
+
+```{r}
+meta.module.helper <- function(do.module, default.set){
+  
+  if (is.na(do.module)){
+    return(default.set)
+  } else if (do.module == TRUE) {
+    return(T)
+  } else if (do.module == FALSE) {
+    return(F)
+  }
+  
+}
 ```
 
 
 ```{r input subtype data specification}
 
-# group by options:
-#   1: clusters ID (seurat_clusters)
-#   2: barcodes (Barcode)
-#   3: Groups (in vivo)
-group.by <- 1
-
 which.gene.set <- as.character(which.input$which.gene.set)
 
-if (which.input$query_input_format==1){
+if (which.input$query_input_format==0){
+  
+  markers_of_interest <- which.gene.set
+  meta.module.flag <- meta.module.helper( which.input$do.module,FALSE)
+  # prefix.label = ""
+} else if (which.input$query_input_format==1){
   stopifnot(which.gene.set %in% names(gene.sets.type1))
   markers_of_interest <- gene.sets.type1[[which.gene.set]] # REQUIRED if query_input_format == 1
-  meta.module.flag <- F
-  prefix.label <- ""
+  meta.module.flag <- meta.module.helper( which.input$do.module,FALSE)
+  # prefix.label <- ""
 } else if(which.input$query_input_format==2){
   stopifnot(which.gene.set %in% names(gene.sets.type2))
   input_spreadsheet <- gene.sets.type2[[which.gene.set]][["file"]]
   dir.geneset <- gene.sets.type2[[which.gene.set]][["directory"]]
-  meta.module.flag <- gene.sets.type2[[which.gene.set]][["module"]] # REQUIRED
+  meta.module.flag <- meta.module.helper( which.input$do.module,gene.sets.type2[[which.gene.set]][["module"]])
   prefix.label <- gene.sets.type2[[which.gene.set]][["prefix.label"]]
 } else if ((which.input$query_input_format==3) | (which.input$query_input_format==4)) {
-  meta.module.flag <- T
-  prefix.label <- ""
+  meta.module.flag <- meta.module.helper( which.input$do.module,T)
+  # prefix.label <- ""
 } else if (which.input$query_input_format==5){
   stopifnot(which.gene.set %in% names(gene.sets.type5))
   markers_of_interest <- id2geneset(gene.sets.type5[[which.gene.set]], my.species = default.species) # REQUIRED if query_input_format == 1
-  meta.module.flag <- F
-  prefix.label <- ""
+  meta.module.flag <- meta.module.helper( which.input$do.module,F)
+  # prefix.label <- ""
 } else if (which.input$query_input_format==6){
   scMiko.geneSets <- scMiko::geneSets
   stopifnot(which.gene.set %in% names(scMiko.geneSets))
   markers_of_interest <- as.data.frame(scMiko.geneSets[[which.gene.set]])
-  meta.module.flag <- T
-  prefix.label <- ""
-  marker_set_name <- which.gene.set
+  meta.module.flag <- meta.module.helper( which.input$do.module,T)
+  # prefix.label <- ""
+}
+
+
+if (exists("markers_of_interest") && "data.frame" %in% class(markers_of_interest)){
+  markers_of_interest <- janitor::clean_names(markers_of_interest, "screaming_snake")
 }
 
 # annotation specifications
@@ -303,14 +205,20 @@ which.ontology <- which.results$ontology
 
 ```{r import seurat object}
 
+if (!exists("data.path") & !exists("user")) {
+  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+}
+
 # import and preprocess data
-load(getLoadPath(query.file, dir.preprocessed))
+warning("Importing data...")
+if (!grepl(".Rdata|.RData", query.file)) query.file <- paste0(query.file, ".Rdata")
+load(getLoadPath(query.file, paste0(data.path, dir.preprocessed)))
 so.query <- prepSeurat(so)
 rm(so)
 
 ```
 
-```{r get clusters and assay}
+```{r get clusters and assay, warning = FALSE}
 
 # get current assay
 current.assay <- DefaultAssay(so.query)
@@ -342,7 +250,7 @@ if (which.input$query_input_format == 1){
     which.col <- "first"
   }
   
-  input_file <- paste(dir.geneset, input_spreadsheet, sep = "")
+  input_file <- paste(data.path,dir.geneset, input_spreadsheet, sep = "")
   output.markers  <- m9.importMarkers(query.format = which.input$query_input_format, 
                                       input.file = input_file, 
                                       which.col = which.col,
@@ -351,58 +259,22 @@ if (which.input$query_input_format == 1){
   output.markers  <- m9.importMarkers(query.format = 1, 
                                       markers.of.interest = markers_of_interest,
                                       which.species = which.species)
+} else if (which.input$query_input_format == 0){
+  
+  if (which.species == "Hs") {
+    markers_of_interest <- toupper(markers_of_interest)
+  } else if (which.species == "Mm") {
+    markers_of_interest <- firstup(markers_of_interest)
+  }
 }
 
-
-if (exists("output.markers")) {
-   # c("markers_of_interest", "marker_set_name")
-  markers_of_interest <- output.markers[[1]]
-  marker_set_name<- output.markers[[2]]
-}
-
+if (exists("output.markers")) markers_of_interest <- output.markers[[1]]
 
 
 ```
 
-```{r}
+```{r seurat data subsetting , warning = FALSE}
 
-subsetSeurat.dev <- function (so, subset.df){
-
-  # check if subset input is validd
-  if (is.na(unique(subset.df$field))){
-    subset.flag <- FALSE
-  } else if ( unique(subset.df$field) %in% names(so@meta.data)) {
-    subset.flag <- TRUE
-  } else {
-    subset.flag <- FALSE
-  }
-
-
-  # subset data
-  if (subset.flag){
-    # pattern <- paste( "^", as.vector(subset.df$subgroups), "$", collapse="|")
-    # pattern <- paste(as.vector(subset.df$subgroups), "$", collapse="|")
-    # pattern <- paste( "*", as.vector(subset.df$subgroups), "*", collapse="|")
-    pattern <- as.character(as.vector(subset.df$subgroups))
-    pattern <- paste(pattern, collapse="|")
-    # pattern <- gsub(" ", "|", pattern)
-    cur.field <- as.vector(unique(subset.df$field))
-    
-    which.cells <- colnames(so)[which(grepl(pattern, as.character(so@meta.data[[cur.field]])))]
-    # so <- subset(x = so, cells = which(grepl(pattern, as.character(so@meta.data[[cur.field]]))))
-    
-    so <- SubsetData(object = so, cells = which.cells)
-  }
-
-  return(so)
-}
-
-
-```
-
-
-```{r seurat data subsetting }
-# so.temp <- so.query
 # subset seurat object
 so.query <- subsetSeurat(so.query, subset.df)
 
@@ -410,7 +282,7 @@ so.query <- subsetSeurat(so.query, subset.df)
 
 
 
-```{r prior log history}
+```{r prior log history, warning = FALSE}
 # get prior log history
 cur.env <- objects()
 module.logs <- cur.env[grep("^df.log_Module",cur.env)]
@@ -418,11 +290,17 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 ```
 
 
-```{r prep seurat  gene list}
+```{r prep seurat  gene list, warning = FALSE}
 gNames.list <- prepGeneList(so.query, objects())
 ```
 
-```{r define grouping var}
+```{r define grouping var, warning = FALSE}
+
+# group by options:
+#   1: clusters ID (seurat_clusters)
+#   2: barcodes (Barcode)
+#   3: Groups (in vivo)
+group.by <- 1
 
 # specift grouping variable
 if (group.by == 1){
@@ -445,96 +323,71 @@ n_group_members <- length(u_groups)
 
 
 
-```{r analysis log}
+```{r analysis log, warning = FALSE}
 
 df.log <- initiateLog("9, Query Marker Exploration")
 
-# Query File
 df.log <- addLogEntry("Query File", query.file, df.log, "query.file")
-# Gene Set Name
 df.log <- addLogEntry("Gene Set Name", which.gene.set, df.log, "which.gene.set")
-# Meta Module
 df.log <- addLogEntry("Compute geneset module score", meta.module.flag, df.log, "meta.module.flag")
-# default species
 df.log <- addLogEntry("Default Species", default.species, df.log, "default.species")
-# which subset
-df.log <- addLogEntry("Which Subset Field", subset.df$field, df.log, "subset.df$field")
-# which subset
-df.log <- addLogEntry("Which Subset Groups", subset.df$subgroups, df.log, "subset.df$subgroups")
-# Cluster Resolution
+df.log <- addLogEntry("Which Subset Field", subset.df$field, df.log, "field")
+df.log <- addLogEntry("Which Subset Groups", subset.df$subgroups, df.log, "subgroups")
 df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
-# Grouping Variable
 df.log <- addLogEntry("Grouping Variable", group_name, df.log, "group_name")
-# Number of groups
 df.log <- addLogEntry("N Groups", n_group_members, df.log, "n_group_members")
-# dot plots
-df.log <- addLogEntry("dot plot flag", which.results$dot.expression, df.log, "which.results$dot.expression")
-# umap plots
-df.log <- addLogEntry("umap flag", which.results$umap.expression, df.log, "which.results$umap.expression")
-# DEG UMAP only
-df.log <- addLogEntry("umap DEG flag", which.results$umap.deg.only, df.log, "which.results$umap.deg.only")
-# correlation plots
-df.log <- addLogEntry("correlations flag", which.results$query.correlation, df.log, "which.results$query.correlation")
-# gsea analysis
-df.log <- addLogEntry("gsea flag", which.results$gsea, df.log, "which.results$gsea")
-# gsea filter
-df.log <- addLogEntry("p<0.05 gsea only", which.results$include.all.gsea, df.log, "which.results$include.all.gsea")
-# gsea umap
-df.log <- addLogEntry("gsea umap", which.results$umap.gsea, df.log, "which.results$umap.gsea")
-# gsea dotplot
-df.log <- addLogEntry("gsea dotplot", which.results$dot.gsea, df.log, "which.results$dot.gsea")
-# Annotation DB
-df.log <- addLogEntry("Annotation DB", which.results$annotation.db, df.log, "which.results$annotation.db")
+df.log <- addLogEntry("Top N UMAPs", which.results$umap.top.n, df.log, "umap.top.n")
+df.log <- addLogEntry("Top N GSEA", which.results$gsea.top.n, df.log, "gsea.top.n")
+df.log <- addLogEntry("Top N correlations", which.results$corr.top.n, df.log, "corr.top.n")
+df.log <- addLogEntry("Annotation DB", which.results$annotation.db, df.log, "annotation.db")
 if (which.results$annotation.db == "GO"){
-  df.log <- addLogEntry("GO ontology", which.results$ontology, df.log, "which.results$ontology")
+  df.log <- addLogEntry("GO ontology", which.results$ontology, df.log, "ontology")
 }
-
-# UMAP Hex
-df.log <- addLogEntry("schex used for UMAPs", which.results$do.hex, df.log, "which.results$do.hex")
-
-
+df.log <- addLogEntry("schex used for UMAPs", which.results$do.hex, df.log, "do.hex")
+df.log <- addLogEntry("PDF saved", save.pdf, df.log, "save.pdf")
 if (which.results$gsea.threshold == 1){
-  df.log <- addLogEntry("GSEA threshold", "padj<0.05" , df.log, "which.results$gsea.threshold")
+  df.log <- addLogEntry("GSEA threshold", "padj<0.1" , df.log, "gsea.threshold")
 } else if (which.results$gsea.threshold == 2) {
-  df.log <- addLogEntry("GSEA threshold", "p<0.05 & |NES| > 1" , df.log, "which.results$gsea.threshold")
+  df.log <- addLogEntry("GSEA threshold", "p<0.05 & |NES| > 1" , df.log, "gsea.threshold")
+} else if (which.results$gsea.threshold == 3) {
+  df.log <- addLogEntry("GSEA threshold", "top 3 (sorted by NES)" , df.log, "gsea.threshold")
 }
-
 
 
 ```
 
 
-```{r convert to symbol}
+```{r convert to symbol, warning = FALSE}
 
 # convert ENSEBLE to GENE names in Seurat object
-# gene.rep <-  check.gene_rep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
 gene.rep <-  checkGeneRep (gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
 
 if (gene.rep == "ensembl"){
-  # so.query <- ens2sym(so = so.query, gNames.list = gNames.list, convert.RNA = TRUE)
   so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list)
   gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-  # gene.rep <-  check.gene_rep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
 }
 
 
 ```
 
-```{r keep available markers}
+```{r keep available markers, warning = FALSE}
+
 if (exists("markers_of_interest")){
   if (is.character(markers_of_interest)){
-  which.available <- unlist(lapply(markers_of_interest, function(x) isGeneAvailable(so.query,x,gNames.list)))
-  markers_of_interest <- unique(markers_of_interest[which.available])
-  markers_of_interest <- rmvCSVprefix(markers_of_interest)
-} else if (is.data.frame(markers_of_interest)){
-  colnames(markers_of_interest) <- rmvCSVprefix(colnames(markers_of_interest))
-}
+    which.available <- unlist(lapply(markers_of_interest, function(x) isGeneAvailable(so.query,x,gNames.list)))
+    genes.not.found <- markers_of_interest[!which.available]
+    markers_of_interest <- unique(markers_of_interest[which.available])
+    markers_of_interest <- rmvCSVprefix(markers_of_interest)
+    if (length(markers_of_interest) == 0) stop("None of queried genes found in seurat object. M09 run terminated.")
+  } else if (is.data.frame(markers_of_interest)){
+    colnames(markers_of_interest) <- rmvCSVprefix(colnames(markers_of_interest))
+  }
 }
 
 
 ```
 
-```{r get clusters and set assay}
+```{r get clusters and set assay, warning = FALSE}
 
 if (DefaultAssay(so.query) == "integrated"){
   # DefaultAssay(so.query) <- "RNA"
@@ -548,7 +401,7 @@ current.assay =  DefaultAssay(so.query)
 
 ```
 
-```{r prepare query gene list (input type 3 or 4)}
+```{r TYPE3 - prepare query gene list, warning = FALSE}
 
 if (which.input$query_input_format == 3){
   
@@ -564,13 +417,13 @@ if (which.input$query_input_format == 3){
                              max.cells.per.ident = 200,
                              return.thresh = 1, #1 ensures all genes are returned
                              verbose = F)
-   Idents(so.query) <- orig.ident
+  Idents(so.query) <- orig.ident
 } 
 
 ```
 
 
-```{r reformat DEG}
+```{r TYPE3 - reformat DEG, warning = FALSE}
 
 if (which.input$query_input_format == 3){
   
@@ -601,35 +454,35 @@ if (which.input$query_input_format == 3){
     select(-row)
   
   markers_of_interest <- as.data.frame(deg.all.wide)
-
+  
   
 } else if (which.input$query_input_format == 4){
   top.n.genes <- 50
   
-gene.scale.name <- unique(rownames(as.matrix(so.query@assays[[DefaultAssay(so.query)]]@scale.data)))
-df.avg.exp <- DotPlot(so.query, assay = DefaultAssay(so.query), features = gene.scale.name, group.by = "seurat_clusters")[["data"]]
-df.avg.exp.sub <- df.avg.exp[ , c("features.plot", "avg.exp", "id")]
-colnames(df.avg.exp.sub) <- c("genes", "exp", "cluster")
-df.avg.exp.sub$cluster <- paste("c", df.avg.exp.sub$cluster, sep = "")
-
-
-df.exp.all.top.wide <- df.avg.exp.sub %>%
-  dplyr::group_by(cluster) %>%
-  dplyr::top_n(n = top.n.genes, wt = exp) %>%
-  dplyr::select(c("genes", "cluster")) %>%
+  gene.scale.name <- unique(rownames(as.matrix(so.query@assays[[DefaultAssay(so.query)]]@scale.data)))
+  df.avg.exp <- DotPlot(so.query, assay = DefaultAssay(so.query), features = gene.scale.name, group.by = "seurat_clusters")[["data"]]
+  df.avg.exp.sub <- df.avg.exp[ , c("features.plot", "avg.exp", "id")]
+  colnames(df.avg.exp.sub) <- c("genes", "exp", "cluster")
+  df.avg.exp.sub$cluster <- paste("c", df.avg.exp.sub$cluster, sep = "")
+  
+  
+  df.exp.all.top.wide <- df.avg.exp.sub %>%
+    dplyr::group_by(cluster) %>%
+    dplyr::top_n(n = top.n.genes, wt = exp) %>%
+    dplyr::select(c("genes", "cluster")) %>%
     group_by(cluster) %>%
     mutate(row = row_number()) %>%
     tidyr::pivot_wider(names_from = cluster, values_from = genes) %>%
     select(-row)
-
-markers_of_interest <- as.data.frame(df.exp.all.top.wide)
-  }
+  
+  markers_of_interest <- as.data.frame(df.exp.all.top.wide)
+}
 
 ```
 
 
 
-```{r umap by cluster}
+```{r umap by cluster, warning = FALSE}
 
 # get GGplot handle for cluster umap
 plt.umap_by_cluster <- cluster.UMAP(so.query, group.by = grouping_var, pt.size = T)
@@ -637,19 +490,17 @@ if (print.inline) plt.umap_by_cluster
 
 ```
 
-```{r meta module }
+```{r meta module , warning = FALSE}
 
+# pool genesets if modular activity is query of interest ##########################
 
-  if(!exists("moi.df")) moi.df <- (markers_of_interest)
-
+if(!exists("moi.df")) moi.df <- (markers_of_interest)
 if (meta.module.flag == T){
-  
-  if (exists("StartNBin.update")) rm("StartNBin.update")
   
   gNames <- gNames.list
   plt.clustermarkers_by_umap <- list()
   available_markers <- c()
-
+  
   markers_of_interest <- names(moi.df)
   
   exp.mat.new <- NULL
@@ -663,27 +514,26 @@ if (meta.module.flag == T){
     # clean dataset and include only those available in seurat object
     cur.features <- as.character(moi.df[,i][moi.df[,i] != ""])
     cur.features <- cleanFilterGenes(cur.features, so.query, which.species)
-
+    
     if (length(cur.features) == 0) next
     
     # append module prefix and get module scores
-    if (prefix.label != ""){
-      module.name <- paste(prefix.label, "-",cur.marker, sep = "")
-    } else {
+    # if (prefix.label != ""){
+    #   module.name <- paste(prefix.label, "-",cur.marker, sep = "")
+    # } else {
       module.name <- cur.marker
-    }
+    # }
     
-
     so.query.try = NA
-      so.query.try <-  try(AddModuleScore(so.query,  
-                                          features = list(cur.features),
-                                          ctrl = 50,
-                                          name = "new.module",
-                                          nbin = 5), silent = T)
-      
-      if (is.na(so.query.try)) next
-
-
+    so.query.try <-  try(AddModuleScore(so.query,  
+                                        features = list(cur.features),
+                                        ctrl = 50,
+                                        name = "new.module",
+                                        nbin = 5), silent = T)
+    
+    if (is.na(so.query.try)) next
+    
+    
     # assign name to modlue score
     names(so.query.try@meta.data)[names(so.query.try@meta.data) %in% paste("new.module", 1, sep = "")] <- module.name
     so.query@meta.data[[module.name]] <- so.query.try@meta.data[[module.name]]
@@ -692,15 +542,15 @@ if (meta.module.flag == T){
     cur.module.df <- as.data.frame(so.query@meta.data[[module.name]])
     colnames(cur.module.df) <- module.name
     exp.mat.new <- bind_cols(exp.mat.new, cur.module.df)
-
+    
     available_markers[i] <- module.name
     all.list[[module.name]] <- cur.features
-
+    
   }
   
   # get all scores and cast as matrix
   exp.mat.new.mat.t <- t(as.matrix(exp.mat.new))
-
+  
   # concat scores to seurat objects
   exp.mat.1 <-so.query@assays[[DefaultAssay(so.query)]]@data
   colnames(exp.mat.new.mat.t) <- colnames(exp.mat.1)
@@ -720,13 +570,15 @@ if (exists("so.query.try")) rm("so.query.try")
 
 
 
-```{r}
+```{r bin cells, warning = FALSE}
 
 if (which.results$do.hex){
-  so.query <- schex::make_hexbin(so.query, nbins = 40, 
-    dimension_reduction = "UMAP")
+  
+  n.cells <- ncol(so.query)
+  cells.per.bin <- 30
+  so.query <- schex::make_hexbin(so.query, nbins = round(n.cells/cells.per.bin), 
+                                 dimension_reduction = "UMAP")
 }
-
 
 ```
 
@@ -734,7 +586,9 @@ if (which.results$do.hex){
 ```{r umap expression plots, message=FALSE, warning=FALSE}
 
 # initialize variables
-plt.clustermarkers_by_umap <- list()
+# plt.clustermarkers_by_umap <- list()
+plt.umap.1 <- list()
+plt.umap.2 <- list()
 gNames <- gNames.list
 available_markers <- c()
 
@@ -747,7 +601,6 @@ if (group.by == 1){
   u_groups <- as.character(as.numeric(u_groups)[order(as.numeric(u_groups))])
 }
 query_genes_by_group <- data.frame(u_groups)
-
 input.marker.list <- markers_of_interest
 
 # sort genes by group
@@ -776,7 +629,7 @@ for (i in c(1:(length(markers_of_interest)))) {
   markers_of_interest[i] <- cur.marker
   
   if (!is.na(cur.marker)){
-
+    
     if ((which.results$do.hex)){
       all_plts[[length(all_plts)+1]] <- schex::plot_hexbin_feature(so.query, feature=cur.marker, 
                                                                    action="mean", xlab="UMAP1", ylab="UMAP2", 
@@ -790,7 +643,10 @@ for (i in c(1:(length(markers_of_interest)))) {
   }
   
   if (length(all_plts) == 2){
-    plt.clustermarkers_by_umap[[length(plt.clustermarkers_by_umap)+1]] <- (CombinePlots(all_plts, ncol = length(all_plts), legend = 'none'))
+    
+    current.ind <- length(plt.umap.1)+1
+    plt.umap.1[[current.ind]] <- all_plts[[1]]
+    plt.umap.2[[current.ind]] <- all_plts[[2]]
     available_markers[length(available_markers)+1] <- markers_of_interest[i]
     
     if (print.inline) print((CombinePlots(all_plts, ncol = length(all_plts), legend = 'none')))
@@ -801,56 +657,228 @@ for (i in c(1:(length(markers_of_interest)))) {
 available_markers <- available_markers[!is.na(available_markers)]
 
 # assign names marker names to each plot
-names(plt.clustermarkers_by_umap) <- available_markers
+names(plt.umap.1) <- names(plt.umap.2) <- available_markers
 
 
 ```
 
 
-```{r DEG query genes}
+```{r DEG query genes, warning = FALSE}
 
 # run DEG analysis
 orig.ident <-  Idents(so.query) 
 Idents(so.query) <- grouping_var
-all.markers <- FindAllMarkers(object = so.query,  features = available_markers)
+all.markers <- FindAllMarkers(object = so.query,  features = available_markers, 
+                              logfc.threshold = 0, min.pct = 0, return.thresh = 1)
 Idents(so.query) <- orig.ident
 
-# sig figs
 if (nrow(all.markers) > 0){
   all.markers[, c("p_val", "avg_logFC", "p_val_adj")] <- signif(all.markers[, c("p_val", "avg_logFC", "p_val_adj")], 3)
   
-  # get sig DEGS
-  all.markers.sig <- all.markers[all.markers$p_val_adj < 0.05, ]
+  # get top DEGS
+  if (!is.na(which.results$umap.top.n)){
+    all.markers.sig <- all.markers %>% dplyr::top_n(which.results$umap.top.n, -log1p(p_val))
+  } else {
+    all.markers.sig <- all.markers
+  }
+  
+  u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
+  if (length(u.clust) == 2){
+    all.markers.sig <- all.markers.sig[!duplicated(all.markers.sig$gene), ]
+    all.markers <- all.markers[!duplicated(all.markers$gene), ]
+  }
   
   if (print.inline) all.markers.sig
 } else {
-  all.markers.sig<- NULL
+  all.markers.sig <- NULL
 }
 
 
 ```
 
-```{r UMAP deg genes}
+```{r UMAP deg genes, warning = FALSE}
 
-if ((which.results$umap.expression) & (which.results$umap.deg.only)){
-  if (!is.null(all.markers.sig)){
-    if (nrow(all.markers.sig) > 0){
-      sig.genes <- unique(all.markers.sig$gene)
-      umap.genes <- names(plt.clustermarkers_by_umap)
-      which.match <- umap.genes %in% sig.genes
-      plt.clustermarkers_by_umap <- plt.clustermarkers_by_umap[which.match]
-    } else {
-      plt.clustermarkers_by_umap <- NULL
-    }
+if (!is.na(which.results$umap.top.n)){
+  top.markers <- all.markers %>% top_n(which.results$umap.top.n, -log10(p_val))
+  which.match <- available_markers %in% top.markers$gene
+  plt.umap.1 <- plt.umap.1[which.match]
+  plt.umap.2 <- plt.umap.2[which.match]
+} 
+
+```
+
+
+```{r, warning = FALSE}
+
+expression.Plot.dev <- function(so, which.gene, e.mat = NULL, f.mat = NULL, which.group = "seurat_clusters", which.data = "data"){
+  
+  # get expression data
+  if (is.null(e.mat)){
+    em <- getExpressionMatrix(
+      so,
+      only.variable = F,
+      which.assay = NULL,
+      which.data = which.data,
+      use.additional.genes = NA
+    )
   } else {
-    plt.clustermarkers_by_umap <- NULL
+    em <- e.mat
+  }
+  
+  # get fraction of expressing cells
+  if (is.null(f.mat)){
+    em.frac <- avgGroupExpression(
+      so,
+      which.data = "data",
+      which.center = "fraction",
+      which.group = which.group
+    )
+  } else {
+    em.frac <- f.mat
+  }
+  
+  # get meta data
+  so.meta <- so@meta.data
+  
+  # ensure grouping variable exists
+  if (!(which.group) %in% colnames(so.meta)) stop("Grouping variable does not exist.")
+  
+  # merge datasets
+  if (sum(rownames(em) %in% (which.gene)) != 1) stop("More than one gene matched query. Cannot continue.")
+  df.meta <- data.frame(id = rownames(so.meta), group = so.meta[,which.group])
+  em.mark <- as.data.frame(em[(rownames(em)) %in% (which.gene), ])
+  em.df <- data.frame(id = rownames(em.mark), query = em.mark[,1])
+  em.merge <- merge(em.df, df.meta, by = "id")
+  
+  # get summary statistics (for clustering)
+  em.sum <- em.merge %>%
+    dplyr::group_by(group) %>%
+    dplyr::summarise(x.mean = mean(query, na.rm = T),
+                     x.sd = sd(query, na.rm = T))
+  em.frac.mark <- as.data.frame(em.frac[(rownames(em.frac)) %in% (which.gene), ])
+  colnames(em.frac.mark) <- which.gene
+  # em.frac.mark <- t(em.frac.mark %>% select(-c("genes")))
+  em.frac.mark.df <- data.frame(group = rownames(em.frac.mark), frac = em.frac.mark[,1])
+  
+  if (which.group == "seurat_clusters") em.frac.mark.df$group <- gsub("c", "", em.frac.mark.df$group)
+  em.sum <- merge(em.sum, em.frac.mark.df, by = "group")
+  
+  # hierarchial clustering
+  row.names.df <- em.sum$group
+  em.sum <- em.sum %>% dplyr::select(-c("group"))
+  clust.var <- as.matrix(em.sum)
+  rownames(clust.var) <- row.names.df
+  d <- dist(as.matrix(clust.var))   # find distance matrix
+  
+  clust.success <- F
+  try({
+    hc <- hclust(d)                # apply hirarchical clustering
+    clust.success <- T
+  }, silent = T)
+  
+  if (clust.success){
+    # helper function for creating dendograms
+    ggdend.v2 <- function(df) {
+      ggplot() +
+        geom_segment(data = df, aes(x=x, y=y, xend=xend, yend=yend)) +
+        ggdendro::theme_dendro()
+    }
+    
+    # get dendromgram data from heat object
+    d.query.clust <- ggdendro::dendro_data(hc)
+    
+    # ggplot dendograms
+    p.query.clust <- ggdend.v2(d.query.clust$segments) +
+      ggtitle(paste0(which.gene, " Expression")) +
+      theme(axis.title.x=element_blank(),
+            axis.text=element_blank(),
+            axis.line=element_blank(),
+            axis.ticks=element_blank(),
+            legend.position = "none")
+    
+    # reorder data according to clusters
+    em.merge$group <- factor(as.character(em.merge$group), levels = (d.query.clust[["labels"]][["label"]]))
+    
+    # violin plots
+    plt.em <- em.merge %>%
+      group_by(group) %>%
+      ggplot(aes(x = group, y = query, fill = group)) +
+      geom_violin() + theme_bw() +
+      ylab("Expression") +
+      xlab(which.group)  +
+      theme(plot.margin = unit(c(0, 1, 0, 1), "cm"),
+            legend.position = "none")
+    
+    # combine plots
+    plt.sgExp <-  cowplot::plot_grid(p.query.clust, plt.em, ncol = 1, align = "v", rel_heights = c(1,2))
+    
+  } else {
+    plt.sgExp <- em.merge %>%
+      group_by(group) %>%
+      ggplot(aes(x = group, y = query, fill = group)) +
+      geom_violin() + theme_bw() +
+      ylab("Expression") +
+      xlab(which.group)  +
+      theme(plot.margin = unit(c(0, 1, 0, 1), "cm"),
+            legend.position = "none")
+  }
+  
+  return(plt.sgExp)
+  
+}
+
+```
+
+```{r single cell expression, fig.width=10, fig.height=4, include = FALSE, warning = FALSE}
+
+
+# clean up
+try({ rm(exp.mat); rm(exp.mat.2); rm(exp.mat.complete) }, silent = T)
+
+e.mat <- getExpressionMatrix(
+  so.query,
+  only.variable = F,
+  which.data = "data",
+  use.additional.genes = NA)
+
+f.mat <- getExpressionMatrix(
+  so.query,
+  only.variable = F,
+  which.data = "data",
+  use.additional.genes = NA)
+
+# plot clustered violin plot
+plt.sgExp.all <- list()
+for (i in 1:length(available_markers)){
+  
+  plt.sgExp.clust <- expression.Plot.dev(so = so.query, e.mat = e.mat, f.mat = f.mat, 
+                                         which.gene = available_markers[i], which.group = "seurat_clusters", which.data = "data") + ylab(paste0(available_markers[i], " Expression")) + xlab("Cluster ID") + labs(title = "Violin Plots", subtitle = "Clusters")
+  
+  is.success <- F
+  try({
+    plt.sgExp.barcode <- expression.Plot.dev(so = so.query, e.mat = e.mat, f.mat = f.mat, 
+                                             which.gene = available_markers[i], which.group = "Barcode", which.data = "data") +  ylab(paste0(available_markers[i], " Expression"))  + xlab("Sample ID") + labs(title = "", subtitle = "Samples")
+    is.success <- T
+  })
+  
+  if (is.success){
+    plt.sgExp <- grid.arrange(grobs = list(plt.sgExp.clust, plt.sgExp.barcode), ncol = 2)
+  } else {
+    plt.sgExp <-plt.sgExp.clust
+  }
+  
+  plt.sgExp.all[[available_markers[i]]] <- plt.sgExp
+  
+  if (print.inline){
+    plt.sgExp.all[[available_markers[i]]]
   }
 }
-
 ```
 
 
-```{r symbol2entrez}
+
+
+```{r symbol2entrez, warning = FALSE}
 
 # get symbol to entrez mapping
 my.symbol <- as.vector(rownames(so.query@assays[[current.assay]]@scale.data))
@@ -861,7 +889,7 @@ my.entrez <- my.entrez[complete.cases(my.entrez), ]
 
 
 
-```{r get correlations, message=F, warning=F}
+```{r get correlations, message=FALSE, warning=FALSE}
 
 which.data <- "data"
 
@@ -871,19 +899,14 @@ exp.mat.complete <- getExpressionMatrix(so.query, which.data = which.data)
 # variable gene only matrix
 use.var <- T
 
-n.var <- 3000 # specfiy number of variable genes
+n.var <- 3000 # specify number of variable genes
 if (use.var){
-  
-  # scale down number of variable features, if assay is SCT
-  if ("integrated" %in% names(so.query@assays)){
-    
-  } else if (DefaultAssay(so.query) == "SCT"){
-    df.meta <- so.query@assays[["SCT"]]@meta.features
-    df.meta$genes <- rownames(df.meta)
-    df.meta <- df.meta[order(-df.meta$sct.residual_variance), ]
-    top.var <- df.meta$genes[1:n.var]
-    so.query@assays[["SCT"]]@var.features <- top.var
-  }
+  # scale down number of variable features
+  df.meta <- so.query@assays[["SCT"]]@meta.features
+  df.meta$genes <- rownames(df.meta)
+  df.meta <- df.meta[order(-df.meta$sct.residual_variance), ]
+  top.var <- df.meta$genes[1:n.var]
+  so.query@assays[["SCT"]]@var.features <- top.var
   
   # if more than 3000 variable features are available, recompute and only take top n.var
   if (length(so.query@assays[[DefaultAssay(so.query)]]@var.features) > n.var){
@@ -900,17 +923,15 @@ if (use.var){
 # ensure no negative values (necessary condition for proportionality association metrics)
 if (min(exp.mat.complete) < 0) {
   exp.mat <- exp.mat + abs(min(exp.mat.complete))
-    exp.mat.complete <- exp.mat.complete + abs(min(exp.mat.complete))
+  exp.mat.complete <- exp.mat.complete + abs(min(exp.mat.complete))
 }
 
 df.cor.list <- NULL
 
 query.cor.list <- list()
 
-if (which.results$query.correlation){
-  
   if (use.var){
-     which.missing <- available_markers[!(available_markers %in% rownames(exp.mat) )]
+    which.missing <- available_markers[!(available_markers %in% rownames(exp.mat) )]
     for (i in 1:length(which.missing)){
       exp.missing <- exp.mat.complete[rownames(exp.mat.complete) %in% which.missing[i], ]
       exp.mat <- rbind(exp.mat, exp.missing)
@@ -918,88 +939,34 @@ if (which.results$query.correlation){
     }
   }
   
-
-  
   cor.method <- "rho_p" # rho_p, spearman, pearson
   t.exp.mat <- t(exp.mat)
   if (cor.method == "rho_p"){
-  query.cor.object <-  propr::perb(t.exp.mat, select = colnames(t.exp.mat))
-  query.cor.mat <- query.cor.object@matrix
+    query.cor.object <-  propr::perb(t.exp.mat, select = colnames(t.exp.mat))
+    query.cor.mat <- query.cor.object@matrix
   } else {
-  query.cor.mat <-  dismay::dismay(t.exp.mat, metric = cor.method)
+    query.cor.mat <-  dismay::dismay(t.exp.mat, metric = cor.method)
   }
   
-   # cor = propr::perb(mat, select = colnames(mat))@matrix
   query.cor.mat.all <- query.cor.mat[!(rownames(query.cor.mat) %in% available_markers),colnames(query.cor.mat) %in% available_markers]
-  # query.cor.mat.all <- query.cor.mat[]
+  
+  # assign results
+  df.cor.list <- as.data.frame(query.cor.mat.all)
+  if (ncol(df.cor.list) == 1) {
+    
+    df.cor.list$genes<-  rownames(query.cor.mat)[!(rownames(query.cor.mat) %in% available_markers)]
+    colnames(df.cor.list)[1] <- available_markers[1]
+  } else {
+    df.cor.list$genes <- rownames(df.cor.list)
+  }
+  
+  df.cor.list <- df.cor.list[ ,c("genes", available_markers)]
+  
 
-
-
-# assign results
-df.cor.list <- as.data.frame(query.cor.mat.all)
-if (ncol(df.cor.list) == 1) {
- 
-  df.cor.list$genes<-  rownames(query.cor.mat)[!(rownames(query.cor.mat) %in% available_markers)]
-   colnames(df.cor.list)[1] <- available_markers[1]
-} else {
-  df.cor.list$genes <- rownames(df.cor.list)
-}
-
-df.cor.list <- df.cor.list[ ,c("genes", available_markers)]
-
-} else {
-  df.cor.list <- NULL
-  cor.method <- NA
-}
 
 ```
 
-
-```{r}
-# visualize top correlations
-
-# head(df.cor.list)
-
-cor.plot.flag <- F
-
-
-if (cor.plot.flag){
-  
-  df.cor.list.noquery <- df.cor.list[!(df.cor.list$genes %in% available_markers), ]
-  
-  max.cor <- c()
-  min.cor <- c()
-  for (i in 1:length(available_markers)){
-    max.cor[i] <- df.cor.list.noquery$gene[which.max(df.cor.list.noquery[ , available_markers[i]])]
-    min.cor[i] <- df.cor.list.noquery$gene[which.min(df.cor.list.noquery[ , available_markers[i]])]
-  }
-  names(max.cor) <- available_markers
-  names(min.cor) <- available_markers
-  
-  for (i in 1:length(available_markers)){
-    
-    expressing.query <- getExpressingCells(so.query, available_markers[i])
-    expressing.hit <- getExpressingCells(so.query, max.cor[i])
-    
-    expressing.query <- expressing.query[expressing.query %in% expressing.hit]
-    
-    exp.mat.query <- exp.mat.complete[rownames(exp.mat.complete) %in% available_markers[i]]
-    exp.mat.hit <- (exp.mat[rownames(exp.mat) == max.cor[i]])
-
-    df.xy.cor <- data.frame(x = exp.mat.query, y = (exp.mat[rownames(exp.mat) == max.cor[i]]))
-    df.xy.cor$x.rank <- rank(df.xy.cor$x, ties.method = "average")
-    df.xy.cor$y.rank <- rank(df.xy.cor$y, ties.method = "average")
-    
-
-  }
-  
-  
-}
-
-```
-
-
-```{r prep ranking lists}
+```{r prep ranking lists, warning = FALSE}
 
 # Rank by LFC if DEG
 if (which.input$query_input_format == 3){
@@ -1035,364 +1002,160 @@ if (which.input$query_input_format == 3){
   df2enrich <- NULL
 }
 
-
 # ensure no duplicate exist
 if (!is.null(df2enrich)){
- df2enrich <- df2enrich[!duplicated(df2enrich$genes), ]
-enrich.groups <- colnames(df2enrich)
-enrich.groups <- enrich.groups[enrich.groups != "genes"]
- 
-}
-
+  df2enrich <- df2enrich[!duplicated(df2enrich$genes), ]
+  enrich.groups <- colnames(df2enrich)
+  enrich.groups <- enrich.groups[enrich.groups != "genes"]
+  }
 
 ```
 
-```{r get pathays}
-
+```{r get pathays, warning = FALSE}
 
 # all.genes <-df2enrich$genes
 all.genes <- rownames(so.query)
 
-
 match.ind <- match(all.genes, my.entrez$SYMBOL)
 all.genes.entrez <- as.character(my.entrez$ENTREZID[match.ind]) 
 
-pathways <- getAnnotationPathways(all.genes.entrez, db = which.annotation.db, ontology = "BP", species = default.species)
-# pathways <- getAnnotationPathways(all.genes.entrez, db = c("GO"), ontology = "BP", species = default.species)
+pathways.subset <- getAnnotationPathways(all.genes.entrez, db = which.annotation.db, ontology = "BP", species = default.species)
 
 ```
 
 
-```{r gsea enrichment}
+```{r gsea enrichment, warning = FALSE}
 
 # get pathways relevant to current gene set
-if (which.results$gsea | which.results$umap.gsea | which.results$dot.gsea) {
-  
-  # which.path <- "positive regulation of immune response to tumor cell"
-  which.path <- NA
-  
-  if (!is.na(which.path)){
-    pathways.subset <- pathways[names(pathways) %in% which.path]
-  } else {
-    pathways.subset <- pathways
-  }
-  
-  gse.pathway.combined <- NULL
-  gse.pathway.filtered.concat <- NULL
-  gse.gene.list <- list()
-  gse.pathway.list <- list()
-  
-  
-  single.path.of.interest <- NULL
-  
-  plt.enrichment <- list()
-  
-  # specify analysis parameters
-  if (which.species == "Hs") {
-    org <- "human"
-    db <- org.Hs.eg.db
-  } else if (which.species == "Mm"){
-    org <- "mouse"
-    db <- org.Mm.eg.db
-  }
+gse.pathway.combined <- NULL
+gse.pathway.list <- list()
 
- for (i in 1:length(enrich.groups)){
-    
-    if (which.results$gsea | which.results$umap.gsea | which.results$dot.gsea) {
-      
-      
-      gene.list <- (df2enrich[, enrich.groups[i]])
-      names(gene.list) <- df2enrich$genes
-      match.ind <- match(names(gene.list), my.entrez$SYMBOL)
-      names(gene.list) <- as.character(my.entrez$ENTREZID[match.ind])
-      gene.list = sort(gene.list, decreasing = TRUE)
-      
-      # clean list
-      df.ent <- data.frame(names = names(gene.list), values = as.vector(gene.list))
-      df.ent <- df.ent[complete.cases(df.ent), ]
-      df.ent <- df.ent[!is.infinite(df.ent$values), ]
-      gene.list.clean <- df.ent$values
-      names(gene.list.clean) <- df.ent$names
+single.path.of.interest <- NULL
 
-      
-      suppressMessages({
-        # pathway gsea enrichment
-        gse.pathway <- fgsea(pathways.subset, gene.list.clean, nperm=1000, maxSize=500)
-        
+plt.enrichment <- list()
 
-        if (nrow(gse.pathway) == 0) next
-        gse.pathway$query <- enrich.groups[i]
-        gse.pathway.combined <- bind_rows(gse.pathway.combined, gse.pathway)
-        
-        # if only one query gene provided, don't filter enrichment terms. 
-        # if ((length(markers_of_interest) == 1) | (which.results$include.all.gsea == T)) {
-        #   gse.pathway.filtered <- gse.pathway.combined
-        # } else {
-          if(which.results$gsea.threshold == 1){
-            gse.pathway.filtered <- gse.pathway[gse.pathway$padj < 0.05, ]
-          } else if (which.results$gsea.threshold == 2){
-            gse.pathway.filtered <- gse.pathway[((gse.pathway$pval < 0.01) & (abs(gse.pathway$NES) > 1)), ]
-          } else if (which.results$gsea.threshold == 3){
-            gse.pathway.filtered <- gse.pathway %>% top_n(3, NES)
-            # gse.pathway.filtered <- gse.pathway[((gse.pathway$pval < 0.01) & (abs(gse.pathway$NES) > 1)), ]
-          }
-        # }
-        
-        if (nrow(gse.pathway.filtered) == 0) next
-        
-        # make human readable (map entrez to symbol)
-        gse.pathway.filtered.orig <- gse.pathway.filtered
-        gse.pathway.filtered$set <- lapply(gse.pathway.filtered$leadingEdge, mapvalues,from = my.entrez$ENTREZID, to = my.entrez$SYMBOL)
-        gse.pathway.filtered$set <- lapply(gse.pathway.filtered$set, paste,collapse = ", ")
-        gse.pathway.filtered$query <- enrich.groups[i]
-      })
-      
-      # sig figs for numerics
-      gse.pathway.filtered$ES <- signif(gse.pathway.filtered$ES, 3)
-      gse.pathway.filtered$NES <- signif(gse.pathway.filtered$NES, 3)
-      gse.pathway.filtered$pval <- signif(gse.pathway.filtered$pval, 3)
-      gse.pathway.filtered$padj <- signif(gse.pathway.filtered$padj, 3)
-      
-      # filter and rearrange columns
-      gse.pathway.filtered.concat <- bind_rows(gse.pathway.filtered.concat, gse.pathway.filtered.orig)
-      gse.pathway.all <- gse.pathway.filtered[ ,c("query", "pathway", "size", "ES", "NES", "pval", "padj", "set")]
-      
-      # store results
-      gse.pathway.list[[enrich.groups[i]]] <- gse.pathway.all
-      gse.gene.list[[enrich.groups[i]]] <- gene.list.clean
-      
-    } 
- }
-
+# specify analysis parameters
+if (which.species == "Hs") {
+  org <- "human"
+  db <- org.Hs.eg.db
+} else if (which.species == "Mm"){
+  org <- "mouse"
+  db <- org.Mm.eg.db
 }
 
+# start cluster
+if (n.workers$gsea > length(enrich.groups)) n.workers$gsea <- length(enrich.groups)
+cl <- parallel::makeCluster(n.workers$gsea)
+doParallel::registerDoParallel(cl)
 
-```
-
-```{r enrich main pathways, message=FALSE, warning=FALSE}
-
-if (which.results$umap.gsea | which.results$dot.gsea){
+score.results <- foreach(i = 1:length(enrich.groups), .packages = c("fgsea", "plyr"))  %dopar% {
   
-  mp.genes.list <- list()
+  # for (i in 1:length(enrich.groups)){
   
-  for (i in 1:length(enrich.groups)){
-    # get main pathways
+  gene.list <- (df2enrich[, enrich.groups[i]])
+  names(gene.list) <- df2enrich$genes
+  match.ind <- match(names(gene.list), my.entrez$SYMBOL)
+  names(gene.list) <- as.character(my.entrez$ENTREZID[match.ind])
+  gene.list = sort(gene.list, decreasing = TRUE)
+  
+  # clean list
+  df.ent <- data.frame(names = names(gene.list), values = as.vector(gene.list))
+  df.ent <- df.ent[complete.cases(df.ent), ]
+  df.ent <- df.ent[!is.infinite(df.ent$values), ]
+  gene.list.clean <- df.ent$values
+  names(gene.list.clean) <- df.ent$names
+  
+  
+  suppressMessages({gse.pathway <- fgsea(pathways.subset, gene.list.clean, nperm=1000, maxSize=500) })
+  
+  if (nrow(gse.pathway) == 0) {
+    return(list(out1 = NULL,
+                out2 = NULL))
+  } else {
+    
+    gse.pathway$query <- enrich.groups[i]
+    # gse.pathway.combined <- bind_rows(gse.pathway.combined, gse.pathway)
     
     if(which.results$gsea.threshold == 1){
-      which.sig <- gse.pathway.list[[enrich.groups[i]]][["padj"]] < 0.05
+      gse.pathway.filtered <- gse.pathway[gse.pathway$padj < 0.1, ]
     } else if (which.results$gsea.threshold == 2){
-      which.sig <- ((gse.pathway.list[[enrich.groups[i]]][["pval"]] < 0.01) & (abs(gse.pathway.list[[enrich.groups[i]]][["NES"]]) > 1))
+      gse.pathway.filtered <- gse.pathway[((gse.pathway$pval < 0.01) & (abs(gse.pathway$NES) > 1)), ]
     } else if (which.results$gsea.threshold == 3){
-      p2include <- gse.pathway.list[[enrich.groups[i]]] %>% top_n(3, NES)
-      which.sig <- gse.pathway.list[[enrich.groups[i]]]$pathway %in% p2include$pathway
-      # gse.pathway.filtered <- gse.pathway[((gse.pathway$pval < 0.01) & (abs(gse.pathway$NES) > 1)), ]
+      gse.pathway.filtered <- gse.pathway %>% top_n(3, NES)
     }
     
-      which.sig[is.na(which.sig)] <- F
-      if (sum(which.sig) == 0) next      
-
-      mp <- tryCatch({
-        main.pathways <- collapsePathways(gse.pathway.list[[enrich.groups[i]]][which.sig], pathways, 
-                                          gse.gene.list[[enrich.groups[i]]]) 
-        mp <- main.pathways[["mainPathways"]]
-      }, error= function(e){
-        
-        mp <- gse.pathway.list[[enrich.groups[i]]]$pathway
-        return(mp)
-      })    
-
-   
-    mp.pathways <- pathways[names(pathways) %in% mp]
-    mp.genes.list[[enrich.groups[i]]] <- mp.pathways
-
+    # if (nrow(gse.pathway.filtered) == 0) next
+    
+    # make human readable (map entrez to symbol)
+    gse.pathway.filtered.orig <- gse.pathway.filtered
+    gse.pathway.filtered$set <- lapply(gse.pathway.filtered$leadingEdge, 
+                                       mapvalues,from = my.entrez$ENTREZID, to = my.entrez$SYMBOL)
+    gse.pathway.filtered$set <- lapply(gse.pathway.filtered$set, paste,collapse = ", ")
+    gse.pathway.filtered$query <- enrich.groups[i]
+    
+    
+    # sig figs for numerics
+    gse.pathway.filtered$ES <- signif(gse.pathway.filtered$ES, 3)
+    gse.pathway.filtered$NES <- signif(gse.pathway.filtered$NES, 3)
+    gse.pathway.filtered$pval <- signif(gse.pathway.filtered$pval, 3)
+    gse.pathway.filtered$padj <- signif(gse.pathway.filtered$padj, 3)
+    
+    # filter and rearrange columns
+    gse.pathway.cur <- gse.pathway.filtered[ ,c("query", "pathway", "size", "ES", "NES", "pval", "padj", "set")]
+    
+    # store results
+    # gse.pathway.list[[enrich.groups[i]]] <- gse.pathway.all
+    
+    return(list(out1 = gse.pathway.cur,
+                out2 = gse.pathway))
   }
   
-  all.pathways <- c()
-  for (i in 1:length(enrich.groups)){
-    all.pathways <- c(all.pathways, names(mp.genes.list[[enrich.groups[i]]]))
-  }
-  all.pathways <- unique(all.pathways)
+} 
 
-if (exists("n.top.pathways")){
-  
-  if (length(all.pathways) > n.top.pathways){
-    gse.pathway.filtered.concat.filtered <- gse.pathway.filtered.concat[gse.pathway.filtered.concat$pathway %in% all.pathways, ]
-    gse.pathway.filtered.concat.filtered <-  gse.pathway.filtered.concat.filtered %>% arrange(padj)
-    top.pathways <- unique(gse.pathway.filtered.concat.filtered$pathway)[1:n.top.pathways]
-  } else if  (length(all.pathways) == 0){
-    which.results$umap.gsea <- F
-  }
-  
-  all.pathways <- top.pathways  
+# stop workers
+parallel::stopCluster(cl)
+
+stopifnot(length(enrich.groups) == length(score.results))
+
+for (i in 1:length(enrich.groups)){
+  gse.pathway.list[[enrich.groups[i]]] <- score.results[[i]]$out1
+  gse.pathway.combined <- bind_rows(gse.pathway.combined, score.results[[i]]$out2)
 }
 
-mp.genes <- pathways[names(pathways) %in% all.pathways]
-mp.genes <- lapply(mp.genes, mapvalues,from = my.entrez$ENTREZID, to = my.entrez$SYMBOL, warn_missing = F)
+  # gse.pathway.combined <- bind_rows(gse.pathway.combined, gse.pathway)
+  
+```
 
-} else {
-  mp.genes <- NULL
+```{r gsea barplot, warning = FALSE}
+
+
+plt.top.gsea <- list()
+for (i in 1:length(available_markers)){
+  
+ current.paths <- gse.pathway.list[[available_markers[i]]]
+ current.paths <- bind_rows(current.paths %>% dplyr::top_n(which.results$gsea.top.n , NES) %>% dplyr::arrange(-NES), 
+                            current.paths %>% dplyr::top_n(which.results$gsea.top.n , -NES) %>% dplyr::arrange(NES))
+ 
+ plt.top.gsea[[available_markers[i]]] <- current.paths %>%
+   ggplot(aes(x = reorder(pathway, NES), y = NES, size = -log10(pval), fill = -log10(pval))) + 
+   geom_point(pch = 21) + 
+   coord_flip() + 
+   xlab("Pathways") + ylab("NES") + 
+   labs(title = "GSEA", subtitle = paste0(available_markers[i], " corr. ranking")) + 
+   geom_hline(yintercept = 0, linetype = "dashed") + 
+   viridis::scale_fill_viridis(option = "B")
+ 
+ if (print.inline){
+   plt.top.gsea[[available_markers[i]]]
+ }
 }
+
 ```
 
 
-```{r module scores for pathways, message=FALSE, warning=FALSE}
-if ((which.results$umap.gsea | which.results$dot.gsea) & (length(mp.genes)>0)){
-  
-  # if (exists("StartNBin.update")) rm("StartNBin.update")
-
-  gNames <- gNames.list
-
-  available_pathways <- c()
-  poi.df <- mp.genes
-  pathways_of_interest <- names(poi.df)
-  
-  pathway.mat.new <- NULL
-  
-  all.list <- list()
-  for (i in 1:length(pathways_of_interest)){
-    
-    # get meta module name
-    cur.marker <- pathways_of_interest[i]
-    
-    # clean dataset and include only those available in seurat object
-    cur.features <- poi.df[[cur.marker]]
-    cur.features <- cleanFilterGenes(cur.features, so.query, which.species)
-
-    if (length(cur.features) == 0) next
-    
-      module.name <- make.names(cur.marker)
-    
-        # get module scores 
-
-          so.query.try = NA
-      so.query.try <-  try(AddModuleScore(so.query,  
-                                          features = list(cur.features),
-                                          ctrl = 50,
-                                          name = "new.module",
-                                          nbin = 5), silent = T)
-      
-      if (is.na(so.query.try)) next
-
-        # assign name to modlue score
-    names(so.query.try@meta.data)[names(so.query.try@meta.data) %in% "new.module1"] <-module.name
-    so.query@meta.data[[module.name]] <- so.query.try@meta.data[[module.name]]
-    
-    # concat scores to dataframe
-    cur.module.df <- as.data.frame(so.query@meta.data[[module.name]])
-    colnames(cur.module.df) <- module.name
-    pathway.mat.new <- bind_cols(pathway.mat.new, cur.module.df)
-
-    available_pathways[i] <- module.name
-    all.list[[module.name]] <- cur.features
-
-  }
-  
-  # get all scores and cast as matrix
-  pathway.mat.new.mat.t <- t(as.matrix(pathway.mat.new))
-  
-  # concat scores to seurat objects
-  exp.mat.1 <-so.query@assays[[DefaultAssay(so.query)]]@data
-  colnames(pathway.mat.new.mat.t) <- colnames(exp.mat.1)
-  exp.mat.1 <- rbind(exp.mat.1, pathway.mat.new.mat.t)
-  so.query@assays[[DefaultAssay(so.query)]]@data <- exp.mat.1
-  
-  exp.mat.2 <-so.query@assays[[DefaultAssay(so.query)]]@scale.data
-  colnames(pathway.mat.new.mat.t) <- colnames(exp.mat.2)
-  exp.mat.2 <- rbind(exp.mat.2, pathway.mat.new.mat.t)
-  so.query@assays[[DefaultAssay(so.query)]]@scale.data <- exp.mat.2
-  pathways_of_interest <- available_pathways[!is.na(available_pathways)]
-  
-}
-if (exists("so.query.try")) rm("so.query.try")
-
-```
-
-```{r umap pathway plots, message=FALSE, warning=FALSE}
-
-if (which.results$umap.gsea){
-# initialize variables
-  plt.pathways_by_umap <- list()
-gNames <- gNames.list
-available_pathways <- c()
-
-
-if (group.by == 1){
-  u_groups <- as.character(as.numeric(u_groups)[order(as.numeric(u_groups))])
-}
-query_genes_by_group <- data.frame(u_groups)
-
-input.marker.list <- pathways_of_interest
-
-# sort genes by group
-for (i in 1:length(pathways_of_interest)){
-  query_genes_by_group[ ,ncol(query_genes_by_group)+1] <- rep(pathways_of_interest[i], nrow(query_genes_by_group))
-}
-
-
-clust.plot <-  DimPlot(so.query, reduction = "umap", group.by = grouping_var, label = TRUE, repel = TRUE)  + 
-    ggtitle(label = "UMAP") + xlab("UMAP 1") +  ylab("UMAP 2")
-
-# plot top differentially expressed genes per cluster and compare to cluster membership
-for (i in c(1:(length(pathways_of_interest)))) {
-  
-  # empty list where plts will be stored
-  all_plts.pathways <- list()
-  
-  # highlight cluster plot
-  all_plts.pathways[[1]]  <- clust.plot
-
-    cur.marker <- pathways_of_interest[i]
-    
-    
-      
-    if (!is.na(cur.marker)){
-
-      if ((which.results$do.hex)){
-        all_plts.pathways[[length(all_plts.pathways)+1]] <- schex::plot_hexbin_feature(so.query, 
-                                                                                       feature=cur.marker, 
-                                                                                       action="mean", 
-                                                                                       xlab="UMAP1", 
-                                                                                       ylab="UMAP2", 
-                                                                                       title=cur.marker,
-                                                                                       mod = DefaultAssay(so.query),
-                                                                                       type = "data")
-      } else {
-        all_plts.pathways[[length(all_plts.pathways)+1]] <- scExpression.UMAP(so.query, cur.marker)
-      }
-      
-    }
-    
-
-  
-  if (length(all_plts.pathways) == 2){
-    plt.pathways_by_umap[[length(plt.pathways_by_umap)+1]] <- (CombinePlots(all_plts.pathways, ncol = length(all_plts.pathways), legend = 'none'))
-    available_pathways[length(available_pathways)+1] <- pathways_of_interest[i]
-    
-    if (print.inline) print((CombinePlots(all_plts.pathways, ncol = length(all_plts.pathways), legend = 'none')))
-  }
-}
-
-# remove NA entries
-available_pathways <- available_pathways[!is.na(available_pathways)]
-
-
-# assign names marker names to each plot
-names(plt.pathways_by_umap) <- available_pathways
-
-} else {
-  plt.pathways_by_umap <- NULL
-}
-
-
-names(plt.pathways_by_umap)
-
-```
-
-```{r common enrichments}
+```{r common enrichments, warning = FALSE}
 
 # summarize enrichments
-if (which.results$gsea | which.results$dot.gsea | which.results$umap.gsea){
-  
   gse.pathway.combined.label <- gse.pathway.combined
   
   if (!is.null(gse.pathway.combined.label)){
@@ -1407,7 +1170,7 @@ if (which.results$gsea | which.results$dot.gsea | which.results$umap.gsea){
     gse.pathway.combined.tally <- gse.pathway.combined.label %>%
       dplyr::filter(pval < 0.01, abs(NES) > 1) %>%
       dplyr::group_by(pathway) %>%
-      summarize(queries = list(query))
+      summarise(queries = list(query))
     
     gse.pathway.combined.tally$n <- lapply(gse.pathway.combined.tally$queries, length)
     gse.pathway.combined.tally$n <- as.numeric(gse.pathway.combined.tally$n)
@@ -1419,17 +1182,14 @@ if (which.results$gsea | which.results$dot.gsea | which.results$umap.gsea){
   } else {
     gse.pathway.combined.tally <- NULL
   }
-  
-}
 
 
 ```
 
-```{r cormat heatmap}
+```{r cormat heatmap, warning = FALSE}
 
 
-if (which.results$query.correlation) {
-  # a <- UpdateSymbolList(symbols =  df.cor.list.mat$genes)
+if (exists("df.cor.list")) {
   
   df.cor.list.mat <- df.cor.list
   df.cor.list.mat <- df.cor.list.mat[!duplicated(df.cor.list.mat$genes), ]
@@ -1437,45 +1197,35 @@ if (which.results$query.correlation) {
   df.cor.list.mat <- dplyr::select(df.cor.list.mat, -c("genes"))
   cor.mat <- as.matrix(df.cor.list.mat)
   
+  
+  top.n.cor <- which.results$cor.top.n
+  n.per.query <- ceiling(0.5*top.n.cor/ncol(cor.mat))
+  
   filter.cor <- T
   if (filter.cor){
-    mean.cor <- median(cor.mat, na.rm = T)
-    sd.cor <- mad(cor.mat, na.rm = T)
-    upper.thresh <- mean.cor + (2*sd.cor)
-    lower.thresh <- mean.cor - (2*sd.cor)
-    mat.filter <- cor.mat > upper.thresh | cor.mat < lower.thresh
-    rs <- apply(mat.filter, 1,sum)
-    rs <-  rs > 0
-    if (sum(rs) == 0) stop("No significant query correlations")
-    cor.mat.sub <- cor.mat[rs , ]
+    
+    cor.mat.df <- as.data.frame(cor.mat)
+    top.cor <- unique(as.vector(unlist(apply(cor.mat.df, 2, function(x) {
+      c(rownames(cor.mat)[order(-x)][1:n.per.query], rownames(cor.mat)[order(x)][1:n.per.query])
+    }))))
+    cor.mat.sub <- cor.mat[rownames(cor.mat) %in% top.cor, ]
+    
+    if (class(cor.mat.sub) == "numeric"){
+      names(cor.mat.sub) <- rownames(cor.mat)[rownames(cor.mat) %in% top.cor]
+    } else {
+      rownames(cor.mat.sub) <- rownames(cor.mat)[rownames(cor.mat) %in% top.cor] 
+    }
+    
   } else {
     cor.mat.sub <- cor.mat
   }
-  
-
-  scale.min <- min(cor.mat)
-  scale.max <- max(cor.mat[cor.mat != 1])
-  scale.limit <- max(abs(scale.max), abs(scale.min))
-  
-  # cluster colors
-  qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
-  col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
-  
-  cols <- NULL
-  try({
-    cols <- sample(col_vector, length(available_markers)) 
-  }, silent = T)
-  
-  
-  # heatmap colors
-  hmcol <- colorRampPalette(brewer.pal(9, "RdBu"))(100)
-  
 }
+
 
 ```
 
 
-```{r gene.expression tables}
+```{r gene.expression tables, warning = FALSE}
 
 data.all <- as.data.frame(so.query@assays[[DefaultAssay(so.query)]]@data)
 data.rownames <- rownames(data.all)
@@ -1508,6 +1258,7 @@ for (i in 1:length(groups.of.interest)){
       summarize(mean.exp = signif(mean(expression),3), 
                 median.exp = signif(median(expression),3),
                 sd.exp = signif(sd(expression),3),
+                pct.exp = signif(mean(expression > 0),3),
                 n.cells = length(expression))
     
     colnames( df.expression.list[[names(groups.of.interest)[i]]])[2] <- names(groups.of.interest)[i]
@@ -1523,6 +1274,7 @@ if (all(c("seurat_clusters", "batch") %in%  names(so.query@meta.data))){
     summarize(mean.exp = signif(mean(expression),3), 
               median.exp = signif(median(expression),3),
               sd.exp = signif(sd(expression),3),
+              pct.exp = signif(mean(expression > 0),3),
               n.cells = length(expression))
   
   if (print.inline) datatable(df.expression.list[[cur.entry]], filter = "top")
@@ -1535,24 +1287,26 @@ if (all(c("seurat_clusters", "stratify.group") %in%  names(so.query@meta.data)))
     summarize(mean.exp = signif(mean(expression),3), 
               median.exp = signif(median(expression),3),
               sd.exp = signif(sd(expression),3),
+              pct.exp = signif(mean(expression > 0),3),
               n.cells = length(expression))
   
   if (print.inline) datatable(df.expression.list[[cur.entry]], filter = "top")
 }
 
 if (grouping_var != "seurat_clusters"){
-
-if (all(grouping_var %in%  names(so.query@meta.data))){
-  cur.entry <- grouping_var
-  df.expression.list[[cur.entry]] <- data.subset.long %>%
-    group_by(gene, get(cur.entry)) %>%
-    summarize(mean.exp = signif(mean(expression),3), 
-              median.exp = signif(median(expression),3),
-              sd.exp = signif(sd(expression),3),
-              n.cells = length(expression))
   
-  if (print.inline) datatable(df.expression.list[[cur.entry]], filter = "top")
-}
+  if (all(grouping_var %in%  names(so.query@meta.data))){
+    cur.entry <- grouping_var
+    df.expression.list[[cur.entry]] <- data.subset.long %>%
+      group_by(gene, get(cur.entry)) %>%
+      summarize(mean.exp = signif(mean(expression),3), 
+                median.exp = signif(median(expression),3),
+                sd.exp = signif(sd(expression),3),
+                pct.exp = signif(mean(expression > 0),3),
+                n.cells = length(expression))
+    
+    if (print.inline) datatable(df.expression.list[[cur.entry]], filter = "top")
+  }
   
 }
 
@@ -1563,146 +1317,125 @@ if (all(grouping_var %in%  names(so.query@meta.data))){
 ```{r create cor heatmap, include= F}
 
 # fitered correlation matrix
-if (which.results$query.correlation) {
   if (class(cor.mat.sub) == "matrix") {
-    # heat.object <- get.heat(cor.mat.sub, hmcol, scale.limit)
-    heat.object <- getHeat(cor.mat.sub, hmcol, scale.limit)
+    plt.heat <- ggplotify::as.ggplot(pheatmap::pheatmap(cor.mat.sub, 
+                                                        main = "Query x Gene Correlations\nx=query, y=genes, z=correlation"))
   } else {
-    heat.object <- NULL
+    plt.heat <- NULL
   }
   
-}
-
 ```
 
-
-```{r generate heat map (correlation) v2}
-
-# reorder according to original clustering
-if (which.results$query.correlation && !is.null(heat.object)){
-  
-
-mat.reconstruct <- cor.mat.sub[heat.object[["rowInd"]], heat.object[["colInd"]]]
-
-# create data frame from reconstructed matrix
-gene.order <- rownames(mat.reconstruct)
-df.recon <- as.data.frame(mat.reconstruct)
-df.recon$genes <- factor(rownames(df.recon), levels = gene.order)
-df.recon.melt <- melt(df.recon)
-df.recon.melt$variable <- factor(df.recon.melt$variable, levels = colnames(mat.reconstruct))
-
-# define limits
-df.recon.melt$value[df.recon.melt$value > scale.max] <- scale.max
-df.recon.melt$value[df.recon.melt$value < scale.min] <- scale.min
-
-# heatmap (ggplot2-based)
-if (cor.method == "rho_p") {
-  fill.label <- "Proportionality Metric"
-} else if (cor.method == "spearman") {
-  fill.label <- "Spearman R"
-} else if (cor.method == "pearson") {
-  fill.label <- "Pearson R"
-}
-
-plt.heat <- ggplot(df.recon.melt, aes(variable, genes)) + 
-  geom_tile(aes(fill = (value))) +  
-  scale_fill_gradientn(colours = rev(brewer.pal(9, "RdBu")), limits = c(-scale.limit, scale.limit)) + 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
-  xlab("Query Genes") + 
-  ggtitle("Query x Gene Correlation Matrix") + labs(fill = fill.label)
-
-# helper function for creating dendograms
-ggdend <- function(df) {
-  ggplot() +
-    geom_segment(data = df, aes(x=x, y=y, xend=xend, yend=yend)) +
-    labs(x = "", y = "") + 
-    ggdendro::theme_dendro() + 
-    theme(axis.text = element_blank(), axis.ticks = element_blank(),
-          panel.grid = element_blank())
-}
-
-# get dendromgram data from heat object
-dx.cor <- ggdendro::dendro_data(heat.object[["colDendrogram"]])
-dy.cor <- ggdendro::dendro_data(heat.object[["rowDendrogram"]])
-
-# x/y dendograms
-px.cor <- ggdend(dx.cor$segments)
-py.cor <- ggdend(dy.cor$segments) + coord_flip()
-
-# hide axis ticks and grid lines
-eaxis <- list(
-  showticklabels = FALSE,
-  showgrid = FALSE,
-  zeroline = FALSE
-)
-
-p_empty <- plot_ly() %>%
-  layout(margin = list(l = 50),
-         xaxis = eaxis,
-         yaxis = eaxis)
-
-if (print.inline) {
-  print(px.cor)
-  print(py.cor)
-} 
-if (print.inline) partial_bundle(ggplotly(plt.heat))
-
-}
-```
-
-```{r single marker query}
+```{r ranked correlations, fig.height=13, fig.width=10, include = FALSE}
 
 
-if (length(markers_of_interest) == 1){
+# if (length(markers_of_interest) == 1){
+
+  if (cor.method == "rho_p") {
+    fill.label <- "Proportionality Metric"
+  } else if (cor.method == "spearman") {
+    fill.label <- "Spearman R"
+  } else if (cor.method == "pearson") {
+    fill.label <- "Pearson R"
+  }
+
+cor.list <- list()
+for (i in 1:length(available_markers)){
   
   # all correlations
-  df.cor.all <-  data.frame(genes = rownames(cor.mat), r = as.vector(cor.mat))
+  df.cor.all <-  data.frame(genes = rownames(cor.mat), r = as.vector(cor.mat[ ,colnames(cor.mat) %in% available_markers[i]]))
   colnames(df.cor.all) <- c("genes", "r")
-  df.cor.all <-  df.cor.all[df.cor.all$genes != markers_of_interest, ]
+  df.cor.all <-  df.cor.all[df.cor.all$genes != available_markers[i], ]
   
-  # heatmap (ggplot2-based)
-if (cor.method == "rho_p") {
-  fill.label <- "Proportionality Metric"
-} else if (cor.method == "spearman") {
-  fill.label <- "Spearman R"
-} else if (cor.method == "pearson") {
-  fill.label <- "Pearson R"
-}
-  
-  plt.ranked.cor.all <- df.cor.all %>%
-    mutate(genes = forcats::fct_reorder(genes, r)) %>%
-    ggplot(aes(x = genes, y = r)) +
-    geom_bar(stat = "identity") + 
-    coord_flip() + 
-    ylab(fill.label) + 
-    xlab("Genes") + 
+    plt.cor.dist <- df.cor.all %>%
+    ggplot(aes(x = r)) +
+    geom_density(fill = "grey") + 
+    ylab("Density") + 
+    xlab(fill.label) + 
     theme_classic() + 
-    ggtitle(paste(markers_of_interest, ": Ranked Correlation (all)"))
+      geom_vline(xintercept = 0, linetype = "dashed") + 
+    labs(title = paste0(available_markers[i], " Correlations"), subtitle = "all variable genes") + 
+    theme(axis.text.y = element_blank())
   
-  # >3SD corr
-  df.cor.sub <-  data.frame(genes = names(cor.mat.sub), r = as.vector(cor.mat.sub))
+  # top corr
+    if (class(cor.mat.sub) == "numeric"){
+  df.cor.sub <-  data.frame(genes = names(cor.mat.sub), 
+                            r = cor.mat.sub)
+    } else {
+  df.cor.sub <-  data.frame(genes = names((cor.mat.sub[ ,colnames(cor.mat.sub) %in% available_markers[i]])), 
+                            r = (cor.mat.sub[ ,colnames(cor.mat.sub) %in% available_markers[i]]))      
+    }
+
   colnames(df.cor.sub) <- c("genes", "r")
-  df.cor.sub <-  df.cor.sub[df.cor.sub$genes != markers_of_interest, ]
+  df.cor.sub <-  df.cor.sub[!(df.cor.sub$genes %in%  available_markers[i]), ]
   
   plt.ranked.cor.sub <- df.cor.sub %>%
-    mutate(genes = forcats::fct_reorder(genes, r)) %>%
-    ggplot(aes(x = genes, y = r)) +
+    ggplot(aes(x = reorder(genes, r), y = r)) +
     geom_bar(stat = "identity") + 
     coord_flip() + 
-    ylab(fill.label) + 
     xlab("Genes") + 
-     theme_classic() + 
-    ggtitle(paste(markers_of_interest, ": Ranked Correlation (top)"))
+    ylab(fill.label) + 
+    theme_classic() + 
+    labs( subtitle = "Top Correlations") 
   
+  cor.list[[available_markers[i]]] <-  cowplot::plot_grid(plt.cor.dist, plt.ranked.cor.sub, ncol = 1, rel_heights = c(1,2.5), align = "hv")
   
   if (print.inline){
-    print(plt.ranked.cor.all)
-    print(plt.ranked.cor.sub)
+    print( cor.list[[available_markers[i]]])
   }
+  # }
 }
 
 ```
 
+
+```{r combine expression plots, fig.height=12, fig.width=20, include = FALSE}
+
+dash.list <- list()
+
+
+for (i in 1:length(available_markers)){
+  
+  check.1 <- available_markers[i] %in% names(plt.umap.1)
+  check.2 <- available_markers[i] %in% names(plt.umap.2)
+  check.3 <- available_markers[i] %in% names(plt.sgExp.all)
+  check.4 <- available_markers[i] %in% all.markers$gene
+  check.5 <- available_markers[i] %in% names(cor.list)
+  
+  if (!(check.1 & check.2 & check.3 & check.4 & check.5)) next
+  top.lq <- cowplot::plot_grid(
+    plt.umap.1[[available_markers[i]]] + theme_miko(legend = F) + labs(title = "UMAP", subtitle = "Clusters"), 
+    plt.umap.2[[available_markers[i]]]+ theme_miko(legend = F) + labs(title = "", subtitle = paste0(available_markers[i], " Expression")),
+    ncol = 2
+    )
+  
+  low.lq <- plt.sgExp.all[[i]]
+  
+  deg.current <- all.markers[all.markers$gene %in% available_markers[i], ] %>% top_n(5, p_val) %>% arrange(p_val)
+  rownames(deg.current) <- NULL
+  tab1 <-  gridExtra::tableGrob(deg.current)
+  
+  exp.current <- df.expression.list[["cluster"]][df.expression.list[["cluster"]]$gene %in% available_markers[i], ] %>% top_n(5, pct.exp) %>% arrange(-pct.exp)
+  df.expression.list[["cluster"]]
+  rownames(exp.current) <- NULL
+  tab2 <- gridExtra::tableGrob(exp.current) 
+
+  lq <- grid.arrange(grobs = list(top.lq, low.lq, tab2, tab1), ncol = 1, heights = c(2,1.5,1.25, 1.25))
+  mq <- grid.arrange(grobs = list(lq,  
+                                  cor.list[[available_markers[i]]], 
+                                  plt.top.gsea[[available_markers[i]]] + 
+                                    scale_x_discrete(label = function(x) stringr::str_trunc(x, 40)) + theme_miko(legend = T)), 
+                     ncol = 3, widths = c(3,2, 3))
+
+  dash.list[[available_markers[i]]] <- mq
+  
+
+}
+
+
+
+
+```
 
 ```{r cluster-wise expression data}
 
@@ -1734,362 +1467,36 @@ exp.mat.av <- exp.mat.scale.processed[rownames(exp.mat.scale.processed) %in% ava
 
 if (!is.null(dim(exp.mat.av))) exp.mat.av <- exp.mat.av[complete.cases(exp.mat.av), ]
 
-# heatmap colors
-hmcol <- colorRampPalette(brewer.pal(9, "RdBu"))(100)
-
 ```
-
-
-```{r}
-
-expression.Plot.dev <- function(so, which.gene, which.group = "seurat_clusters", which.data = "data"){
-  # which.group <- "Barcode"
-  # which.dataslot <- "data"
-  # which.gene <- available_markers
-
-  # get expression data
-  em <- getExpressionMatrix(
-    so,
-    only.variable = F,
-    which.assay = NULL,
-    which.data = which.data,
-    use.additional.genes = NA
-  )
-
-  # get fraction of expressing cells
-  em.frac <- avgGroupExpression(
-    so,
-    which.data = "data",
-    which.center = "fraction",
-    which.group = which.group
-  )
-
-  # get meta data
-  so.meta <- so@meta.data
-
-  # ensure grouping variable exists
-  if (!(which.group) %in% colnames(so.meta)) stop("Grouping variable does not exist.")
-
-  # merge datasets
-  if (sum(rownames(em) %in% (which.gene)) != 1) stop("More than one gene matched query. Cannot continue.")
-  df.meta <- data.frame(id = rownames(so.meta), group = so.meta[,which.group])
-  em.mark <- as.data.frame(em[(rownames(em)) %in% (which.gene), ])
-  em.df <- data.frame(id = rownames(em.mark), query = em.mark[,1])
-  em.merge <- merge(em.df, df.meta, by = "id")
-
-  # get summary statistics (for clustering)
-  em.sum <- em.merge %>%
-    group_by(group) %>%
-    summarize(x.mean = mean(query, na.rm = T),
-              x.sd = sd(query, na.rm = T))
-  em.frac.mark <- as.data.frame(em.frac[(em.frac$genes) %in% (which.gene), ])
-  em.frac.mark <- t(em.frac.mark %>% select(-c("genes")))
-  em.frac.mark.df <- data.frame(group = rownames(em.frac.mark), frac = em.frac.mark[,1])
-
-  if (which.group == "seurat_clusters") em.frac.mark.df$group <- gsub("c", "", em.frac.mark.df$group)
-  em.sum <- merge(em.sum, em.frac.mark.df, by = "group")
-
-  # hierarchial clustering
-  row.names.df <- em.sum$group
-  em.sum <- em.sum %>% select(-c("group"))
-  clust.var <- as.matrix(em.sum)
-  rownames(clust.var) <- row.names.df
-  d <- dist(as.matrix(clust.var))   # find distance matrix
-  hc <- hclust(d)                # apply hirarchical clustering
-  # plot(hc)
-
-
-  # helper function for creating dendograms
-  ggdend.v2 <- function(df) {
-    ggplot() +
-      geom_segment(data = df, aes(x=x, y=y, xend=xend, yend=yend)) +
-      ggdendro::theme_dendro()
-  }
-
-  # get dendromgram data from heat object
-  d.query.clust <- ggdendro::dendro_data(hc)
-
-  # ggplot dendograms
-  p.query.clust <- ggdend.v2(d.query.clust$segments) +
-    ggtitle(paste0(which.gene, " Expression")) +
-    theme(axis.title.x=element_blank(),
-          axis.text=element_blank(),
-          axis.line=element_blank(),
-          axis.ticks=element_blank(),
-          legend.position = "none")
-
-  # reorder data according to clusters
-  # a <- factor(em.merge$group, levels = levels(d.query.clust[["labels"]][["label"]]))
-  em.merge$group <- factor(as.character(em.merge$group), levels = (d.query.clust[["labels"]][["label"]]))
-
-  # violin plots
-  plt.em <- em.merge %>%
-    group_by(group) %>%
-    ggplot(aes(x = group, y = query, fill = group)) +
-    geom_violin() + theme_bw() +
-    ylab("Expression") +
-    xlab(which.group)  +
-    theme(plot.margin = unit(c(0, 1, 0, 1), "cm"),
-          legend.position = "none")
-
-  # combine plots
-  plt.sgExp <-  cowplot::plot_grid(p.query.clust, plt.em, ncol = 1, align = "v", rel_heights = c(1,2))
-  
-  try({
-    rm(em); rm(em.frac); gc();
-  }, silent = T)
-
-  return(plt.sgExp)
-}
-
-```
-
-```{r single cell expression, fig.width=10, fig.height=4}
-
-
-# clean up
-try({
-  rm(exp.mat); rm(exp.mat.2); rm(exp.mat.complete); 
-}, silent = T)
-# gc()
-
-
-# if single marker only, plot clustered violin plot
-if (length(available_markers) == 1){
-
-  
-  plt.sgExp.clust <- expression.Plot.dev(so = so.query, which.gene = available_markers, which.group = "seurat_clusters", which.data = "data")
-  
-  is.success <- F
-  try({
-    plt.sgExp.barcode <- expression.Plot.dev(so.query, which.gene = available_markers, which.group = "Barcode", which.data = "data")
-    is.success <- T
-  })
-  
-  if (is.success){
-    plt.sgExp.list <- list(plt.sgExp.clust, plt.sgExp.barcode)
-  } else {
-    plt.sgExp.list <- list(plt.sgExp.clust)
-  }
-  
-  
-  if (print.inline){
-    # fig.width=10, fig.height=4
-    print(cowplot::plot_grid(plotlist = plt.sgExp.list))
-  }
-  
-}
-```
-
-
-
-```{r pathway-wise expression data}
-
-if ((which.results$dot.gsea) & (length(mp.genes)>0)){
-  
-path.dot.score <- DotPlot(so.query, features = unique(available_pathways), group.by = grouping_var)[["data"]]
-path.dot.score$genes <- path.dot.score$features.plot
-path.dot.score$id <- as.numeric(as.character( path.dot.score$id))
-path.dot.score.sub <- path.dot.score[ ,c("id", "avg.exp.scaled", "genes")]
-colnames(path.dot.score.sub) <- c("cluster", "expression", "genes")
-path.dot.score.wide <- pivot_wider(path.dot.score.sub, names_from = "cluster", values_from = "expression")
-gene.names.row <- path.dot.score.wide$genes
-path.dot.score.wide <- dplyr::select(path.dot.score.wide, -c("genes"))
-path.dot.score.wide <- path.dot.score.wide[ ,as.character(u.clusters)]
-rownames(path.dot.score.wide) <- gene.names.row
-
-# cast expression data as matrix
-exp.mat.scale.path <- as.matrix(path.dot.score.wide)
-exp.mat.path <- exp.mat.scale.path[rownames(exp.mat.scale.path) %in% available_pathways, ]
-
-}
-
-```
-
 
 
 ```{r create exp heatmap object , include= F}
 
-
-if (!exists("scale.limit")) scale.limit <- 3
-
-# keep this in separate chunk where include = F
-  if (class(exp.mat.av) == "matrix") {
-    # heat.object.expression.cluster <- get.heat(exp.mat.av, hmcol, scale.limit)
-    heat.object.expression.cluster <- getHeat(exp.mat.av, hmcol, scale.limit)
-  } else {
-    heat.object.expression.cluster <- NULL
-  }
-
-
-if (exists("exp.mat.path")){
-   if (class(exp.mat.path) == "matrix") {
-    # heat.object.expression.pathway <- get.heat(exp.mat.path, hmcol, scale.limit)
-     heat.object.expression.pathway <- getHeat(exp.mat.path, hmcol, scale.limit)
-  } else {
-    heat.object.expression.pathway <- NULL
-  } 
+clust.success <- F
+if (class(exp.mat.av) == "matrix") {
+  try({
+    heat.object.expression.cluster <- getHeat(exp.mat.av)
+    mat.reconstruct.av <- exp.mat.av[heat.object.expression.cluster[["rowInd"]], heat.object.expression.cluster[["colInd"]]]
+    gene.order.av <- rownames(mat.reconstruct.av)
+    cluster.order.av <- colnames(mat.reconstruct.av)
+    plt.heat.availableGenes <- ggplotify::as.ggplot(pheatmap::pheatmap(exp.mat.av))
+    clust.success <- T
+  }, silent = T)
+  
 } else {
-  heat.object.expression.pathway <- NULL
+  gene.order.av <- rownames(exp.mat.scale.processed)[rownames(exp.mat.scale.processed) %in% available_markers]
+  cluster.order.av <- colnames(exp.mat.scale.processed)
+  plt.heat.availableGenes <- NULL
 }
 
-
-
-
-```
-
-
-```{r generate heat map (quieried expression)}
-
-
-# heat.object.expression.cluster
-if (!is.null(heat.object.expression.cluster)){
-
-# reorder according to original clustering
-mat.reconstruct.av <- exp.mat.av[heat.object.expression.cluster[["rowInd"]], heat.object.expression.cluster[["colInd"]]]
-
-# create data frame from reconstructed matrix
-gene.order.av <- rownames(mat.reconstruct.av)
-cluster.order.av <- colnames(mat.reconstruct.av)
-df.recon.av <- as.data.frame(mat.reconstruct.av)
-df.recon.av$genes <- factor(rownames(df.recon.av), levels = gene.order.av)
-df.recon.av.melt <- melt(df.recon.av)
-df.recon.av.melt$variable <- factor(df.recon.av.melt$variable, levels = colnames(mat.reconstruct.av))
-
-# define limits
-scale.min.av <- min(exp.mat.av)
-scale.max.av <- max(exp.mat.av[exp.mat.av != 1])
-scale.limit.av <- max(abs(scale.max.av), abs(scale.min.av))
-
-df.recon.av.melt$value[df.recon.av.melt$value > scale.max.av] <- scale.max.av
-df.recon.av.melt$value[df.recon.av.melt$value < scale.min.av] <- scale.min.av
-
-# heatmap (ggplot2-based)
-plt.heat.availableGenes <- ggplot(df.recon.av.melt, aes(variable, genes)) + 
-  geom_tile(aes(fill = (value))) +  
-  scale_fill_gradientn(colours = rev(brewer.pal(9, "RdBu")), limits = c(-scale.limit.av, scale.limit.av)) + 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
-  xlab("Cluster ID") + 
-  ylab("Query Genes") + 
-  ggtitle("Gene x Cluster Expression Matrix") + labs(fill = "Expression (scaled)")
-
-# helper function for creating dendograms
-ggdend <- function(df) {
-  ggplot() +
-    geom_segment(data = df, aes(x=x, y=y, xend=xend, yend=yend)) +
-    labs(x = "", y = "") + 
-    ggdendro::theme_dendro() + 
-    theme(axis.text = element_blank(), axis.ticks = element_blank(),
-          panel.grid = element_blank())
-  
-  # theme_minimal() +
-}
-
-# get dendromgram data from heat object
-dx <- ggdendro::dendro_data(heat.object.expression.cluster[["colDendrogram"]])
-dy <- ggdendro::dendro_data(heat.object.expression.cluster[["rowDendrogram"]])
-
-# x/y dendograms
-px <- ggdend(dx$segments)
-py <- ggdend(dy$segments) + coord_flip()
-
-# hide axis ticks and grid lines
-eaxis <- list(
-  showticklabels = FALSE,
-  showgrid = FALSE,
-  zeroline = FALSE
-)
-
-p_empty <- plot_ly() %>%
-  layout(margin = list(l = 50),
-         xaxis = eaxis,
-         yaxis = eaxis)
-
-if (print.inline) {
-  print(px)
-  print(py)
-} 
-
-  
+if (!clust.success){
+  gene.order.av <- rownames(exp.mat.scale.processed)[rownames(exp.mat.scale.processed) %in% available_markers]
+  cluster.order.av <- colnames(exp.mat.scale.processed)
+  if (!exists("plt.heat.availableGenes")) plt.heat.availableGenes <- NULL  
 }
 
 ```
 
-```{r generate heat map (pathways expression)}
-
-
-# heat.object.expression.cluster
-if (!is.null(heat.object.expression.pathway)){
-
-# reorder according to original clustering
-mat.reconstruct.path <- exp.mat.path[heat.object.expression.pathway[["rowInd"]], heat.object.expression.pathway[["colInd"]]]
-
-# create data frame from reconstructed matrix
-gene.order.path <- rownames(mat.reconstruct.path)
-cluster.order.path <- colnames(mat.reconstruct.path)
-df.recon.path <- as.data.frame(mat.reconstruct.path)
-df.recon.path$genes <- factor(rownames(df.recon.path), levels = gene.order.path)
-df.recon.path.melt <- melt(df.recon.path)
-df.recon.path.melt$variable <- factor(df.recon.path.melt$variable, levels = colnames(mat.reconstruct.path))
-
-# define limits
-scale.min.path <- min(exp.mat.path)
-scale.max.path <- max(exp.mat.path[exp.mat.path != 1])
-scale.limit.path <- max(abs(scale.max.path), abs(scale.min.path))
-
-df.recon.path.melt$value[df.recon.path.melt$value > scale.max.path] <- scale.max.path
-df.recon.path.melt$value[df.recon.path.melt$value < scale.min.path] <- scale.min.path
-
-# heatmap (ggplot2-based)
-plt.heat.pathway <- ggplot(df.recon.path.melt, aes(variable, genes)) + 
-  geom_tile(aes(fill = (value))) +  
-  scale_fill_gradientn(colours = rev(brewer.pal(9, "RdBu")), limits = c(-scale.limit.path, scale.limit.path)) + 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
-  xlab("Cluster ID") + 
-  ylab("Pathways") + 
-  ggtitle("Pathway x Cluster Expression Matrix") + labs(fill = "Expression (scaled)")
-
-# helper function for creating dendograms
-ggdend <- function(df) {
-  ggplot() +
-    geom_segment(data = df, aes(x=x, y=y, xend=xend, yend=yend)) +
-    labs(x = "", y = "") + 
-    ggdendro::theme_dendro() + 
-    theme(axis.text = element_blank(), axis.ticks = element_blank(),
-          panel.grid = element_blank())
-  
-  # theme_minimal() +
-}
-
-# get dendromgram data from heat object
-dx.path <- ggdendro::dendro_data(heat.object.expression.pathway[["colDendrogram"]])
-dy.path <- ggdendro::dendro_data(heat.object.expression.pathway[["rowDendrogram"]])
-
-# x/y dendograms
-px.path <- ggdend(dx.path$segments)
-py.path <- ggdend(dy.path$segments) + coord_flip()
-
-# hide axis ticks and grid lines
-eaxis.path <- list(
-  showticklabels = FALSE,
-  showgrid = FALSE,
-  zeroline = FALSE
-)
-
-p_empty.path <- plot_ly() %>%
-  layout(margin = list(l = 50),
-         xaxis = eaxis.path,
-         yaxis = eaxis.path)
-
-if (print.inline) {
-  print(px.path)
-  print(py.path)
-} 
-
-  
-}
-
-```
 
 ```{r get dot size helper function}
 
@@ -2113,16 +1520,14 @@ get.dot.size <- function(gene.list){
 # order clusters according to hierarchial clustering
 if (exists("cluster.order.av")){
   so.query@meta.data[[grouping_var]] <- factor(so.query@meta.data[[grouping_var]], 
-                                             levels=cluster.order.av)
+                                               levels=cluster.order.av)
 }
 
 plt.dot.list <- list()
 
-if (which.results$dot.expression){
-  
   if (!(exists("gene.order.av"))) gene.order.av <- available_markers
   
-    # scale label sizes accordingly
+  # scale label sizes accordingly
   xlab.size <- get.dot.size(gene.order.av)
   
   # create dotplo
@@ -2152,63 +1557,58 @@ if (which.results$dot.expression){
                                               dot.scale = 8,
                                               cols="RdBu" ) + 
           RotatedAxis() + ylab(group_name) +
-          theme(axis.text.x=element_text(size=xlab.size, angle = 75)) + ggtitle("DEG Query Genes (p<0.05)")
+          theme(axis.text.x=element_text(size=xlab.size, angle = 75)) + ggtitle("Top Genes")
         if (print.inline) print( plt.dot.list[["Dot.DEG"]])
       }
     }
   }, silent = T)
   
 
-} else {
-  plt.dot.list[["Dot.All"]] <- NULL
+```
+
+```{r central log}
+
+# update central log
+run.id <- NULL
+if (!exists("user")) user <- "guest"
+
+clog.update.success <- F
+try({
+  run.id <-  updateCentralLog(Module = "M09", input.data = query.file, input.subset = NA, pdf.flag = save.pdf)
+  clog.update.success <-  T
+}, silent = F)
+if (is.null(run.id))  {
+  warning("Central log update was unsuccessful :(\n")
+  run.id <- paste("M09_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
 }
 
 ```
 
 
-```{r create dot plots pathways, fig.width = 8, fig.height = 10}
+```{r setup output directories}
 
-# dot plot
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
 
-# order clusters according to hierarchial clustering
-if (exists("cluster.order.path")){
-  so.query@meta.data[[grouping_var]] <- factor(so.query@meta.data[[grouping_var]], 
-                                             levels=cluster.order.path)
-}
-
-plt.dot.list.path <- list()
-
-if (exists("p_empty.path")){
-  
-  if (!(exists("gene.order.path"))) gene.order.path <- available_pathways
-  
-    # scale label sizes accordingly
-  xlab.size <- get.dot.size(gene.order.path)
-  
-  # create dotplo
-  plt.dot.list.path[["Dot.All"]] <-  DotPlot(so.query, features = factor(gene.order.path, levels = gene.order.path), 
-                                        group.by = grouping_var, 
-                                        dot.scale = 8,
-                                        cols="RdBu" ) + 
-    RotatedAxis() + ylab(group_name) +
-    theme(axis.text.x=element_text(size=xlab.size, angle = 75)) + ggtitle("Pathway")
-  if (print.inline) print( plt.dot.list.path[["Dot.All"]])
-  
-  
-} else {
-  plt.dot.list.path[["Dot.All"]] <- NULL
-}
+# create output directories
+dir.create(output.path)
+dir.create(paste0(output.path, "Tables/"))
+if (save.pdf) dir.create(paste0(output.path, "PDF/"))
 
 ```
+
 
 1) cluster UMAP
 ===================================== 
 
 ```{r plt.umap_by_c}
 print(plt.umap_by_cluster) 
+savePDF(file.name = paste0(output.path, "PDF/", "M09_umap_cluster.pdf"), plot.handle = plt.umap_by_cluster, 
+        fig.width = 7, fig.height = 5, save.flag = save.pdf)
 ```
 
-2) DotPlot
+2) Expression
 ===================================== 
 
 Row {.tabset}
@@ -2219,14 +1619,12 @@ Row {.tabset}
 out1.1 <-NULL
 
 try({
-  if (which.results$dot.expression){
-    
     out1.1 <- lapply(seq_along(plt.dot.list), function(i) {
       
       s1 <- paste("plt.dot.list[[", i, "]]", sep = "")
       
       a1 <- knitr::knit_expand(text = sprintf("### %s\n", names(plt.dot.list)[i])) # tab header
-      a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,  fig.width = 10, fig.height = 10}", paste(i, "plotly.dot.plt"))) # start r chunk
+      a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,  fig.width = 10, fig.height = 10}", paste(i, "plotly.dot.plt"))) 
       a3 <- knitr::knit_expand(text = sprintf("\n %s", s1))
       a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
       
@@ -2234,43 +1632,36 @@ try({
       
     })
     
-  } else {
-    out1.1 <- NULL
-  }
 }, silent = T)
-
-
-
-
-# ggplotly(plt.dot.list[[1]]) %>% partial_bundle()
 
 ```
 `r paste(knitr::knit(text = paste(out1.1, collapse = '\n')))`
 
+```{r pdf dotplots,include = FALSE}
+
+for (i in 1:length(plt.dot.list)){
+  plot.name <- paste0("M09_expression_dotplot_", names(plt.dot.list)[i] ,".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+          plot.handle =  plt.dot.list[[i]], 
+          fig.width = 10, fig.height = 10, save.flag = save.pdf)
+}
+
+```
 
 ### Expression Heatmap
 
 ```{r}
 
-# partial_bundle(ggplotly(plt.heat.availableGenes))
-
-tryCatch({
-  if (exists("px")){
-    subplot(px, p_empty, plt.heat.availableGenes, py, 
-            nrows = 2, margin = 0.01, 
-            widths = c(0.85, 0.15), heights = c(0.15, 0.85)) %>%
-      config(
-        toImageButtonOptions = list(
-          format = "svg",
-          filename = "myplot",
-          width = 600,
-          height = 700
-        )
-      )
-  }
-},error = function(e){
+if (!is.null(plt.heat.availableGenes)) {
+  
   print(plt.heat.availableGenes)
-})
+  
+  savePDF(file.name = paste0(output.path, "PDF/", "M09_expression_heatmap.pdf"), plot.handle = plt.heat.availableGenes, 
+          fig.width = 5, fig.height = 5, save.flag = save.pdf)
+  
+}
+
+
 
 ```
 
@@ -2279,8 +1670,11 @@ tryCatch({
 if (exists("plt.sgExp.list")){
   if (length(plt.sgExp.list) == 2){
     print(cowplot::plot_grid(plotlist = plt.sgExp.list))
+      savePDF(file.name = paste0(output.path, "PDF/", "M09_expression_violin.pdf"), 
+              plot.handle = cowplot::plot_grid(plotlist = plt.sgExp.list), 
+          fig.width = 10, fig.height = 4, save.flag = save.pdf)
   }
- }
+}
 
 ```
 
@@ -2289,135 +1683,110 @@ if (exists("plt.sgExp.list")){
 if (exists("plt.sgExp.list")){
   if (length(plt.sgExp.list) == 1){
     print(cowplot::plot_grid(plotlist = plt.sgExp.list))
+          savePDF(file.name = paste0(output.path, "PDF/", "M09_expression_violin.pdf"), 
+              plot.handle = cowplot::plot_grid(plotlist = plt.sgExp.list), 
+          fig.width = 5, fig.height =5, save.flag = save.pdf)
   }
 }
 
 ```
 
-3) UMAP expression
+3) Results
 ===================================== 
 
 Row {.tabset}
 -------------------------------------
 
-```{r res2}
+```{r dash}
 
 
 try({
-  if (which.results$umap.expression){
-  
-  out <- lapply(seq_along(plt.clustermarkers_by_umap), function(i) {
-    
-    a1 <- knitr::knit_expand(text = sprintf("### %s\n", names(plt.clustermarkers_by_umap)[i])) # tab header
-    a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=11, fig.height=5}", paste(i, "umap"))) # start r chunk
-    a3 <- knitr::knit_expand(text = sprintf("\nprint(plt.clustermarkers_by_umap[[%d]])", i)) 
-    a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-    
-    paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
-    
-  })
-} else {
-  out <- NULL
-}
-}, silent = T)
 
+    out <- lapply(seq_along(dash.list), function(i) {
+      
+      a1 <- knitr::knit_expand(text = sprintf("### %s\n", names(dash.list)[i])) # tab header
+      a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=20, fig.height=12}", paste(i, "dash"))) # start r chunk
+      a3 <- knitr::knit_expand(text = sprintf("\nplot(dash.list[[%d]])", i)) 
+      a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+      
+      paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+      
+    })
+
+}, silent = T)
 
 
 ```
 
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
+```{r pdf dash,include = FALSE}
+
+for (i in 1:length(dash.list)){
+  plot.name <- paste0("M09_summary_", names(dash.list)[i] ,".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+          plot.handle =  plot(dash.list[[i]]), 
+          fig.width = 20, fig.height = 12, save.flag = save.pdf)
+}
+
+```
 
 
 
-
-4) Gene Correlations
+4) Correlations
 ===================================== 
 
 Row {.tabset}
 -------------------------------------
 
 
-### Query Correlations (top)
-
-```{r query correlation heatmap - top, fig.width=12, fig.height=12}
-
-try({
-  
-  if (length(markers_of_interest) == 1){
-    
-    tryCatch({
-      plotly::config(ggplotly(plt.ranked.cor.sub),
-                     toImageButtonOptions = list(format = 'svg', filename = 'myplot', width = unit(600, units = "mm"), height =  unit(700, units = "mm")))
-    }, error = function(e){
-      print(plt.ranked.cor.sub)
-    })
-    
-  } else {
-    if (which.results$query.correlation & exists("px.cor")){
-      
-      tryCatch({
-        subplot(px.cor, p_empty, plt.heat, py.cor, 
-                nrows = 2, margin = 0.01, 
-                widths = c(0.85, 0.15), heights = c(0.15, 0.85)) %>%
-          config(
-            toImageButtonOptions = list(
-              format = "svg",
-              filename = "myplot",
-              width = 600,
-              height = 700
-            )
-          )
-      }, error = function(e){
-        print(plt.heat)
-      })
-      
-    }
-  }
-  
-}, silent = T)
-
-```
 
 ### Correlation Table (top)
 
 ```{r correlation table - top}
 
-if (which.results$query.correlation){
-  
+
   if (class(cor.mat.sub) == "matrix"){
     df.cor.list.sub <- df.cor.list[df.cor.list$genes %in% rownames(cor.mat.sub), ]
   } else if  (class(cor.mat.sub) == "numeric"){
     df.cor.list.sub <- df.cor.list[df.cor.list$genes %in% names(cor.mat.sub), ]
   }
+
+write.csv(cor.mat, file = paste0(output.path, "Tables/", "correlations.csv"), 
+          row.names = T) 
   
   flex.asDT(df.cor.list.sub)
-}
+
 
 
 
 ```
 
-### Query Correlations (all; only if single query provided)
 
-```{r query correlations - all}
+### Query Correlations (top)
 
+```{r query correlation heatmap - top, fig.width=10, fig.height=13}
 
 try({
-  tryCatch({
-    if (length(markers_of_interest) == 1){
-      plotly::config(ggplotly(plt.ranked.cor.all), 
-                     toImageButtonOptions = list(format = 'svg', filename = 'myplot', width = 600, height = 700))
-    } 
-  }, error = function(e){
-    print(plt.ranked.cor.all)
+  if (length(markers_of_interest) == 1){
+    
+    plt.dis.rank.cor <- cowplot::plot_grid(cowplot::plot_grid(plt.cor.dist, NULL, rel_heights = c(1,2), ncol = 1), plt.ranked.cor.sub, ncol = 2)
+    
+    savePDF(file.name = paste0(output.path, "PDF/", "M09_ranked_correlations.pdf"), 
+            plot.handle = plt.dis.rank.cor, 
+            fig.width = 10, fig.height =13, save.flag = save.pdf)
+    
+    print(plt.dis.rank.cor)
+  } else {
+        savePDF(file.name = paste0(output.path, "PDF/", "M09_correlation_heatmap.pdf"), 
+            plot.handle = plt.heat, 
+            fig.width = 10, fig.height =13, save.flag = save.pdf)
+    
+    plt.heat
   }
-  )
-  
 }, silent = T)
 
 ```
-
 
 5) GSEA 
 ===================================== 
@@ -2430,8 +1799,13 @@ Row {.tabset}
 ```{r common enrich table }
 
 if (exists("gse.pathway.combined.tally")){
-  if (which.results$gsea & !is.null(gse.pathway.combined.tally)){
-    gse.pathway.combined.tally <- as.data.frame(gse.pathway.combined.tally)
+  if (!is.null(gse.pathway.combined.tally)){
+    gse.pathway.tally.output <- as.data.frame(gse.pathway.combined.tally)
+    
+    gse.pathway.tally.output$set <- vapply(gse.pathway.tally.output$set, paste, collapse = ", ", character(1L))
+    write.csv(gse.pathway.tally.output, file = paste0(output.path, "Tables/", "gsea_pathway_tally.csv"), 
+          row.names = F) 
+    
     flex.asDT(gse.pathway.combined.tally)
   }
 }
@@ -2442,110 +1816,30 @@ if (exists("gse.pathway.combined.tally")){
 ```{r gsea cor mat,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
 
 # create enrihcment list
-if ((which.results$gsea) & exists("gse.pathway.list")){
+if (exists("gse.pathway.list")){
   out_enrich_table <- flex.multiTabTables(gse.pathway.list, "gse.pathway.list")
 } else {
   out_enrich_table <- NULL
 }
 
-
-
-
 ```
 
 `r paste(knitr::knit(text = paste(out_enrich_table, collapse = '\n')))`
 
-6) GSEA UMAP
-===================================== 
 
-Row {.tabset}
--------------------------------------
+```{r save gsea statistics csv}
 
-```{r umap gsea plots}
-
-if ((which.results$umap.gsea) & exists("plt.pathways_by_umap")){
-  out <- flex.multiTabPlot(plt.pathways_by_umap,"plt.pathways_by_umap", fig.width = 11, fig.height = 5)
-} else {
-  out <- NULL
+for (i in 1:length(gse.pathway.list)){
+  table.name <- paste0(output.path, "Tables/", "gsea_statistics_", names(gse.pathway.list)[i] , ".csv")
+  current.output <- gse.pathway.list[[i]]
+  current.output$set <- vapply(current.output$set, paste, collapse = ", ", character(1L))
+      write.csv(current.output, file = table.name, 
+          row.names = F) 
 }
-
-```
-
-`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
-
-
-
-
-
-7) Pathway Activity
-===================================== 
-
-
-
-```{r}
-
-# Row {.tabset}
-# -------------------------------------
-  
-# out1.1 <- NULL
-# 
-# try({
-#   if (exists("plt.dot.list.path")){
-#   
-#   # out1.1 <- flex.multiTabPlotly(plt.dot.list.path, "plt.dot.list.path", fig.width = 10, fig.height = 10)
-#   
-#   out1.1 <- lapply(seq_along(plt.dot.list.path), function(i) {
-# 
-#     s1 <- paste("plotly::config(ggplotly(plt.dot.list.path[[", i, "]]), toImageButtonOptions = list(format = 'svg', filename = 'myplot', width = 600, height = 700))", sep = "")
-# 
-#     a1 <- knitr::knit_expand(text = sprintf("### %s\n", names(plt.dot.list.path)[i])) # tab header
-#     a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,  fig.width = 10, fig.height = 10}", paste(i, "plotly.dot.plt.path"))) # start r chunk
-#     a3 <- knitr::knit_expand(text = sprintf("\n %s", s1))
-#     a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-# 
-#     paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
-# 
-#   })
-#   
-# } else {
-#   out1.1 <- NULL
-# }
-# }, silent = T)
-
-# `r paste(knitr::knit(text = paste(out1.1, collapse = '\n')))`
 ```
 
 
-
-### Expression Heatmap
-
-```{r, fig.height=20, fig.width=15}
-
-# partial_bundle(ggplotly(plt.heat.availableGenes))
-
-tryCatch({
-  if (exists("px.path")){
-    subplot(px.path, p_empty.path, plt.heat.pathway, py.path, 
-            nrows = 2, margin = 0.01, 
-            widths = c(0.85, 0.15), heights = c(0.15, 0.85)) %>%
-      config(
-        toImageButtonOptions = list(
-          format = "svg",
-          filename = "myplot",
-          width = 600,
-          height = 700
-        )
-      )
-  }
-}, error= function(e){
-  if (exists("px.path")){
-    print(plt.heat.pathway)
-  }
-})
-
-```
-
-8) Gene Expression Table(s)
+6) Expression Table(s)
 ===================================== 
 
 Row {.tabset}
@@ -2557,47 +1851,52 @@ out <- flex.multiTabTables(df.expression.list, "df.expression.list")
 
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
+```{r save expression csv}
 
-9) DEG
+for (i in 1:length(df.expression.list)){
+  table.name <- paste0(output.path, "Tables/", "expression_", names(df.expression.list)[i] , ".csv")
+      write.csv(df.expression.list[[i]], file = table.name, row.names = F) 
+}
+```
+
+7) DEG
 ===================================== 
 
 ### DEG Query Genes
 
 ```{r DEG query }
+write.csv(all.markers, file = paste0(output.path, "Tables/", "differential_expression_analysis.csv"), row.names = F) 
 flex.asDT(all.markers)
 ```
 
-10) Marker List
+8) Marker List
 ===================================== 
 
 ### Marker List
 
 ```{r}
+
+write.csv(moi.df, file = paste0(output.path, "Tables/", "query_list.csv"), row.names = F) 
 flex.asDT(moi.df)
 ```
 
 ```{r save results}
 
-# Correlation MEasure
+# Update analysis log
 df.log <- addLogEntry("Correlation Metric", cor.method, df.log, "cor.method")
-
-# Query Markers
 df.log <- addLogEntry("Query Markers", markers_of_interest, df.log, "markers_of_interest")
-
-# pathways 
-if (exists("pathways_of_interest")) df.log <- addLogEntry("GSEA pathways", pathways_of_interest, df.log, "pathways_of_interest")
-
-# assay 
 df.log <- addLogEntry("Seurat Assay", DefaultAssay(so.query), df.log, "DefaultAssay(so.query)")
-
-# assay 
-if (exists("exp.mat")) df.log <- addLogEntry("N henes for correlation", nrow(exp.mat), df.log, "nrow(exp.mat)")
-
+if (exists("exp.mat")) df.log <- addLogEntry("N genes for correlation", nrow(cor.mat), df.log, "nrow(cor.mat)")
+if (exists("genes.not.found")) df.log <- addLogEntry("Genes not found", genes.not.found, df.log, "genes.not.found")
 
 # Run time
 end.time <- proc.time()
 elapsed.time <- round((end.time - start.time)[[3]], 2)
 df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
 
 df.log_Module_9 <- df.log
 
@@ -2614,4 +1913,27 @@ Log (Module 9)
 
 ```{r table.log_current}
 knitr::kable(df.log_Module_9)
+```
+
+```{r save analysis log as csv}
+
+try({
+  write.csv(df.log_Module_9, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+    row.names = F)  
+}, silent = T)
+
+```
+
+```{r merge pdfs, include = FALSE}
+
+# combine pdfs into single binder
+if (save.pdf){
+  
+  pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+  pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+  
+  pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+}
+
+
 ```
