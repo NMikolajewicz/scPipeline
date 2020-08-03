@@ -49,7 +49,8 @@ dir.reference <- "Reference_Datasets/"
 
 # Query input
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-input.file <- "Module1_p7_mesoderm_110620.Rdata"
+# input.file <- "Module1_p7_mesoderm_110620.Rdata"
+input.file <- "Module1_Neftel_ss2_GBM_160120.Rdata"
 # input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 
 # specify reference genesets
@@ -59,7 +60,8 @@ which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.
 # specify cluster resolution
 cluster.resolution <- 0.15 # OPTIONAL; range 0 to inf (default = 1)
 
-so.input.species <- "Hs" # REQUIRED; Hs, Mm
+so.input.species <- "Hs" # eREQUIRED; Hs, Mm
+
 
 # Data subsampling
 subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
@@ -70,7 +72,7 @@ print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 
 # specify number of workers for parallelization
 n.workers <- list(
-  scoring = 5,
+  scoring = 4,
   deg = 1
 )
 
@@ -101,6 +103,7 @@ names(csv_input) <- as.vector(query.references$names)
 if (!exists("data.path") & !exists("user")) {
   stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
 }
+if (!exists("input.file")) stop("input.file is not specified")
 
 # load query dataset
 warning("Importing data...")
@@ -115,10 +118,21 @@ current.assay <- DefaultAssay(so.query)
 
 ```
 
+```{r}
+
+# Neftel 2019 preprocessing
+# a <- names(so.query@active.ident)
+# a <- gsub(".", "", stringr::str_extract(a, "[a-zA-Z]*[0-9]*"))
+# a <- stringr::str_extract(a, "[a-zA-Z]*[0-9]*")
+# table(a)
+```
+
 
 
 ```{r data subsetting and clustering}
 
+# check species
+if (so.input.species != unique(so.query@meta.data[["Organism"]])) stop("Specified input species does not match with input data")
 
 # cluster data
 so.query <- setResolution(so.query, cluster.resolution)
@@ -367,9 +381,15 @@ prepGeneSet <- function(gs.file, gs.dir, gs.species, gs.available.genes){
   
   gs.data <- read.csv(paste(gs.dir, gs.file, sep = ""), header = TRUE)
   gs.long <- pivot_longer(gs.data, colnames(gs.data))
-  colnames(gs.long) <- c("set", "genes")
-  gs.long$set <- rmvCSVprefix(gs.long$set)
+  
+  #clean up
+colnames(gs.long) <- c("set", "genes")
   gs.long$genes <- as.character(gs.long$genes)
+  gs.long <- gs.long[complete.cases(gs.long), ]
+  gs.long <- gs.long[gs.long[ ,2] != "", ]
+  gs.long$genes <- trimws(as.character(gs.long$genes))
+  gs.long$set <- rmvCSVprefix(gs.long$set)
+  
   
   # get correct speices
   if (gs.species == "Hs"){
@@ -378,10 +398,9 @@ prepGeneSet <- function(gs.file, gs.dir, gs.species, gs.available.genes){
     gs.long$genes <- firstup(gs.long$genes)
   }
   
-  gs.long <- gs.long[complete.cases(gs.long), ]
   
-  # trim white space
-  gs.long$genes <- trimws(as.character(gs.long$genes))
+  
+
   
   # keep only genes that are availale in seurat object
   gs.long <- gs.long[gs.long$genes %in% gs.available.genes, ]
@@ -602,7 +621,7 @@ score.results <- foreach(i = 1:length(signatures.symbol), .packages = c("scMiko"
                                                      n.genes.total = n.genes.total,
                                                      n.genes.available, n.genes.available))
         
-        per.mat.sub <- df.pd.long[df.pd.long$gene %in% cur.features, ]
+        per.mat.sub <- df.f.long[df.f.long$gene %in% cur.features, ]
         exp.mat.sub <- df.e.long[df.e.long$gene %in% cur.features, ]
         lfc.mat.sub <- df.lfc.long[df.lfc.long$gene %in% cur.features, ]
         pct.mat.sub <- df.pd.long[df.pd.long$gene %in% cur.features, ]
@@ -692,87 +711,11 @@ for (i in 1:length(signatures.symbol)){
 
 ```
 
-```{r}
-
-
-
-FindAllMarkers.Parallel <- function(object, n.work = 1, assay = DefaultAssay(object), slot = "data", only.pos = F, min.pct = 0, test.use = "MAST",
-                                    logfc.threshold = 0.15, max.cells.per.ident = 200, return.thresh = 1, verbose = F){
-  
-  
-  if (n.work == 1){
-    deg.gene.a <- FindAllMarkers(object,
-                                 assay = assay,
-                                 slot = slot,
-                                 only.pos = only.pos,
-                                 min.pct = min.pct,
-                                 test.use = test.use,
-                                 logfc.threshold = logfc.threshold,
-                                 max.cells.per.ident = max.cells.per.ident,
-                                 return.thresh = return.thresh, #1 ensures all genes are returned
-                                 verbose = verbose)
-  } else {
-    
-    if (!require("BiocParallel")) stop("BiocParallel package not found.")
-    
-    suppressWarnings({
-      
-      
-      # helper function to set BPParam
-      safeBPParam <- function(nworkers) {
-        if (.Platform$OS.type=="windows") {
-          BiocParallel::SnowParam(nworkers)
-        } else {
-          BiocParallel::MulticoreParam(nworkers)
-        }
-      }
-      
-      # get number of unique clusters
-      M <- length(unique(object@active.ident))
-      N <- M-1
-      
-      # get optimal BPParam setup
-      if (n.work > M) n.work <- M
-      nw <- safeBPParam(n.work)
-      
-      # find marker wrapper function
-      FindMarker.wrapper <- function(object, x){
-        Seurat::FindMarkers(object, ident.1 = x, only.pos = only.pos, min.pct =min.pct, test.use = test.use,
-                            logfc.threshold = logfc.threshold, max.cells.per.ident = max.cells.per.ident, verbose = verbose)
-      }
-      
-    
-    
-    # run parallelized implementation of find markers
-    deg.gene.par <- bplapply(0:N, object = object, FUN = FindMarker.wrapper, BPPARAM = nw)
-    
-    # retrieve results
-    deg.gene.a <- NULL
-    for (i in 1:length(deg.gene.par)){
-      deg.gene.par[[i]]$cluster <- as.character(i-1)
-      deg.gene.par[[i]]$gene <- rownames(deg.gene.par[[i]])
-      deg.gene.a <- bind_rows(deg.gene.a, deg.gene.par[[i]])
-    }
-    
-    rm(deg.gene.par)
-    invisible(gc())
-    
-    })
-  }
-  
-  return(deg.gene.a)
-  
-}
-
-
-
-```
-
 
 ```{r DEG analysis using module scores}
 
 # get cell-level annotation scores 
-# e.mat <- getExpressionMatrix(so.query, which.data = "data")
+
 sc.mod.all <- NULL
 sig.names.all <- c()
 for (i in 1:length(signatures.symbol)){
@@ -917,93 +860,93 @@ df.dist.pd <- wrangleHelper(pd.score.list)
 ```{r}
 
 
-vstScoreThreshold.orig  <- function(x, y, label, set, percentile.threshold = 0.95, spline.df = 3, quantile.norm = T, loess.center = T){
-  
-  # purpose: scale and normalize gene set scores 
-  # step 1: loess-centering
-  #     - ensures that data is not biased and that no outliers skew score distributions
-  # step 2: variance-stabilizing transform based on quantile spline regression
-  #
-  # output: normalized and scaled geneset scores 
-  
-  # prepare data
-  df <- data.frame(x = x, x.log = log(x), y = y,
-                   annotation = label, ref.set = set)
-  df$cluster <- gsub("-", "", stringr::str_extract(df$annotation, "-c[0-9]*")) 
-  
-  u.set <- unique(df$ref.set)
-  
-  # loess-centering
-  if (loess.center){
-    for (i in 1:length(unique(u.set))){
-      error.loess.mean <- loess(y ~ x.log, df[df$ref.set %in% u.set[i], ])
-      pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$ref.set %in% u.set[i]]), se = TRUE)[["fit"]]
-      df$y.centered[df$ref.set %in% u.set[i]] <-  df$y[df$ref.set %in% u.set[i]] - pred
-    } 
-  } else {
-    df$y.centered <- df$y
-  }
-  
-  # quantile-regression based variance stabilization
-  if (quantile.norm){
-    
-    # import splines packages
-    if (!require(splines)) stop("splines package not found")
-    
-    rqfit <- rq(y.centered ~ bs(x, df = spline.df), data = df, tau = c(percentile.threshold))
-    df$qr95 <- predict(rqfit, data.frame(x = (df$x)))
-    df$ratio <- df$y.centered/df$qr95
-    df$residuals <- rqfit[["residuals"]]
-    df$z.sig  <- (df$ratio - mean(df$ratio )) / sd(df$ratio )
-    df$p.val <- 2*pnorm(abs(df$z.sig), lower.tail = F)
-    df$p.adj <- p.adjust( df$p.val, method = "BH")
-    df$sig <- (df$p.val < 0.05) & (df$z.sig > 0)
-    
-    df$color <- "grey"
-    df$color[df$sig ] <- "tomato"
-    
-    plt.vstScore2 <- df %>%
-      ggplot(aes(x, y.centered)) +
-      geom_point() +
-      geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
-      stat_quantile(formula = y ~ bs(x, df = spline.df), quantiles = c(1-percentile.threshold, percentile.threshold), linetype = "dashed", color = "tomato", size = 1) +
-      theme_miko(legend = F) + 
-      ylab("Annotation Score (loess-centered)") + 
-      xlab("Geneset Size (N)") + 
-      labs(title = "Variance-Stabilizing Transform", subtitle = paste0("Quant.Regression; B-Spline"))
-    
-    plt.vstScore <- df %>%
-      ggplot(aes(x, z.sig)) + 
-      geom_point(color =  df$color) + 
-      geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
-      geom_hline(yintercept = c(1.96), color = "tomato", linetype = "dashed") + 
-      theme_miko() + 
-      labs(title = "Annotation Scores", subtitle = "Var.Stabilized Scores") + 
-      xlab("Geneset Size (N)") + 
-      ylab("Z-Score")
-    
-  } else {
-    df$ratio   <- df$y.centered
-    df$residuals   <- df$y.centered
-    df$z.sig  <- (df$y.centered - mean(df$y.centered )) / sd(df$y.centered )
-    
-    plt.vstScore <- df %>%
-      ggplot(aes(x, z.sig)) + 
-      geom_point() + 
-      geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
-      geom_hline(yintercept =c(1.96), color = "tomato", linetype = "dashed") + 
-      theme_miko()
-    
-    plt.vstScore2 <- NULL
-  }
-  
-  list(
-    results = df,
-    plot = plt.vstScore,
-    plot.trans = plt.vstScore2
-  )
-  
-}
+# vstScoreThreshold.orig  <- function(x, y, label, set, percentile.threshold = 0.95, spline.df = 3, quantile.norm = T, loess.center = T){
+#   
+#   # purpose: scale and normalize gene set scores 
+#   # step 1: loess-centering
+#   #     - ensures that data is not biased and that no outliers skew score distributions
+#   # step 2: variance-stabilizing transform based on quantile spline regression
+#   #
+#   # output: normalized and scaled geneset scores 
+#   
+#   # prepare data
+#   df <- data.frame(x = x, x.log = log(x), y = y,
+#                    annotation = label, ref.set = set)
+#   df$cluster <- gsub("-", "", stringr::str_extract(df$annotation, "-c[0-9]*")) 
+#   
+#   u.set <- unique(df$ref.set)
+#   
+#   # loess-centering
+#   if (loess.center){
+#     for (i in 1:length(unique(u.set))){
+#       error.loess.mean <- loess(y ~ x.log, df[df$ref.set %in% u.set[i], ])
+#       pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$ref.set %in% u.set[i]]), se = TRUE)[["fit"]]
+#       df$y.centered[df$ref.set %in% u.set[i]] <-  df$y[df$ref.set %in% u.set[i]] - pred
+#     } 
+#   } else {
+#     df$y.centered <- df$y
+#   }
+#   
+#   # quantile-regression based variance stabilization
+#   if (quantile.norm){
+#     
+#     # import splines packages
+#     if (!require(splines)) stop("splines package not found")
+#     
+#     rqfit <- rq(y.centered ~ bs(x, df = spline.df), data = df, tau = c(percentile.threshold))
+#     df$qr95 <- predict(rqfit, data.frame(x = (df$x)))
+#     df$ratio <- df$y.centered/df$qr95
+#     df$residuals <- rqfit[["residuals"]]
+#     df$z.sig  <- (df$ratio - mean(df$ratio )) / sd(df$ratio )
+#     df$p.val <- 2*pnorm(abs(df$z.sig), lower.tail = F)
+#     df$p.adj <- p.adjust( df$p.val, method = "BH")
+#     df$sig <- (df$p.val < 0.05) & (df$z.sig > 0)
+#     
+#     df$color <- "grey"
+#     df$color[df$sig ] <- "tomato"
+#     
+#     plt.vstScore2 <- df %>%
+#       ggplot(aes(x, y.centered)) +
+#       geom_point() +
+#       geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+#       stat_quantile(formula = y ~ bs(x, df = spline.df), quantiles = c(1-percentile.threshold, percentile.threshold), linetype = "dashed", color = "tomato", size = 1) +
+#       theme_miko(legend = F) + 
+#       ylab("Annotation Score (loess-centered)") + 
+#       xlab("Geneset Size (N)") + 
+#       labs(title = "Variance-Stabilizing Transform", subtitle = paste0("Quant.Regression; B-Spline"))
+#     
+#     plt.vstScore <- df %>%
+#       ggplot(aes(x, z.sig)) + 
+#       geom_point(color =  df$color) + 
+#       geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
+#       geom_hline(yintercept = c(1.96), color = "tomato", linetype = "dashed") + 
+#       theme_miko() + 
+#       labs(title = "Annotation Scores", subtitle = "Var.Stabilized Scores") + 
+#       xlab("Geneset Size (N)") + 
+#       ylab("Z-Score")
+#     
+#   } else {
+#     df$ratio   <- df$y.centered
+#     df$residuals   <- df$y.centered
+#     df$z.sig  <- (df$y.centered - mean(df$y.centered )) / sd(df$y.centered )
+#     
+#     plt.vstScore <- df %>%
+#       ggplot(aes(x, z.sig)) + 
+#       geom_point() + 
+#       geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
+#       geom_hline(yintercept =c(1.96), color = "tomato", linetype = "dashed") + 
+#       theme_miko()
+#     
+#     plt.vstScore2 <- NULL
+#   }
+#   
+#   list(
+#     results = df,
+#     plot = plt.vstScore,
+#     plot.trans = plt.vstScore2
+#   )
+#   
+# }
 
 
 ```
@@ -1011,7 +954,8 @@ vstScoreThreshold.orig  <- function(x, y, label, set, percentile.threshold = 0.9
 
 ```{r}
 
-vstScoreThreshold  <- function(x, y, label, set, percentile.threshold = 0.95, spline.df = 3, quantile.norm = T, loess.center = T){
+vstScoreThreshold  <- function(x, y, label, set, percentile.threshold = 0.95, 
+                               spline.df = 3, quantile.norm = T, loess.center = T, loess.span = 5, center.by.group = T){
   
   # purpose: scale and normalize gene set scores 
   # step 1: loess-centering
@@ -1032,11 +976,28 @@ vstScoreThreshold  <- function(x, y, label, set, percentile.threshold = 0.95, sp
   
   # loess-centering
   if (loess.center){
-    for (i in 1:length(unique(u.set))){
-      error.loess.mean <- loess(y ~ x.log, df[df$ref.set %in% u.set[i], ])
-      pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$ref.set %in% u.set[i]]), se = TRUE)[["fit"]]
-      df$y.centered[df$ref.set %in% u.set[i]] <-  df$y[df$ref.set %in% u.set[i]] - pred
-    } 
+    if (center.by.group){
+      # for (i in 1:length(unique(u.set))){
+      #   error.loess.mean <- loess(y ~ x.log, df[df$ref.set %in% u.set[i], ])
+      #   pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$ref.set %in% u.set[i]]), se = TRUE)[["fit"]]
+      #   df$y.centered[df$ref.set %in% u.set[i]] <-  df$y[df$ref.set %in% u.set[i]] - pred
+      # } 
+      for (i in 1:length(uni.clust)){
+        error.loess.mean <- loess(y ~ x.log, df[df$cluster %in% uni.clust[i], ], span = loess.span)
+        pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$cluster %in% uni.clust[i]]), se = TRUE)[["fit"]]
+        df$y.centered[df$cluster %in% uni.clust[i]] <-  df$y[df$cluster %in% uni.clust[i]] - pred
+        
+        # df %>%
+        #   filter(cluster == uni.clust[i]) %>%
+        #   ggplot(aes(x = x, y = y.centered)) + 
+        #   geom_point()
+      } 
+    } else {
+      error.loess.mean <- loess(y ~ x.log, df)
+      pred <- predict(error.loess.mean, data.frame(x.log = df$x.log), se = TRUE)[["fit"]]
+      df$y.centered <-  df$y - pred 
+    }
+    
   } else {
     df$y.centered <- df$y
   }
@@ -1049,15 +1010,32 @@ vstScoreThreshold  <- function(x, y, label, set, percentile.threshold = 0.95, sp
     
     
     for (i in 1:length(uni.clust)){
-      rqfit <- rq(y.centered ~ bs(x, df = spline.df), data = df[df$cluster %in% uni.clust[i], ], tau = c(percentile.threshold))
-      df$qr95[df$cluster %in% uni.clust[i]] <- predict(rqfit, data.frame(x = (df$x[df$cluster %in% uni.clust[i]])))
-      df$ratio[df$cluster %in% uni.clust[i]] <- df$y.centered[df$cluster %in% uni.clust[i]]/df$qr95[df$cluster %in% uni.clust[i]]
-      df$residuals[df$cluster %in% uni.clust[i]] <- rqfit[["residuals"]]
-      df$z.sig[df$cluster %in% uni.clust[i]]  <- (df$ratio[df$cluster %in% uni.clust[i]] - mean(df$ratio[df$cluster %in% uni.clust[i]] )) / sd(df$ratio[df$cluster %in% uni.clust[i]] )
-      df$p.val[df$cluster %in% uni.clust[i]] <- 2*pnorm(abs(df$z.sig[df$cluster %in% uni.clust[i]]), lower.tail = F)
-      # df$p.adj <- p.adjust( df$p.val, method = "BH")
-      df$sigUp[df$cluster %in% uni.clust[i]] <- (df$p.val[df$cluster %in% uni.clust[i]] < 0.05) & (df$z.sig[df$cluster %in% uni.clust[i]] > 0)
-      df$sigDown[df$cluster %in% uni.clust[i]] <- (df$p.val[df$cluster %in% uni.clust[i]] < 0.05) & (df$z.sig[df$cluster %in% uni.clust[i]] < 0)
+      
+      score.selection <- df$cluster %in% uni.clust[i]
+      
+      # fit quantile spline regression
+      rqfit95 <- rq(y.centered ~ bs((x), df = spline.df), data = df[df$cluster %in% uni.clust[i], ], tau = c(percentile.threshold))
+      rqfit05 <- rq(y.centered ~ bs((x), df = spline.df), data = df[df$cluster %in% uni.clust[i], ], tau = c(1-percentile.threshold))
+      
+      # predict quantiles
+      df$qr95[score.selection] <- predict(rqfit95, data.frame(x = (df$x[score.selection])))
+      df$qr05[score.selection] <- predict(rqfit05, data.frame(x = (df$x[score.selection])))
+      
+      # apply transformation
+      score.up.selection <- score.selection & (df$y.centered > 0)
+      df$ratio[score.up.selection] <- df$y.centered[score.up.selection]/df$qr95[score.up.selection]
+            score.down.selection <- score.selection & (df$y.centered < 0)
+      df$ratio[score.down.selection] <- df$y.centered[score.down.selection]/(-1*df$qr05[score.down.selection])
+      
+      # get residuals
+      df$residuals95[score.selection] <- rqfit95[["residuals"]]
+      df$residuals05[score.selection] <- rqfit05[["residuals"]]
+      
+      #df$z.sig[score.selection]  <- (df$ratio[score.selection] - mean(df$ratio[score.selection] )) / sd(df$ratio[score.selection] )
+      df$z.sig[score.selection]  <- df$ratio[score.selection] * 1.96 
+      df$p.val[score.selection] <- 2*pnorm(abs(df$z.sig[score.selection]), lower.tail = F)
+      df$sigUp[score.selection] <- (df$p.val[score.selection] < 0.05) & (df$z.sig[score.selection] > 0)
+      df$sigDown[score.selection] <- (df$p.val[score.selection] < 0.05) & (df$z.sig[score.selection] < 0)
     }
 
     
@@ -1113,20 +1091,22 @@ vstScoreThreshold  <- function(x, y, label, set, percentile.threshold = 0.95, sp
 ```
 
 
-```{r score processing, warning = FALSE, fig.width=8, fig.height=6}
+
+
+```{r score processing, warning = FALSE, fig.width=14, fig.height=6}
 
 # process scores
 vst.exp.list <- vstScoreThreshold(x = df.dist.expr$n.genes.available, y = df.dist.expr$ratio, 
-                                     label = df.dist.expr$pred, set = df.dist.expr$ref.set, quantile.norm = T)
+                                     label = df.dist.expr$pred, set = df.dist.expr$ref.set, quantile.norm = T, loess.center = T)
 vst.gsva.list <- vstScoreThreshold(x = df.dist.gsva$n.genes.available, y = df.dist.gsva$ratio, 
-                                      label = df.dist.gsva$pred, set = df.dist.gsva$ref.set, quantile.norm = T)
+                                      label = df.dist.gsva$pred, set = df.dist.gsva$ref.set, quantile.norm = T, loess.center = T)
 vst.per.list <- vstScoreThreshold(x = df.dist.per$n.genes.available, y = df.dist.per$ratio, 
-                                     label = df.dist.per$pred, set = df.dist.per$ref.set, quantile.norm = T)
+                                     label = df.dist.per$pred, set = df.dist.per$ref.set, quantile.norm = T, loess.center = T)
 
 vst.logfc.list <- vstScoreThreshold(x = df.dist.logfc$n.genes.available, y = df.dist.logfc$ratio, 
-                                       label = df.dist.logfc$pred, set = df.dist.logfc$ref.set, quantile.norm = T)
+                                       label = df.dist.logfc$pred, set = df.dist.logfc$ref.set, quantile.norm = T, loess.center = T)
 vst.pd.list <- vstScoreThreshold(x = df.dist.pd$n.genes.available, y = df.dist.pd$ratio, 
-                                    label = df.dist.pd$pred, set = df.dist.pd$ref.set, quantile.norm = T)
+                                    label = df.dist.pd$pred, set = df.dist.pd$ref.set, quantile.norm = T, loess.center = T)
 
 
 # merge results
@@ -1190,14 +1170,15 @@ plt.rank.cor <- GGally::ggpairs(vst.merge[ ,c(names(vst.list), "composite")], ti
   ggtitle("Score Correlations")
 
 if (print.inline){
-  plt.score.thresholds
-  plt.score.thresholds.resids
+  # plt.score.thresholds
+  # plt.score.thresholds.resids
+  
+  cowplot::plot_grid(plt.score.thresholds, plt.score.thresholds.resids)
 }
 
 # get cluster ID
 vst.merge$cluster <- gsub("-", "", stringr::str_extract(vst.merge$annotation, "-c[0-9]*"))
 vst.merge$cell.type <- gsub("-c[0-9]*", "", vst.merge$annotation)
-
 
 
 vst.merge.final <- vst.merge[ ,c("cluster", "cell.type", "ref.set", "n.genes","exp","gsva","per","logfc", "pd", "composite")]
@@ -1207,41 +1188,50 @@ vst.merge.final$cv.comp <- signif(apply(vst.merge.final[ ,c("exp","gsva","per","
 
 ```
 
-```{r annotate tissue types}
 
-# cell.types <- list(stem = "stem|germ|pluripotent|fetal|placent|Multipotent", 
-#                    endothelial = "endothelial", 
-#                    epithelial = "epithelial|Pulmonary.alveolar|ciliated|henle|proximal.tubule|distal.tubul|Urothelial.cells", 
-#                    hepatic = "liver|hepato|hepatic|cholangio", 
-#                    endoderm = "endoderm",
-#                    renal = "renal|kidney|distal.tubul|proximal.tubule|henle|Juxtaglomerula|Urothelial.cells",
-#                    neural = "neural|neuro|purkinje|lens|Retzius|photorecep|Pyramidal|Retinal.ganglion|Retinal|Science.Ex|Science.In",
-#                    myelin = "schwann|oligodendro",
-#                    brain = "schwann|oligodendro|glia|microgli|neural|neuro|purkinje|lens|astrocy|Retzius|photorecep|Pyramidal|Retinal.ganglion|Retinal|Science.Ex|Science.In",
-#                    mesenchymal = "fibroblast|osteo|chondro|mesench|keratinocyte|myofibro|connective|Jaw|tooth|notocho|adipo",
-#                    skin = "keratin|melano",
-#                    mesoderm = "mesoderm",
-#                    cancer = "cancer",
-#                    myeloid = "monocyte|macrophage|dendritic|microgli|myeloid",
-#                    lymphocyte = "T.cell|T.regulato|B.cells|Lymphoid|white.blood|NK|Thymocytes|memory",
-#                    muscle = "myocyte|myoblast|muscle",
-#                    blood = "T.cell|T.regulato|B.cells|Lymphoid|white.blood|monocyte|macrophage|dendritic|erythro|megakaryo|neutro|basophil|platelet|Hematopoietic|mast",
-#                    progenitor = "progeni",
-#                    immune = "CD8|CD4|T.regulato|B.cells|Lymphoid|white.blood|monocyte|macrophage|dendritic|microgli|neutrophi|natural.killer|killer|basophil|NK|Thymocytes|memory|mast",
-#                    cardiac = "cardio|cardiac|aorta")
-# 
-# annotations <- vst.merge.final$cell.type
-# 
-# for (i in 1:length(annotations)){
-#   ann <- toupper(annotations[i])
-#   vst.merge.final$gen[i] <- paste(names(which(purrr::map_dbl(cell.types, 
-#                                                              function(x) grepl(toupper(x), ann, fixed = F, perl = T)) == 1)), 
-#                                   collapse = ", ")
-# }
+```{r assess size biases, fig.width = 8, fig.height = 6}
 
+plt.score.box <- list()
+plt.score.density <- list()
+
+for (i in 1:length(vst.list)){
+  
+  which.score <- names(vst.list)[i]
+  
+  # wilcox test
+  tt.p <- signif(wilcox.test(vst.list[[which.score]]$x[vst.list[[which.score]]$sigUp], vst.list[[which.score]]$x[!vst.list[[which.score]]$sigUp])[["p.value"]], 3)
+  
+  # bonferroni correction
+  tt.p <- tt.p*5
+  if (tt.p > 1) tt.p <- 1
+  
+  
+  plt.score.box[[which.score]] <- vst.list[[which.score]] %>%
+    ggplot(aes(x = sigUp, y = log(x), fill = sigUp)) + 
+    geom_boxplot()+ 
+    ylab("Geneset Size, log(N)") + 
+    xlab("Significant") + 
+    theme_miko() + 
+    ggthemes::scale_fill_ptol() + 
+    labs(title = which.score, subtitle = paste0("p.adj=", tt.p))
+  
+}
+
+title_gg <- ggplot()+ 
+  labs(title = "Geneset Size Bias Assessment", subtitle = "Size differences assessed by Ranked Sum Test") + 
+  theme_grey() + 
+  theme(plot.title = element_text(face= "bold"))
+body_gg <- cowplot::plot_grid(plotlist = plt.score.box)
+
+plt.size_bias <- cowplot::plot_grid(title_gg, body_gg, ncol = 1, rel_heights = c(0.15, 1))
+
+if (print.inline){
+ # fig.width = 8, fig.height = 6
+  print(plt.size_bias)
+}
+
+  
 ```
-
-
 
 ```{r wordclouds, fig.width = 15, fig.height =5}
 
@@ -1359,7 +1349,6 @@ df.fct.deg.hm <- df.fct.deg[df.fct.deg.wide$annotation %in% top.terms, ]
   
 
 if (print.inline){
-  
 
   pheatmap::pheatmap(df.fct.deg.hm, 
                      main = "Fraction of DEGs present in Genesets\n x: cluster; y: annotation; z: DEG fraction",
@@ -1402,7 +1391,7 @@ plt.signature.subset <- TRUE # (flag specifying whether to plot all or just subs
 # top N signatures
 # top signatures
 # df.sig2plt <- unique((vst.merge.final %>% arrange(-composite) %>% top_n(90, composite))[ ,c("cell.type", "ref.set")])
-df.sig2plt <- unique((vst.merge.cloud %>% dplyr::filter(sig.lenient,composite > 1) %>% dplyr::arrange(-z.comp))[ ,c("cell.type", "ref.set")])
+df.sig2plt <- unique((vst.merge.cloud %>% dplyr::filter(sig.lenient,composite > 1) %>% dplyr::arrange(-composite))[ ,c("cell.type", "ref.set")])
 if (nrow(df.sig2plt) > 50) df.sig2plt <- df.sig2plt[1:50, ]
 
 signature.dot.list <- list()
@@ -1582,7 +1571,7 @@ datatable(df.all_barcodes_wide, filter="top", extensions = 'Buttons',
 Score Distributions
 ===================================== 
 
-Prior to thresholding, scores were preprocessed using 1) variance-stabilizing transform and 2) detrending 
+Annotation scores were loess-centered and variances were stabilized using 95% quantile B-spline regression to eliminate size-biased. 
 
 Row {.tabset}
 -------------------------------------
@@ -1615,13 +1604,23 @@ savePDF(file.name = paste0(output.path, "PDF/", "M05_score_correlations.pdf"), p
 
 ```
 
+### Geneset Size Bias Assessment
+```{r geneset_size_bias_assessment, fig.width=8, fig.height=6, warning = F, message=F}
+
+print(plt.size_bias)
+savePDF(file.name = paste0(output.path, "PDF/", "M05_geneset_size_bias_assessment.pdf"), plot.handle = plt.size_bias, 
+        fig.width = 8, fig.height = 8, save.flag = save.pdf)
+
+```
+
+
 
 
 
 Annotation Scores
 ===================================== 
 
-EXP: Gene set (average) expression, GSVA: Gene set variation analysis, PER: Expressing Fraction (average), MOD: Modular score (Tirosh et 2016), LOGFC: log fold-change, PD: difference between percentage of expression cells,  COMPOSITE: Average of component scores
+EXP: Gene set (average) expression, GSVA: Gene set variation analysis, PER: Expressing Fraction (average), LOGFC: log fold-change, PD: difference between percentage of expression cells,  COMPOSITE: Average of component scores
 
 Row {.tabset}
 -------------------------------------
@@ -1630,6 +1629,8 @@ Row {.tabset}
 
 ```{r lenient filter tab,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
 
+
+try({vst.merge.lenient <- vst.merge.lenient %>% dplyr::select(-c("gen"))}, silent = T)
 datatable(vst.merge.lenient, 
           filter = 'top',
           extensions = 'Buttons',
@@ -1648,6 +1649,7 @@ write.csv(vst.merge.lenient, file = paste0(output.path, "Tables/", "annotation_s
 
 ```{r no filter tab,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
 
+try({vst.merge.final <- vst.merge.final %>% dplyr::select(-c("gen"))}, silent = T)
 datatable(vst.merge.final, 
           filter = 'top',
           extensions = 'Buttons',
@@ -1662,6 +1664,8 @@ write.csv(vst.merge.final, file = paste0(output.path, "Tables/", "annotation_sco
 
 Word Clouds (Cell)
 ===================================== 
+
+Red: enriched annotations; Blue: depleted annotations; Word size ~ composite score; Word transparency ~ confidence.
 
 Row {.tabset}
 -------------------------------------
@@ -1687,11 +1691,6 @@ out_word <- lapply(seq_along(u.cl), function(i) {
                        freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$composite)*-50), min.freq = 0,
                        max.words=20, random.order=FALSE, rot.per=0, scale = c(1.3, 0.01),
                        colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$colorDown, ordered.colors = T)", sep = "")
-  
-  # s4 <-   paste("wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$cell, 
-  #                          freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$composite)*50), min.freq = 0,
-  #                          max.words=30, random.order=FALSE, rot.per=0, scale = c(1.5, .2),
-  #                          colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$color, ordered.colors = T)", sep = "")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
   a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("detailed_tab", i, sep = "")))               # start r chunk
@@ -1722,49 +1721,10 @@ for (i in 1:length(u.cl)){
 ```
 
 
-
-
-```{r Clouds tissue}
-
-
-# Word Clouds (Tissue)
-# ===================================== 
-# 
-# Row {.tabset}
-# -------------------------------------
-# u.cl <- unique(as.numeric(as.character((cluster.membership))))
-# u.cl <- u.cl[order(u.cl)]
-# u.cl <- paste("c", u.cl, sep = "")
-# 
-# out_word <- lapply(seq_along(u.cl), function(i) {
-#   
-#   table.name <- u.cl[i]
-#   
-#   s4 <-   paste("wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$gen, 
-#                            freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$composite)*50), min.freq = 0,
-#                            max.words=30, random.order=FALSE, rot.per=0, scale = c(1.5, .2),
-#                            colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$color, ordered.colors = T)", sep = "")
-#   
-#   a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
-#   a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("detailed_tab v2", i, sep = "")))               # start r chunk
-#   a3 <- knitr::knit_expand(text = sprintf("\n %s",s4)) 
-#   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-#   
-#   paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
-#   
-# })
-
-# `r paste(knitr::knit(text = paste(out_word, collapse = '\n')))`
-
-```
-
-
-
-
-
-
 Differential Module Scores
 ===================================== 
+
+differential analysis of annotation scores. Independent of earlier composite scoring (intended as indepenent annotation method).
 
 Row {.tabset}
 -------------------------------------
