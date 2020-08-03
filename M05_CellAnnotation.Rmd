@@ -53,8 +53,8 @@ input.file <- "Module1_p7_mesoderm_110620.Rdata"
 # input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 
 # specify reference genesets
-which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", "cancerSEA", "immune.signatures", "immuneSubtype", "GBM")
-# which.references <- c("MCA_50", "GBM")
+which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", 
+                      "cancerSEA", "immune.signatures", "immuneSubtype", "GBM")
 
 # specify cluster resolution
 cluster.resolution <- 0.15 # OPTIONAL; range 0 to inf (default = 1)
@@ -70,7 +70,8 @@ print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 
 # specify number of workers for parallelization
 n.workers <- list(
-  scoring = 6
+  scoring = 5,
+  deg = 1
 )
 
 #logical indicating whether to generate gene expression dot plots (computationally intensive)
@@ -109,11 +110,7 @@ load(paste(data.path, dir.preprocessed, input.file, sep = ""));
 so.query <- prepSeurat(so)
 rm(so)
 
-# slim down so
-#so.query@assays[["RNA"]] <- NULL
-#so.query@graphs[["integrated_nn"]] <- NULL
 invisible(gc())
-
 current.assay <- DefaultAssay(so.query)
 
 ```
@@ -481,85 +478,20 @@ rcnames.2d <- function (score.mat, exp.mat, sig){
 ```
 
 
-```{r DEG analysis}
+```{r cluster differentials}
 
-# DEG analysis
-
-#################################################################################
-# PARALLEL IMPLEMENTATION OF FINDALLMARKERS
-# findAllMarkers.Parallel <- function(object, n.workers, ...){
-#   
-# }
-
-do.deg <- F
-
-if (do.deg){
-  
-  
-  if (n.workers$deg == 1){
-    deg.gene.a <- FindAllMarkers(so.query,
-                                 assay = DefaultAssay(so.query),
-                                 slot = "data",
-                                 only.pos = F,
-                                 min.pct = 0,
-                                 test.use = "MAST",
-                                 logfc.threshold = 0.15,
-                                 max.cells.per.ident = 200,
-                                 return.thresh = 1, #1 ensures all genes are returned
-                                 verbose = F)
-  } else {
-    
-    # helper function to set BPParam
-    safeBPParam <- function(nworkers) {
-      if (.Platform$OS.type=="windows") {
-        BiocParallel::SnowParam(nworkers)
-      } else {
-        BiocParallel::MulticoreParam(nworkers)
-      }
-    }
-    
-    # get number of unique clusters
-    M <- length(unique(so.query@meta.data$seurat_clusters))
-    N <- M-1
-    
-    # get optimal BPParam setup
-    if (n.workers$deg > M) n.workers$deg <- M
-    nw <- safeBPParam(n.workers$deg)
-    
-    # find marker wrapper function
-    FindMarker.wrapper <- function(object, x){
-      Seurat::FindMarkers(object, ident.1 = x, only.pos = F, min.pct = 0, test.use = "MAST",
-                          logfc.threshold = 0.15, max.cells.per.ident = 200)
-    }
-    
-    # run parallelized implementation of find markers
-    deg.gene.par <- BiocParallel::bplapply(0:N, object = so.query, FUN = FindMarker.wrapper, BPPARAM = nw)
-    
-    # retrieve results
-    deg.gene.a <- NULL
-    for (i in 1:length(deg.gene.par)){
-      deg.gene.par[[i]]$cluster <- i-1
-      deg.gene.par[[i]]$gene <- rownames(deg.gene.par[[i]])
-      deg.gene.a <- bind_rows(deg.gene.a.unpack, deg.gene.par[[i]])
-    }
-    
-    rm(deg.gene.par)
-    invisible(gc())
-  }
-  
-  
-}
-
-##################################################################################
-
+# get expression  matrix
 ef.mat <- as.matrix(so.query@assays[[DefaultAssay(so.query)]]@data)
 sc.meta <- so.query@meta.data[["seurat_clusters"]]
 u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
 
+# initiate empty matrices
 logfc.mat <- matrix(nrow = nrow(so.query), ncol = length(u.clust))
 pct.mat <- matrix(nrow = nrow(so.query), ncol = length(u.clust))
 e.mat <- matrix(nrow = nrow(so.query), ncol = length(u.clust))
 f.mat <- matrix(nrow = nrow(so.query), ncol = length(u.clust))
+
+# get cluster-level aggregate scores
 for (i in 1:length(u.clust)){
   which.cells <- sc.meta %in% u.clust[i]
   
@@ -608,15 +540,6 @@ cluster.membership <- so.query@meta.data[[cluster.lab]]
 # get unique clusters
 u.clusters <- unique(as.numeric(as.character((cluster.membership))))
 u.clusters <- u.clusters[order(u.clusters)]
-
-# initiate data frames and list
-df.exp.scale <- NULL
-dot.e.scale.list <- list()
-dot.s.scale.list <- list()
-dot.expr.scale.list <- list()
-dot.comp.scale.list <- list()
-dot.mod.scale.list <- list()
-dot.per.scale.list <- list()
 
 # initiate score lists
 e.score.list <- list()
@@ -769,6 +692,83 @@ for (i in 1:length(signatures.symbol)){
 
 ```
 
+```{r}
+
+
+
+FindAllMarkers.Parallel <- function(object, n.work = 1, assay = DefaultAssay(object), slot = "data", only.pos = F, min.pct = 0, test.use = "MAST",
+                                    logfc.threshold = 0.15, max.cells.per.ident = 200, return.thresh = 1, verbose = F){
+  
+  
+  if (n.work == 1){
+    deg.gene.a <- FindAllMarkers(object,
+                                 assay = assay,
+                                 slot = slot,
+                                 only.pos = only.pos,
+                                 min.pct = min.pct,
+                                 test.use = test.use,
+                                 logfc.threshold = logfc.threshold,
+                                 max.cells.per.ident = max.cells.per.ident,
+                                 return.thresh = return.thresh, #1 ensures all genes are returned
+                                 verbose = verbose)
+  } else {
+    
+    if (!require("BiocParallel")) stop("BiocParallel package not found.")
+    
+    suppressWarnings({
+      
+      
+      # helper function to set BPParam
+      safeBPParam <- function(nworkers) {
+        if (.Platform$OS.type=="windows") {
+          BiocParallel::SnowParam(nworkers)
+        } else {
+          BiocParallel::MulticoreParam(nworkers)
+        }
+      }
+      
+      # get number of unique clusters
+      M <- length(unique(object@active.ident))
+      N <- M-1
+      
+      # get optimal BPParam setup
+      if (n.work > M) n.work <- M
+      nw <- safeBPParam(n.work)
+      
+      # find marker wrapper function
+      FindMarker.wrapper <- function(object, x){
+        Seurat::FindMarkers(object, ident.1 = x, only.pos = only.pos, min.pct =min.pct, test.use = test.use,
+                            logfc.threshold = logfc.threshold, max.cells.per.ident = max.cells.per.ident, verbose = verbose)
+      }
+      
+    
+    
+    # run parallelized implementation of find markers
+    deg.gene.par <- bplapply(0:N, object = object, FUN = FindMarker.wrapper, BPPARAM = nw)
+    
+    # retrieve results
+    deg.gene.a <- NULL
+    for (i in 1:length(deg.gene.par)){
+      deg.gene.par[[i]]$cluster <- as.character(i-1)
+      deg.gene.par[[i]]$gene <- rownames(deg.gene.par[[i]])
+      deg.gene.a <- bind_rows(deg.gene.a, deg.gene.par[[i]])
+    }
+    
+    rm(deg.gene.par)
+    invisible(gc())
+    
+    })
+  }
+  
+  return(deg.gene.a)
+  
+}
+
+
+
+```
+
+
 ```{r DEG analysis using module scores}
 
 # get cell-level annotation scores 
@@ -798,9 +798,6 @@ for (i in 1:length(signatures.symbol)){
 # assign annotation names
 rownames(sc.mod.all) <- sig.names.all
 
-# get rid of baggage
-# rm(e.mat)
-
 sc.mod.all <- as.data.frame(t(sc.mod.all))
 rownames(sc.mod.all) <- colnames(so.query)
 so.deg <- CreateSeuratObject(
@@ -818,18 +815,17 @@ so.deg <- CreateSeuratObject(
 so.deg@meta.data[["seurat_clusters"]] <- so.query@meta.data[["seurat_clusters"]]
 Idents(so.deg) <- so.deg@meta.data[["seurat_clusters"]]
 
-# run DEG analysis
-deg.gene <- FindAllMarkers(so.deg, 
-                           assay = DefaultAssay(so.deg),
-                           slot = "data",
-                           only.pos = T, 
-                           min.pct = 0,
-                           test.use = "MAST",
-                           logfc.threshold = 0, 
-                           max.cells.per.ident = 200,
-                           return.thresh = 1, #1 ensures all genes are returned
-                           verbose = F)
+if (n.workers$deg > length(u.clusters)) n.workers$deg <- length(u.clusters)
 
+deg.gene <- FindAllMarkers.Parallel(object = so.deg, 
+                                    n.work = n.workers$deg,
+                                    only.pos = T, 
+                                    min.pct = 0,
+                                    test.use = "MAST",
+                                    logfc.threshold = 0, 
+                                    max.cells.per.ident = 200,
+                                    return.thresh = 1, #1 ensures all genes are returned
+                                    verbose = T)
 
 # data wrangling
 deg.gene$pDif <- deg.gene$pct.1 - deg.gene$pct.2
@@ -912,66 +908,79 @@ wrangleHelper <- function(score.list){
 df.dist.expr <- wrangleHelper(expr.score.list)
 df.dist.gsva <- wrangleHelper(e.score.list)
 df.dist.per <- wrangleHelper(per.score.list)
-# df.dist.mod <- wrangleHelper(mod.score.list)
 df.dist.logfc <- wrangleHelper(logfc.score.list)
 df.dist.pd <- wrangleHelper(pd.score.list)
 
 
 ```
 
-
-```{r variance stabilizing score transform}
-
+```{r}
 
 
-
-vstScoreThreshold.v2  <- function(x, y, label, set, percentile.threshold = 0.98, quantile.norm = F){
+vstScoreThreshold.orig  <- function(x, y, label, set, percentile.threshold = 0.95, spline.df = 3, quantile.norm = T, loess.center = T){
   
   # purpose: scale and normalize gene set scores 
   # step 1: loess-centering
-  #     - ensures that data not biased and that no outliers skew score distributions
-  # step 2: variance-stabilizing transform based on quantile regression
+  #     - ensures that data is not biased and that no outliers skew score distributions
+  # step 2: variance-stabilizing transform based on quantile spline regression
   #
   # output: normalized and scaled geneset scores 
   
-  # loess-centering
-  
+  # prepare data
   df <- data.frame(x = x, x.log = log(x), y = y,
                    annotation = label, ref.set = set)
+  df$cluster <- gsub("-", "", stringr::str_extract(df$annotation, "-c[0-9]*")) 
   
   u.set <- unique(df$ref.set)
-  for (i in 1:length(unique(u.set))){
-    error.loess.mean <- loess(y ~ x.log , df[df$ref.set %in% u.set[i], ])
-    pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$ref.set %in% u.set[i]]), se = TRUE)[["fit"]]
-    df$y.centered[df$ref.set %in% u.set[i]] <-  df$y[df$ref.set %in% u.set[i]] - pred
-    
-    
+  
+  # loess-centering
+  if (loess.center){
+    for (i in 1:length(unique(u.set))){
+      error.loess.mean <- loess(y ~ x.log, df[df$ref.set %in% u.set[i], ])
+      pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$ref.set %in% u.set[i]]), se = TRUE)[["fit"]]
+      df$y.centered[df$ref.set %in% u.set[i]] <-  df$y[df$ref.set %in% u.set[i]] - pred
+    } 
+  } else {
+    df$y.centered <- df$y
   }
   
+  # quantile-regression based variance stabilization
   if (quantile.norm){
-    rqfit <- rq(y.centered ~ log1p(x) - sqrt(x) - x, data = df, tau = percentile.threshold)
-    # rqfit <- rq("y.centered ~ log(x) - x", data = df, tau = percentile.threshold)
+    
+    # import splines packages
+    if (!require(splines)) stop("splines package not found")
+    
+    rqfit <- rq(y.centered ~ bs(x, df = spline.df), data = df, tau = c(percentile.threshold))
     df$qr95 <- predict(rqfit, data.frame(x = (df$x)))
     df$ratio <- df$y.centered/df$qr95
     df$residuals <- rqfit[["residuals"]]
     df$z.sig  <- (df$ratio - mean(df$ratio )) / sd(df$ratio )
-    df$sig <- df$z.sig > 2.575
-    df$color <- "black"
+    df$p.val <- 2*pnorm(abs(df$z.sig), lower.tail = F)
+    df$p.adj <- p.adjust( df$p.val, method = "BH")
+    df$sig <- (df$p.val < 0.05) & (df$z.sig > 0)
+    
+    df$color <- "grey"
     df$color[df$sig ] <- "tomato"
     
     plt.vstScore2 <- df %>%
       ggplot(aes(x, y.centered)) +
       geom_point() +
-      geom_smooth() +
-      geom_quantile(formula = y ~ log1p(x) - sqrt(x) - x, quantiles = percentile.threshold, linetype = "dashed", color = "tomato", size = 1) +
-      theme_miko()
+      geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+      stat_quantile(formula = y ~ bs(x, df = spline.df), quantiles = c(1-percentile.threshold, percentile.threshold), linetype = "dashed", color = "tomato", size = 1) +
+      theme_miko(legend = F) + 
+      ylab("Annotation Score (loess-centered)") + 
+      xlab("Geneset Size (N)") + 
+      labs(title = "Variance-Stabilizing Transform", subtitle = paste0("Quant.Regression; B-Spline"))
     
     plt.vstScore <- df %>%
       ggplot(aes(x, z.sig)) + 
-      geom_point() + 
+      geom_point(color =  df$color) + 
       geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
-      geom_hline(yintercept = 2.575, color = "tomato", linetype = "dashed") + 
-      theme_miko()
+      geom_hline(yintercept = c(1.96), color = "tomato", linetype = "dashed") + 
+      theme_miko() + 
+      labs(title = "Annotation Scores", subtitle = "Var.Stabilized Scores") + 
+      xlab("Geneset Size (N)") + 
+      ylab("Z-Score")
     
   } else {
     df$ratio   <- df$y.centered
@@ -982,7 +991,7 @@ vstScoreThreshold.v2  <- function(x, y, label, set, percentile.threshold = 0.98,
       ggplot(aes(x, z.sig)) + 
       geom_point() + 
       geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
-      geom_hline(yintercept = 2.575, color = "tomato", linetype = "dashed") + 
+      geom_hline(yintercept =c(1.96), color = "tomato", linetype = "dashed") + 
       theme_miko()
     
     plt.vstScore2 <- NULL
@@ -996,24 +1005,127 @@ vstScoreThreshold.v2  <- function(x, y, label, set, percentile.threshold = 0.98,
   
 }
 
+
 ```
 
 
+```{r}
 
-```{r score processing, warning = FALSE}
+vstScoreThreshold  <- function(x, y, label, set, percentile.threshold = 0.95, spline.df = 3, quantile.norm = T, loess.center = T){
+  
+  # purpose: scale and normalize gene set scores 
+  # step 1: loess-centering
+  #     - ensures that data is not biased and that no outliers skew score distributions
+  # step 2: variance-stabilizing transform based on quantile spline regression
+  #
+  # output: normalized and scaled geneset scores 
+  
+  # prepare data
+  df <- data.frame(x = x, x.log = log(x), y = y,
+                   annotation = label, ref.set = set)
+  df$cluster <- gsub("-", "", stringr::str_extract(df$annotation, "-c[0-9]*")) 
+  
+  uni.clust <- unique(df$cluster)
+  uni.clust <- uni.clust[order(uni.clust)]
+  
+  u.set <- unique(df$ref.set)
+  
+  # loess-centering
+  if (loess.center){
+    for (i in 1:length(unique(u.set))){
+      error.loess.mean <- loess(y ~ x.log, df[df$ref.set %in% u.set[i], ])
+      pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$ref.set %in% u.set[i]]), se = TRUE)[["fit"]]
+      df$y.centered[df$ref.set %in% u.set[i]] <-  df$y[df$ref.set %in% u.set[i]] - pred
+    } 
+  } else {
+    df$y.centered <- df$y
+  }
+  
+  # quantile-regression based variance stabilization
+  if (quantile.norm){
+    
+    # import splines packages
+    if (!require(splines)) stop("splines package not found")
+    
+    
+    for (i in 1:length(uni.clust)){
+      rqfit <- rq(y.centered ~ bs(x, df = spline.df), data = df[df$cluster %in% uni.clust[i], ], tau = c(percentile.threshold))
+      df$qr95[df$cluster %in% uni.clust[i]] <- predict(rqfit, data.frame(x = (df$x[df$cluster %in% uni.clust[i]])))
+      df$ratio[df$cluster %in% uni.clust[i]] <- df$y.centered[df$cluster %in% uni.clust[i]]/df$qr95[df$cluster %in% uni.clust[i]]
+      df$residuals[df$cluster %in% uni.clust[i]] <- rqfit[["residuals"]]
+      df$z.sig[df$cluster %in% uni.clust[i]]  <- (df$ratio[df$cluster %in% uni.clust[i]] - mean(df$ratio[df$cluster %in% uni.clust[i]] )) / sd(df$ratio[df$cluster %in% uni.clust[i]] )
+      df$p.val[df$cluster %in% uni.clust[i]] <- 2*pnorm(abs(df$z.sig[df$cluster %in% uni.clust[i]]), lower.tail = F)
+      # df$p.adj <- p.adjust( df$p.val, method = "BH")
+      df$sigUp[df$cluster %in% uni.clust[i]] <- (df$p.val[df$cluster %in% uni.clust[i]] < 0.05) & (df$z.sig[df$cluster %in% uni.clust[i]] > 0)
+      df$sigDown[df$cluster %in% uni.clust[i]] <- (df$p.val[df$cluster %in% uni.clust[i]] < 0.05) & (df$z.sig[df$cluster %in% uni.clust[i]] < 0)
+    }
+
+    
+    df$color <- "grey"
+    df$color[df$sigUp ] <- "tomato"
+    df$color[df$sigDown ] <- "skyblue"
+    
+    plt.vstScore2 <- df %>%
+      ggplot(aes(x, y.centered)) +
+      geom_point() +
+      geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+      stat_quantile(formula = y ~ bs(x, df = spline.df), quantiles = c(1-percentile.threshold, percentile.threshold), linetype = "dashed", color = "tomato", size = 1) +
+      theme_miko(legend = F) + 
+      ylab("Annotation Score (loess-centered)") + 
+      xlab("Geneset Size (N)") + 
+      labs(title = "Variance-Stabilizing Transform", subtitle = paste0("Quant.Regression; B-Spline"))
+    
+    plt.vstScore <- df %>%
+      ggplot(aes(x, z.sig)) + 
+      geom_point(color =  df$color) + 
+      geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
+      geom_hline(yintercept = c(1.96), color = "tomato", linetype = "dashed") + 
+      geom_hline(yintercept = c(-1.96), color = "skyblue", linetype = "dashed") + 
+      theme_miko() + 
+      labs(title = "Annotation Scores", subtitle = "Var.Stabilized Scores") + 
+      xlab("Geneset Size (N)") + 
+      ylab("Z-Score")
+    
+  } else {
+    df$ratio   <- df$y.centered
+    df$residuals   <- df$y.centered
+    df$z.sig  <- (df$y.centered - mean(df$y.centered )) / sd(df$y.centered )
+    
+    plt.vstScore <- df %>%
+      ggplot(aes(x, z.sig)) + 
+      geom_point() + 
+      geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
+      geom_hline(yintercept =c(1.96), color = "tomato", linetype = "dashed") + 
+      theme_miko()
+    
+    plt.vstScore2 <- NULL
+  }
+  
+  list(
+    results = df,
+    plot = plt.vstScore,
+    plot.trans = plt.vstScore2
+  )
+  
+}
+
+
+```
+
+
+```{r score processing, warning = FALSE, fig.width=8, fig.height=6}
 
 # process scores
-vst.exp.list <- vstScoreThreshold.v2(x = df.dist.expr$n.genes.available, y = df.dist.expr$ratio, 
+vst.exp.list <- vstScoreThreshold(x = df.dist.expr$n.genes.available, y = df.dist.expr$ratio, 
                                      label = df.dist.expr$pred, set = df.dist.expr$ref.set, quantile.norm = T)
-vst.gsva.list <- vstScoreThreshold.v2(x = df.dist.gsva$n.genes.available, y = df.dist.gsva$ratio, 
+vst.gsva.list <- vstScoreThreshold(x = df.dist.gsva$n.genes.available, y = df.dist.gsva$ratio, 
                                       label = df.dist.gsva$pred, set = df.dist.gsva$ref.set, quantile.norm = T)
-vst.per.list <- vstScoreThreshold.v2(x = df.dist.per$n.genes.available, y = df.dist.per$ratio, 
+vst.per.list <- vstScoreThreshold(x = df.dist.per$n.genes.available, y = df.dist.per$ratio, 
                                      label = df.dist.per$pred, set = df.dist.per$ref.set, quantile.norm = T)
-# vst.mod.list <- vstScoreThreshold.v2(x = df.dist.mod$n.genes.available, y = df.dist.mod$ratio, 
-# label = df.dist.mod$pred, set = df.dist.mod$ref.set, quantile.norm = T)
-vst.logfc.list <- vstScoreThreshold.v2(x = df.dist.logfc$n.genes.available, y = df.dist.logfc$ratio, 
+
+vst.logfc.list <- vstScoreThreshold(x = df.dist.logfc$n.genes.available, y = df.dist.logfc$ratio, 
                                        label = df.dist.logfc$pred, set = df.dist.logfc$ref.set, quantile.norm = T)
-vst.pd.list <- vstScoreThreshold.v2(x = df.dist.pd$n.genes.available, y = df.dist.pd$ratio, 
+vst.pd.list <- vstScoreThreshold(x = df.dist.pd$n.genes.available, y = df.dist.pd$ratio, 
                                     label = df.dist.pd$pred, set = df.dist.pd$ref.set, quantile.norm = T)
 
 
@@ -1021,7 +1133,6 @@ vst.pd.list <- vstScoreThreshold.v2(x = df.dist.pd$n.genes.available, y = df.dis
 vst.list <-  list(exp = vst.exp.list$results, 
                   gsva = vst.gsva.list$results, 
                   per= vst.per.list$results, 
-                  # mod = vst.mod.list$results,
                   logfc = vst.logfc.list$results,
                   pd = vst.pd.list$results)
 
@@ -1056,20 +1167,18 @@ plt.vstComposite <- vst.merge %>%
 
 
 # pooled plot
-plt.score.thresholds.resids <- cowplot::plot_grid(vst.exp.list$plot.trans + labs(title = "Expression") + ylab("Residuals"),
-                                                  vst.gsva.list$plot.trans  + labs(title = "GSVA") + ylab("Residuals"),
-                                                  vst.per.list$plot.trans  + labs(title = "Expression Fraction") + ylab("Residuals"),
-                                                  # vst.mod.list$plot.trans  + labs(title = "Modular Score") + ylab("Residuals"),
-                                                  vst.logfc.list$plot.trans  + labs(title = "log FC") + ylab("Residuals"),
-                                                  vst.pd.list$plot.trans  + labs(title = "Pct Differences") + ylab("Residuals"),
+plt.score.thresholds.resids <- cowplot::plot_grid(vst.exp.list$plot.trans + labs(title = "Expression"),
+                                                  vst.gsva.list$plot.trans  + labs(title = "GSVA"),
+                                                  vst.per.list$plot.trans  + labs(title = "Expression Fraction"),
+                                                  vst.logfc.list$plot.trans  + labs(title = "log FC"),
+                                                  vst.pd.list$plot.trans  + labs(title = "Pct Differences"),
                                                   ncol = 3)
 
-plt.score.thresholds <- cowplot::plot_grid(vst.exp.list$plot + labs(title = "Expression") + ylab("z-scores"),
-                                           vst.gsva.list$plot  + labs(title = "GSVA") + ylab("z-scores"),
-                                           vst.per.list$plot  + labs(title = "Expression Fraction") + ylab("z-scores"),
-                                           # vst.mod.list$plot  + labs(title = "Modular Score") + ylab("z-scores"),
-                                           vst.logfc.list$plot  + labs(title = "log FC") + ylab("z-scores"),
-                                           vst.pd.list$plot  + labs(title = "Pct Differences") + ylab("z-scores"),
+plt.score.thresholds <- cowplot::plot_grid(vst.exp.list$plot + labs(title = "Expression"),
+                                           vst.gsva.list$plot  + labs(title = "GSVA"),
+                                           vst.per.list$plot  + labs(title = "Expression Fraction"),
+                                           vst.logfc.list$plot  + labs(title = "log FC"),
+                                           vst.pd.list$plot  + labs(title = "Pct Differences"),
                                            ncol = 3)
 
 
@@ -1100,43 +1209,43 @@ vst.merge.final$cv.comp <- signif(apply(vst.merge.final[ ,c("exp","gsva","per","
 
 ```{r annotate tissue types}
 
-cell.types <- list(stem = "stem|germ|pluripotent|fetal|placent|Multipotent", 
-                   endothelial = "endothelial", 
-                   epithelial = "epithelial|Pulmonary.alveolar|ciliated|henle|proximal.tubule|distal.tubul|Urothelial.cells", 
-                   hepatic = "liver|hepato|hepatic|cholangio", 
-                   endoderm = "endoderm",
-                   renal = "renal|kidney|distal.tubul|proximal.tubule|henle|Juxtaglomerula|Urothelial.cells",
-                   neural = "neural|neuro|purkinje|lens|Retzius|photorecep|Pyramidal|Retinal.ganglion|Retinal|Science.Ex|Science.In",
-                   myelin = "schwann|oligodendro",
-                   brain = "schwann|oligodendro|glia|microgli|neural|neuro|purkinje|lens|astrocy|Retzius|photorecep|Pyramidal|Retinal.ganglion|Retinal|Science.Ex|Science.In",
-                   mesenchymal = "fibroblast|osteo|chondro|mesench|keratinocyte|myofibro|connective|Jaw|tooth|notocho|adipo",
-                   skin = "keratin|melano",
-                   mesoderm = "mesoderm",
-                   cancer = "cancer",
-                   myeloid = "monocyte|macrophage|dendritic|microgli|myeloid",
-                   lymphocyte = "T.cell|T.regulato|B.cells|Lymphoid|white.blood|NK|Thymocytes|memory",
-                   muscle = "myocyte|myoblast|muscle",
-                   blood = "T.cell|T.regulato|B.cells|Lymphoid|white.blood|monocyte|macrophage|dendritic|erythro|megakaryo|neutro|basophil|platelet|Hematopoietic|mast",
-                   progenitor = "progeni",
-                   immune = "CD8|CD4|T.regulato|B.cells|Lymphoid|white.blood|monocyte|macrophage|dendritic|microgli|neutrophi|natural.killer|killer|basophil|NK|Thymocytes|memory|mast",
-                   cardiac = "cardio|cardiac|aorta")
-
-annotations <- vst.merge.final$cell.type
-
-for (i in 1:length(annotations)){
-  ann <- toupper(annotations[i])
-  vst.merge.final$gen[i] <- paste(names(which(purrr::map_dbl(cell.types, 
-                                                             function(x) grepl(toupper(x), ann, fixed = F, perl = T)) == 1)), 
-                                  collapse = ", ")
-}
+# cell.types <- list(stem = "stem|germ|pluripotent|fetal|placent|Multipotent", 
+#                    endothelial = "endothelial", 
+#                    epithelial = "epithelial|Pulmonary.alveolar|ciliated|henle|proximal.tubule|distal.tubul|Urothelial.cells", 
+#                    hepatic = "liver|hepato|hepatic|cholangio", 
+#                    endoderm = "endoderm",
+#                    renal = "renal|kidney|distal.tubul|proximal.tubule|henle|Juxtaglomerula|Urothelial.cells",
+#                    neural = "neural|neuro|purkinje|lens|Retzius|photorecep|Pyramidal|Retinal.ganglion|Retinal|Science.Ex|Science.In",
+#                    myelin = "schwann|oligodendro",
+#                    brain = "schwann|oligodendro|glia|microgli|neural|neuro|purkinje|lens|astrocy|Retzius|photorecep|Pyramidal|Retinal.ganglion|Retinal|Science.Ex|Science.In",
+#                    mesenchymal = "fibroblast|osteo|chondro|mesench|keratinocyte|myofibro|connective|Jaw|tooth|notocho|adipo",
+#                    skin = "keratin|melano",
+#                    mesoderm = "mesoderm",
+#                    cancer = "cancer",
+#                    myeloid = "monocyte|macrophage|dendritic|microgli|myeloid",
+#                    lymphocyte = "T.cell|T.regulato|B.cells|Lymphoid|white.blood|NK|Thymocytes|memory",
+#                    muscle = "myocyte|myoblast|muscle",
+#                    blood = "T.cell|T.regulato|B.cells|Lymphoid|white.blood|monocyte|macrophage|dendritic|erythro|megakaryo|neutro|basophil|platelet|Hematopoietic|mast",
+#                    progenitor = "progeni",
+#                    immune = "CD8|CD4|T.regulato|B.cells|Lymphoid|white.blood|monocyte|macrophage|dendritic|microgli|neutrophi|natural.killer|killer|basophil|NK|Thymocytes|memory|mast",
+#                    cardiac = "cardio|cardiac|aorta")
+# 
+# annotations <- vst.merge.final$cell.type
+# 
+# for (i in 1:length(annotations)){
+#   ann <- toupper(annotations[i])
+#   vst.merge.final$gen[i] <- paste(names(which(purrr::map_dbl(cell.types, 
+#                                                              function(x) grepl(toupper(x), ann, fixed = F, perl = T)) == 1)), 
+#                                   collapse = ", ")
+# }
 
 ```
 
 
 
-```{r wordclouds}
+```{r wordclouds, fig.width = 15, fig.height =5}
 
-sig.thresh <- 2.575
+sig.thresh <- 1.96
 vst.merge.cloud <- vst.merge.final
 vst.merge.cloud$sig.lenient <- F
 vst.merge.cloud$sig.lenient[vst.merge.cloud$exp > sig.thresh | 
@@ -1145,7 +1254,20 @@ vst.merge.cloud$sig.lenient[vst.merge.cloud$exp > sig.thresh |
                               vst.merge.cloud$logfc > sig.thresh | 
                               vst.merge.cloud$pd > sig.thresh] <- T
 
-# vst.merge.cloud$mod > sig.thresh | 
+
+psum <- function(x) Reduce("+",x)
+vst.merge.cloud$n.sigUp <- 0
+vst.merge.cloud$n.sigUp <- psum(data.frame(vst.merge.cloud$exp > sig.thresh , 
+                                           vst.merge.cloud$gsva > sig.thresh ,
+                                           vst.merge.cloud$per > sig.thresh ,
+                                           vst.merge.cloud$logfc > sig.thresh ,
+                                           vst.merge.cloud$pd > sig.thresh))
+vst.merge.cloud$n.sigDown <- 0
+vst.merge.cloud$n.sigDown <- psum(data.frame(vst.merge.cloud$exp < -1*sig.thresh , 
+                                             vst.merge.cloud$gsva < -1*sig.thresh ,
+                                             vst.merge.cloud$per < -1*sig.thresh ,
+                                             vst.merge.cloud$logfc < -1*sig.thresh ,
+                                             vst.merge.cloud$pd < -1*sig.thresh))
 
 vst.merge.cloud$sig.stringent <- F
 vst.merge.cloud$sig.stringent[vst.merge.cloud$exp > sig.thresh & 
@@ -1154,32 +1276,35 @@ vst.merge.cloud$sig.stringent[vst.merge.cloud$exp > sig.thresh &
                                 vst.merge.cloud$logfc > sig.thresh & 
                                 vst.merge.cloud$pd > sig.thresh] <- T
 
-# vst.merge.cloud$mod > sig.thresh & 
+vst.merge.cloud$colorUp <- "grey"
+hue.col <- 0
+vst.merge.cloud$colorUp[vst.merge.cloud$n.sigUp >= 1] <- colorspace::sequential_hcl(4, h = hue.col)[3]
+vst.merge.cloud$colorUp[vst.merge.cloud$n.sigUp >= 3] <-  colorspace::sequential_hcl(4, h = hue.col)[2]
+vst.merge.cloud$colorUp[vst.merge.cloud$n.sigUp >= 5] <- colorspace::sequential_hcl(4, h = hue.col)[1]
 
-vst.merge.cloud$color <- "grey"
-vst.merge.cloud$color[vst.merge.cloud$sig.lenient] <- "orange"
-vst.merge.cloud$color[vst.merge.cloud$sig.stringent] <- "red"
-
+vst.merge.cloud$colorDown <- "grey"
+vst.merge.cloud$colorDown[vst.merge.cloud$n.sigDown >= 1] <- colorspace::sequential_hcl(4)[3]
+vst.merge.cloud$colorDown[vst.merge.cloud$n.sigDown >= 3] <- colorspace::sequential_hcl(4)[2]
+vst.merge.cloud$colorDown[vst.merge.cloud$n.sigDown >= 5] <- colorspace::sequential_hcl(4)[1]
 
 if (print.inline){
   
   u.cl <- paste("c", u.clusters, sep = "")
-  
-  cols <- rev(c("#d73027",
-                "#4575b4"))
-  
+  # cols <- rev(c("#d73027",
+
   for (i in 1:length(u.cl)){
     
     vst.merge.subset <- vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[i], ]
-    # colors=brewer.pal(8, "Dark2"),
-    
-    
     if (nrow(vst.merge.subset) >0){
+      par(mfrow = c(1,2))
       wordcloud::wordcloud(words = vst.merge.subset$cell,
-                           freq =  round((vst.merge.subset$composite + abs(min(vst.merge.subset$composite)))*25), min.freq = -5,
+                           freq =  round((vst.merge.subset$composite + abs(min(vst.merge.subset$composite)))*20), min.freq = -5,
                            max.words=20, random.order=FALSE, rot.per=0, scale = c(1.3, 0.01),
-                           colors= vst.merge.subset$color, ordered.colors = T)
-      
+                           colors= vst.merge.subset$colorUp, ordered.colors = T)
+            wordcloud::wordcloud(words = vst.merge.subset$cell,
+                           freq =  round((-1*vst.merge.subset$composite + abs(min(-1*vst.merge.subset$composite)))*20), min.freq = -5,
+                           max.words=20, random.order=FALSE, rot.per=0, scale = c(1.3, 0.01),
+                           colors= vst.merge.subset$colorDown, ordered.colors = T)
     } 
   }  
 }
@@ -1189,11 +1314,11 @@ vst.merge.lenient <- vst.merge.final[vst.merge.cloud$sig.lenient, ]
 
 ```
 
-```{r deg evaluation, warning = FALSE}
+```{r deg evaluation, warning = FALSE, fig.width=8, fig.height=8}
 
 # Find fraction of DEGs present in each geneset ##########################################
 
-deg.gene.sub <- df.lfc.long[(df.pd.long$value > 0.3) & (df.lfc.long$value > 1) & (df.f.long$value > 0.3), ]
+deg.gene.sub <- df.lfc.long[(df.pd.long$value > 0.5) | (df.lfc.long$value > 1), ]
 
 deg.list <- deg.gene.sub %>%
   arrange(cluster) %>%
@@ -1222,15 +1347,25 @@ df.fct.deg.long <- pivot_longer(df.fct.deg.wide, cols = colnames(df.fct.deg))
 
 df.top.deg <- (df.fct.deg.long %>%
   group_by(name) %>%
-  arrange(-value))[c(1:20), ]
+  arrange(-value))
 
-top.terms <- unique(df.top.deg$annotation)
+
+n.col.max <- nrow(df.top.deg)
+if (n.col.max > 50) n.col.max <- 50
+top.terms <- unique(df.top.deg$annotation)[c(1:n.col.max)]
 
 df.fct.deg.hm <- df.fct.deg[df.fct.deg.wide$annotation %in% top.terms, ]
+  df.fct.deg.hm.scaled <- apply(df.fct.deg.hm, 2, function(x) x <- tryCatch({rescaleValues(x)}, error = function (e){x})) 
+  
 
 if (print.inline){
   
+
   pheatmap::pheatmap(df.fct.deg.hm, 
+                     main = "Fraction of DEGs present in Genesets\n x: cluster; y: annotation; z: DEG fraction",
+                     color = viridis::inferno(10))
+  
+    pheatmap::pheatmap(df.fct.deg.hm.scaled, 
                      main = "Fraction of DEGs present in Genesets\n x: cluster; y: annotation; z: DEG fraction",
                      color = viridis::inferno(10))
 }
@@ -1264,9 +1399,11 @@ if (length(signatures.symbol) > 0){
 
 plt.signature.subset <- TRUE # (flag specifying whether to plot all or just subset)
 
-# top 20 signatures
-df.sig2plt <- unique((vst.merge.final %>% arrange(-composite) %>% top_n(90, composite))[ ,c("cell.type", "ref.set")])
-if (nrow(df.sig2plt) > 35) df.sig2plt <- df.sig2plt[1:35, ]
+# top N signatures
+# top signatures
+# df.sig2plt <- unique((vst.merge.final %>% arrange(-composite) %>% top_n(90, composite))[ ,c("cell.type", "ref.set")])
+df.sig2plt <- unique((vst.merge.cloud %>% dplyr::filter(sig.lenient,composite > 1) %>% dplyr::arrange(-z.comp))[ ,c("cell.type", "ref.set")])
+if (nrow(df.sig2plt) > 50) df.sig2plt <- df.sig2plt[1:50, ]
 
 signature.dot.list <- list()
 if (plt.signature.subset){
@@ -1334,15 +1471,29 @@ if (show.gene.exp){
 
 
 ```{r prep matrix for expression heatmap, include = FALSE}
-agg.mat <- aggGroupExpression(so.query, which.data = "scale")
-var.features <- so.query@assays[[DefaultAssay(so.query)]]@var.features
-agg.mat <- agg.mat[agg.mat$genes %in% var.features, ]
-agg.mat <- agg.mat[!duplicated(agg.mat$genes), ]
-rownames(agg.mat) <- agg.mat$genes
-agg.mat <- agg.mat %>% dplyr::select(-c("genes"))
 
+agg.mat <- aggGroupExpression(so.query)
+
+try({var1 <-  so.query@assays[["RNA"]]@var.features}, silent = T)
+try({var2 <- so.query@assays[["SCT"]]@var.features}, silent = T)
+try({var3 <- so.query@assays[["integrated"]]@var.features}, silent = T)
+
+if (exists("var1") && length(var1) > 0) var.features <- var1
+if (exists("var2") && length(var2) > 0) var.features <- var2
+if (exists("var3") && length(var3) > 0) var.features <- var3
+
+if (exists("var.features")){
+  agg.mat <- agg.mat[agg.mat$genes %in% var.features, ]
+  agg.mat <- agg.mat[!duplicated(agg.mat$genes), ]
+  rownames(agg.mat) <- agg.mat$genes
+  agg.mat <- agg.mat %>% dplyr::select(-c("genes"))
+  
   plt.hm <- ggplotify::as.ggplot(pheatmap::pheatmap(agg.mat, show_rownames = F,
-                   main = "Expression Matrix\nx=clusters, y=genes, z=expression", scale = "row"))
+                                                    main = "Expression Matrix\nx=clusters, y=genes, z=expression", scale = "row"))
+  
+} else {
+  plt.hm <- NULL
+}
 
 if (print.inline){
   print(plt.hm)
@@ -1368,7 +1519,6 @@ if (is.null(run.id))  {
 }
 
 ```
-
 
 ```{r setup output directories}
 
@@ -1526,10 +1676,22 @@ out_word <- lapply(seq_along(u.cl), function(i) {
   
   table.name <- u.cl[i]
   
-  s4 <-   paste("wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$cell, 
-                           freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$composite)*50), min.freq = 0,
-                           max.words=30, random.order=FALSE, rot.per=0, scale = c(1.5, .2),
-                           colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$color, ordered.colors = T)", sep = "")
+  
+  
+  s4 <-   paste("par(mfrow = c(1,2))
+  wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$cell,
+                       freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$composite)*50), min.freq = 0,
+                       max.words=20, random.order=FALSE, rot.per=0, scale = c(1.3, 0.01),
+                       colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$colorUp, ordered.colors = T)
+  wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$cell,
+                       freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$composite)*-50), min.freq = 0,
+                       max.words=20, random.order=FALSE, rot.per=0, scale = c(1.3, 0.01),
+                       colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$colorDown, ordered.colors = T)", sep = "")
+  
+  # s4 <-   paste("wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$cell, 
+  #                          freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$composite)*50), min.freq = 0,
+  #                          max.words=30, random.order=FALSE, rot.per=0, scale = c(1.5, .2),
+  #                          colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$color, ordered.colors = T)", sep = "")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
   a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("detailed_tab", i, sep = "")))               # start r chunk
@@ -1549,50 +1711,54 @@ out_word <- lapply(seq_along(u.cl), function(i) {
 
 for (i in 1:length(u.cl)){
   plot.name <- paste0("M05_wordcloud_", u.cl[i] ,".pdf")
-  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
-          plot.handle =  wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[i], ]$cell, 
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name),
+          plot.handle =  wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[i], ]$cell,
                                               freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[i], ]$composite)*50), min.freq = 0,
                                               max.words=30, random.order=FALSE, rot.per=0, scale = c(1.5, .2),
-                                              colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[i], ]$color, ordered.colors = T), 
+                                              colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[i], ]$colorUp, ordered.colors = T),
           fig.width = 5, fig.height = 5, save.flag = save.pdf)
 }
 
 ```
 
 
-Word Clouds (Tissue)
-===================================== 
 
-Row {.tabset}
--------------------------------------
 
 ```{r Clouds tissue}
 
-u.cl <- unique(as.numeric(as.character((cluster.membership))))
-u.cl <- u.cl[order(u.cl)]
-u.cl <- paste("c", u.cl, sep = "")
 
-out_word <- lapply(seq_along(u.cl), function(i) {
-  
-  table.name <- u.cl[i]
-  
-  s4 <-   paste("wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$gen, 
-                           freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$composite)*50), min.freq = 0,
-                           max.words=30, random.order=FALSE, rot.per=0, scale = c(1.5, .2),
-                           colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$color, ordered.colors = T)", sep = "")
-  
-  a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("detailed_tab v2", i, sep = "")))               # start r chunk
-  a3 <- knitr::knit_expand(text = sprintf("\n %s",s4)) 
-  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-  
-  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
-  
-})
+# Word Clouds (Tissue)
+# ===================================== 
+# 
+# Row {.tabset}
+# -------------------------------------
+# u.cl <- unique(as.numeric(as.character((cluster.membership))))
+# u.cl <- u.cl[order(u.cl)]
+# u.cl <- paste("c", u.cl, sep = "")
+# 
+# out_word <- lapply(seq_along(u.cl), function(i) {
+#   
+#   table.name <- u.cl[i]
+#   
+#   s4 <-   paste("wordcloud::wordcloud(words = vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$gen, 
+#                            freq =  round((vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$composite)*50), min.freq = 0,
+#                            max.words=30, random.order=FALSE, rot.per=0, scale = c(1.5, .2),
+#                            colors= vst.merge.cloud[vst.merge.cloud$cluster %in% u.cl[" ,i, "], ]$color, ordered.colors = T)", sep = "")
+#   
+#   a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
+#   a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("detailed_tab v2", i, sep = "")))               # start r chunk
+#   a3 <- knitr::knit_expand(text = sprintf("\n %s",s4)) 
+#   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+#   
+#   paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+#   
+# })
+
+# `r paste(knitr::knit(text = paste(out_word, collapse = '\n')))`
 
 ```
 
-`r paste(knitr::knit(text = paste(out_word, collapse = '\n')))`
+
 
 
 
@@ -1668,7 +1834,25 @@ try({
 
 ```
 
+### Fraction of differential genes in each geneset (rescaled)
 
+```{r fdgg2, fig.width = 10, fig.height=8}
+
+plt.hm.genedeg.scale <- ggplotify::as.ggplot(  pheatmap::pheatmap(df.fct.deg.hm.scaled, 
+                                                            main = "Fraction of DEGs present in Genesets\n x: cluster; y: annotation; z: DEG fraction (scaled)",
+                                                            color = viridis::inferno(10)))
+
+```
+
+```{r pdf fdgg2}
+
+try({
+  savePDF(file.name = paste0(output.path, "PDF/", "M05_fraction_DEG_in_genesets_rescaled.pdf"), 
+          plot.handle = plt.hm.genedeg.scale, 
+          fig.width = 10, fig.height = 8, save.flag = save.pdf)
+}, silent = T)
+
+```
 
 ### Expression Table
 
