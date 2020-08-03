@@ -13,21 +13,16 @@ editor_options:
 ```{r setup, include=FALSE}
 
 # clear global enviroment
-rm(list = ls())
+rm(list = setdiff(ls(), c("data.path", "user")))
 
 # initiate timer
 start.time <- proc.time()
 
 # load packages
-library(scMiko)
-modulePackages(module.number = 1)
-library(biomaRt)
-library(AnnotationDbi)
-library(org.Mm.eg.db)
-library(org.Hs.eg.db)
-library(zoo)
-library(caTools)
-library(cluster)
+packages2load <- c("scMiko", "Seurat",  "biomaRt", "AnnotationDbi", "dplyr", 
+                   "org.Mm.eg.db", "org.Hs.eg.db", "zoo", "caTools", "cluster", "ggplot2", "infercnv")
+# load packages
+invisible(lapply(packages2load, library, character.only = TRUE))
 
 ```
 
@@ -39,7 +34,8 @@ library(cluster)
 dir.preprocessed <- "Preprocessed_Datasets/"
 
 # Query input
-input.file <- "Module1_M16_M27_UHN_070620.Rdata"
+# input.file <- "Module1_M16_M27_UHN_070620.Rdata"
+input.file <- "Module1_Neftel_ss2_GBM_160120.Rdata"
 
 # cluster resolution
 cluster.resolution <- 1
@@ -58,23 +54,44 @@ which.species <- "Hs"
 
 ```{r load data, message=FALSE, warning=FALSE}
 
+if (!exists("data.path") & !exists("user")) {
+  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+}
+
 # load query dataset
 warning("Importing dataset...")
-load(paste(dir.preprocessed, input.file, sep = ""))
-so <- prepSeurat(so)
-so.query <- so; so.input <- so.query; rm(so)
+if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
+load(paste(data.path, dir.preprocessed, input.file, sep = ""));
+
+so.query <- prepSeurat(so)
+rm(so)
 
 current.assay <- DefaultAssay(so.query)
 
-# subsample (for dev purposes)
-n.subset <- round(subsample_factor *ncol(so.input))
-cell.ind <- sample(x = seq(1, ncol(so.input)), size = n.subset, replace = FALSE, prob = NULL)
-so.query <- SubsetData(so.query , cells = cell.ind)
-
-rm(so.input)
-
 ```
 
+```{r data subsetting and clustering}
+
+# check species
+if (which.species != unique(so.query@meta.data[["Organism"]])) stop("Specified input species does not match with input data")
+
+# cluster data
+warning("Computing clusters...")
+so.query <- setResolution(so.query, cluster.resolution)
+
+# subsample 
+stopifnot(exists("subsample_factor"))
+if (subsample_factor < 1){
+  so.query <- downsampleSeurat(so.query, subsample.factor = subsample_factor)
+}
+
+# subset data
+if (exists("subset.df")){
+  so.query <- subsetSeurat(so.query, subset.df)
+}
+
+
+```
 
 ```{r analysis log}
 
@@ -124,11 +141,6 @@ if (gene.rep == "ensembl"){
 ```{r get clusters, fig.width=10, fig.height=4}
 
 # compute clusters
-warning("Computing clusters...")
-so.query <- FindClusters(object = so.query, 
-                         resolution = cluster.resolution, 
-                         verbose = 0, algorithm = 1, modularity.fxn = 1)
-
 
 # prep query parameters with assertions
 cur.cluster.field <- paste(DefaultAssay(so.query), "_snn_res.", cluster.resolution, sep = "")
@@ -143,7 +155,7 @@ plt.umap_by_cluster <- cluster.UMAP(
   plot.name = "UMAP",
   include.labels = T,
   reduction = "umap"
-) + labs(subtitle = paste0("Clusters (resolution = ", cluster.resolution ,")"))
+) + labs(subtitle = paste0("Clusters Resolution = ", cluster.resolution ,")"))
 
 
 plt.umap_by_barcode <- cluster.UMAP(
@@ -170,74 +182,78 @@ if (print.inline){
 
 
 
-```{r}
+```{r visualize non-malignant based off heatmap, include = FALSE}
 
-# # get symbol to entrez conversion list
-# all_enz_names <- as.list(org.Hs.egALIAS2EG)
-# 
-# # get chromsomal location for each gene
-# chromosome_locations <- org.Hs.egCHRLOC
-# 
-# # Get the entrez gene identifiers that are mapped to chromosome locations
-# mapped_genes <- mappedkeys(chromosome_locations)
-# 
-# # convert to list
-# chromosome_location_entrez.list <- as.list(chromosome_locations[mapped_genes])
-# 
-# 
-# # symbol to entrez mapping
-# 
-# # my.symbol <- as.vector(as.vector(gNames.list))
-# 
-# my.symbol <- names(all_enz_names)
-# # my.entrez <- unlist(all_enz_names)
-# my.entrez <- lapply(all_enz_names, function(x) unlist(x)[1])
-# 
-# 
-# # my.entrez <- sym2entrez(my.symbol, my.species = which.species )
-# my.entrez <- my.entrez[complete.cases(my.entrez), ]
-# 
-# e2g <- my.entrez$SYMBOL
-# names(e2g) <- my.entrez$ENTREZID
-# 
-# chromosome_location_symbols.list <- chromosome_location_entrez.list
-# names(chromosome_location_symbols.list) <- e2g[names(chromosome_location_symbols.list)]
+agg.mat <- aggGroupExpression(so.query)
+
+try({var1 <-  so.query@assays[["RNA"]]@var.features}, silent = T)
+try({var2 <- so.query@assays[["SCT"]]@var.features}, silent = T)
+try({var3 <- so.query@assays[["integrated"]]@var.features}, silent = T)
+
+if (exists("var1") && length(var1) > 0) var.features <- var1
+if (exists("var2") && length(var2) > 0) var.features <- var2
+if (exists("var3") && length(var3) > 0) var.features <- var3
+
+if (exists("var.features")){
+  agg.mat <- agg.mat[agg.mat$genes %in% var.features, ]
+  agg.mat <- agg.mat[!duplicated(agg.mat$genes), ]
+  rownames(agg.mat) <- agg.mat$genes
+  agg.mat <- agg.mat %>% dplyr::select(-c("genes"))
+  
+  plt.hm <- ggplotify::as.ggplot(pheatmap::pheatmap(agg.mat, show_rownames = F,
+                                                    main = "Expression Matrix\nx=clusters, y=genes, z=expression", scale = "row"))
+  
+} else {
+  plt.hm <- NULL
+}
+
+if (print.inline){
+  print(plt.hm)
+}
+
 
 ```
 
-
 ```{r}
-library(infercnv)
 
-e.mat <- as.data.frame(so.query@assays[["SCT"]]@data)
-# e.mat <- e.mat[1:15]
+#e.mat <- as.data.frame(so.query@assays[[current.assay]]@data)
+e.mat <- as.data.frame(so.query@assays[["RNA"]]@counts)
 
-ic.data <- infercnv::data
-ic.genes <- infercnv::genes
-ic.annot <- infercnv::annots
 
 so.data <- e.mat
 so.genes <- infercnv::genes
-so.annot <- data.frame(V2 = rep("tumor", ncol(e.mat)))
+
+
+# Neftel 2019 preprocessing
+a <- names(so.query@active.ident)
+a <- stringr::str_extract(a, "[a-zA-Z]*[0-9]*")
+so.annot <- data.frame(V2 = a)
 rownames(so.annot) <- colnames(e.mat)
 
-infercnv_obj <- infercnv::CreateInfercnvObject(raw_counts_matrix=so.data, 
-                                               gene_order_file=so.genes,
-                                               annotations_file=so.annot,
-                                               ref_group_names=NULL)
 
+# create InferCNV Object
+infercnv_obj <- CreateInfercnvObject(
+  raw_counts_matrix = as.matrix(e.mat),
+  annotations_file = so.annot,
+  gene_order_file = so.genes,
+  ref_group_names = NULL
+)
 
-# perform infercnv operations to reveal cnv signal
+# filter genes
 infercnv_obj <- infercnv::run(infercnv_obj,
-                             cutoff=0.1,  # use 1 for smart-seq, 0.1 for 10x-genomics
+                             cutoff=1,  # use 1 for smart-seq, 0.1 for 10x-genomics
                              cluster_by_groups=T,   # cluster
                              denoise=T,
-                             HMM=T,
-                             out_dir="output_dir_v3_SCTdata"
+                             HMM=F,
+                             out_dir = "test3"
                              )
- # out_dir="output_dir",  # dir is auto-created for storing outputs
+
+# so.query <- add_to_seurat(so.query, infercnv_output_path = "test3")
 
 ```
+
+
+
 
 
 ```{r gene symbol interconversion}
@@ -318,30 +334,6 @@ df.ma <- (df.ma - region_avg)/region_std
 
 ```
 
-```{r cnv heatmap}
-
-# subsample_n <- 100
-# 
-# df.ma_sub <- df.ma[ , 1:subsample_n]
-# 
-# 
-# df.ma_long <- df.ma_sub %>%
-#   rownames_to_column() %>%
-#   gather(cellID, value, -rowname)
-
-# plt.chr_heatmap <- ggplot(df.ma_long, aes(x = rowname, y = cellID, fill = value)) +
-#   geom_tile() +   scale_colour_gradient2()
-# 
-# print(plt.chr_heatmap)
-
-# 
-# 
-# df.ma_asmat_trans <- t(as.matrix(df.ma_sub))
-# 
-# 
-# gplots::heatmap.2(df.ma_asmat_trans, trace = "none")
-
-```
 
 
 
