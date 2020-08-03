@@ -53,11 +53,11 @@ which.input <- list(
   #   4: top N cluster markers
   #   5: M09_type3_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
-  query_input_format = 2,
+  query_input_format = 1,
   do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
-  which.gene.set = c("immune.TF") # character
+  which.gene.set = c("sex.specific") # character
 )
 #c("P2RY2", "P2RX7", "P2RY1", "P2RY6")
 
@@ -74,7 +74,7 @@ which.results <- data.frame(
   do.hex = T               # specify whether to generate hex UMAPs (schex package)
 )
 
-cluster.resolution <- 0.15
+cluster.resolution <- 0.45
 
 # specify subgroup provided in M00_subgroups.csv; subgroup <- "no.subgroup" to include all data
 subgroup <- "no.subset"
@@ -84,18 +84,22 @@ default.species <- "Mm" # if multple species are detected in input, only then de
 dir.preprocessed <- "Preprocessed_Datasets/"
 # query.file <- "M01_NM2_R1_test_300720.Rdata"
 # query.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+query.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 
 # print figures inline
 print.inline <- F
 
 # n workers
 n.workers <- list(
-  gsea = 15
+  gsea = 5
 )
 
 
 # save PDF
 save.pdf <- T
+
+# downsample factor
+subsample_factor <- 0.1
 
 
 ```
@@ -224,8 +228,17 @@ rm(so)
 # get current assay
 current.assay <- DefaultAssay(so.query)
 
-# get cluster
+# cluster data
 so.query <- setResolution(so.query, cluster.resolution)
+
+# subsample 
+stopifnot(exists("subsample_factor"))
+if (subsample_factor < 1){
+  so.query <- downsampleSeurat(so.query, subsample.factor = subsample_factor)
+}
+
+# subset seurat object
+so.query <- subsetSeurat(so.query, subset.df)
 
 ```
 
@@ -273,14 +286,6 @@ if (exists("output.markers")) markers_of_interest <- output.markers[[1]]
 
 
 ```
-
-```{r seurat data subsetting , warning = FALSE}
-
-# subset seurat object
-so.query <- subsetSeurat(so.query, subset.df)
-
-```
-
 
 
 ```{r prior log history, warning = FALSE}
@@ -341,6 +346,7 @@ df.log <- addLogEntry("Top N UMAPs", which.results$umap.top.n, df.log, "umap.top
 df.log <- addLogEntry("Top N GSEA", which.results$gsea.top.n, df.log, "gsea.top.n")
 df.log <- addLogEntry("Top N correlations", which.results$corr.top.n, df.log, "corr.top.n")
 df.log <- addLogEntry("Annotation DB", which.results$annotation.db, df.log, "annotation.db")
+df.log <- addLogEntry("subsample_factor", subsample_factor, df.log, "subsample_factor")
 if (which.results$annotation.db == "GO"){
   df.log <- addLogEntry("GO ontology", which.results$ontology, df.log, "ontology")
 }
@@ -371,6 +377,22 @@ if (gene.rep == "ensembl"){
 
 ```
 
+```{r get clusters and set assay, warning = FALSE}
+
+if (DefaultAssay(so.query) == "integrated"){
+  DefaultAssay(so.query) <- "RNA"
+  so.query <-NormalizeData(so.query, verbose = FALSE)
+  so.query <- ScaleData(so.query, verbose = FALSE)
+  so.query <- FindVariableFeatures(so.query, selection.method = "vst", nfeatures = 3000)
+  
+  so.query@assays[["SCT"]] <- NULL
+  invisible(gc())
+} 
+
+current.assay =  DefaultAssay(so.query)
+
+```
+
 ```{r keep available markers, warning = FALSE}
 
 if (exists("markers_of_interest")){
@@ -388,19 +410,7 @@ if (exists("markers_of_interest")){
 
 ```
 
-```{r get clusters and set assay, warning = FALSE}
 
-if (DefaultAssay(so.query) == "integrated"){
-  # DefaultAssay(so.query) <- "RNA"
-  # so.query <-NormalizeData(so.query, verbose = FALSE)
-  # so.query <- ScaleData(so.query, verbose = FALSE)
-  # so.query <- FindVariableFeatures(so.query, selection.method = "vst", nfeatures = 3000)
-  DefaultAssay(so.query) <- "SCT"
-} 
-
-current.assay =  DefaultAssay(so.query)
-
-```
 
 ```{r TYPE3 - prepare query gene list, warning = FALSE}
 
@@ -577,6 +587,12 @@ if (which.results$do.hex){
   
   n.cells <- ncol(so.query)
   cells.per.bin <- 30
+  
+  if (round(n.cells/cells.per.bin) > 100){
+    nhexbins <- 100
+  } else {
+    round(n.cells/cells.per.bin)
+  }
   so.query <- schex::make_hexbin(so.query, nbins = round(n.cells/cells.per.bin), 
                                  dimension_reduction = "UMAP")
 }
@@ -871,7 +887,7 @@ for (i in 1:length(available_markers)){
   plt.sgExp.all[[available_markers[i]]] <- plt.sgExp
   
   if (print.inline){
-    plt.sgExp.all[[available_markers[i]]]
+    print(plt.sgExp.all[[available_markers[i]]])
   }
 }
 ```
@@ -903,20 +919,20 @@ use.var <- T
 n.var <- 3000 # specify number of variable genes
 if (use.var){
   # scale down number of variable features
-  df.meta <- so.query@assays[["SCT"]]@meta.features
+        df.meta <- so.query@assays[[current.assay]]@meta.features
   df.meta$genes <- rownames(df.meta)
-  df.meta <- df.meta[order(-df.meta$sct.residual_variance), ]
-  top.var <- df.meta$genes[1:n.var]
-  so.query@assays[["SCT"]]@var.features <- top.var
   
-  # if more than 3000 variable features are available, recompute and only take top n.var
-  if (length(so.query@assays[[DefaultAssay(so.query)]]@var.features) > n.var){
-    so.query.2 <- FindVariableFeatures( so.query, selection.method = "vst", DefaultAssay(so.query), nfeatures = n.var)
-  } else {
-    so.query.2 <- so.query
+  if (current.assay == "SCT"){
+    df.meta <- df.meta[order(-df.meta$sct.residual_variance), ]
+    top.var <- df.meta$genes[1:n.var]
+    so.query@assays[[current.assay]]@var.features <- top.var
+  } else if (current.assay == "RNA"){
+    df.meta <- df.meta[order(-df.meta$vst.variance.standardized), ]
+    top.var <- df.meta$genes[1:n.var]
+    so.query@assays[[current.assay]]@var.features <- top.var
   }
-  
-  exp.mat <- getExpressionMatrix(so.query.2, only.variable = use.var, which.data = which.data)
+
+  exp.mat <- getExpressionMatrix(so.query, only.variable = use.var, which.data = which.data)
 } else {
   exp.mat <- exp.mat.complete
 }
