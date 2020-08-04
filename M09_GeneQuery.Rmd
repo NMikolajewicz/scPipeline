@@ -99,7 +99,7 @@ n.workers <- list(
 save.pdf <- T
 
 # downsample factor
-subsample_factor <- 0.1
+subsample_factor <- 1
 
 
 ```
@@ -297,7 +297,12 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 
 
 ```{r prep seurat  gene list, warning = FALSE}
-gNames.list <- prepGeneList(so.query, objects())
+
+try({so.query <- UpdateSeuratObject(so.query)}, silent = T)
+gNames.list <- tryCatch({gNames.list <- prepGeneList( so.query, objects())},
+                        error = function(e){
+                          return(gNames.list)
+                        })
 ```
 
 ```{r define grouping var, warning = FALSE}
