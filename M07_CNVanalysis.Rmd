@@ -19,7 +19,7 @@ rm(list = setdiff(ls(), c("data.path", "user")))
 start.time <- proc.time()
 
 # load packages
-packages2load <- c("scMiko", "Seurat",  "biomaRt", "AnnotationDbi", "dplyr", 
+packages2load <- c("scMiko", "Seurat",  "biomaRt", "AnnotationDbi", "dplyr", "CONICSmat",
                    "org.Mm.eg.db", "org.Hs.eg.db", "zoo", "caTools", "cluster", "ggplot2", "infercnv")
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE))
@@ -34,17 +34,21 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 dir.preprocessed <- "Preprocessed_Datasets/"
 
 # Query input
-# input.file <- "Module1_M16_M27_UHN_070620.Rdata"
-input.file <- "Module1_Neftel_ss2_GBM_160120.Rdata"
+input.file <- "Module1_M16_M27_UHN_070620.Rdata"
+# input.file <- "Module1_Neftel_ss2_GBM_160120.Rdata"
 
 # cluster resolution
-cluster.resolution <- 1
+cluster.resolution <- 0.15
 
 # print inline
 print.inline <- F
 
 # Data subsampling
 subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+
+
+# subset.df <- data.frame(field = "Barcode", subgroups = c("ctrl.0231", "TRA.0231", "TR.0231"))
+subset.df <- data.frame(field = "Barcode", subgroups = c("ctrl.0238", "TR.0238"))
 
 # species
 which.species <- "Hs"
@@ -70,6 +74,8 @@ current.assay <- DefaultAssay(so.query)
 
 ```
 
+
+
 ```{r data subsetting and clustering}
 
 # check species
@@ -77,7 +83,7 @@ if (which.species != unique(so.query@meta.data[["Organism"]])) stop("Specified i
 
 # cluster data
 warning("Computing clusters...")
-so.query <- setResolution(so.query, cluster.resolution)
+so.query <- setResolution(so = so.query, cluster.resolution)
 
 # subsample 
 stopifnot(exists("subsample_factor"))
@@ -113,10 +119,14 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 ```
 
 
-```{r prep gene list}
+```{r prep gene list, warning = FALSE}
 
 # prep gene list
-gNames.list <- prepGeneList( so.query, objects())
+try({so.query <- UpdateSeuratObject(so.query)}, silent = T)
+gNames.list <- tryCatch({gNames.list <- prepGeneList( so.query, objects())},
+                        error = function(e){
+                          return(gNames.list)
+                        })
 
 # ensure gene list is available
 stopifnot(exists("gNames.list"))
@@ -155,7 +165,7 @@ plt.umap_by_cluster <- cluster.UMAP(
   plot.name = "UMAP",
   include.labels = T,
   reduction = "umap"
-) + labs(subtitle = paste0("Clusters Resolution = ", cluster.resolution ,")"))
+) + labs(subtitle = paste0("Clusters Resolution = ", cluster.resolution))
 
 
 plt.umap_by_barcode <- cluster.UMAP(
@@ -178,6 +188,125 @@ if (print.inline){
 
 ```
 
+```{r CONICmat}
+
+do.CONICmat <- T
+
+if (do.CONICmat){
+
+#e.mat <- log1p(as.data.frame(so.query@assays[["RNA"]]@data))
+e.mat <- CONICSmat::normMat(as.matrix(Seurat::GetAssayData(so.query, assay = DefaultAssay(so.query), slot = "counts")))
+# e.mat <-so.query@assays[["SCT"]]@scale.data
+
+# Neftel 2019 preprocessing (should be barcodes)
+# a <- names(so.query@active.ident)
+# a <- stringr::str_extract(a, "[a-zA-Z]*[0-9]*")
+# so.annot <- data.frame(V2 = a)
+# rownames(so.annot) <- colnames(e.mat)
+
+# get barcodes
+so.annot <- so.query@meta.data[["Barcode"]]
+
+# get regions
+regions=read.table("M07_chromosome_arm_positions_grch38.txt",sep="\t",row.names = 1,header = T)
+
+# get gene positions
+gene_pos <- getGenePositions(rownames(e.mat))
+
+# filter matrix
+e.mat <- filterMatrix(e.mat,gene_pos[,"hgnc_symbol"],minCells=5)
+
+# norm factors
+normFactor <- calcNormFactors(e.mat)
+
+#  specify output names
+output.name <- "BT799v2"
+
+# initial run
+conic.plot <- plotAll(e.mat,normFactor,regions,gene_pos,output.name)
+
+# visualize clusters
+conic.hm  <- plotHistogram(conic.plot,e.mat,clusters=2,zscoreThreshold=2,so.annot)
+
+# identify candidates
+lrbic <- read.table(paste0(output.name, "_BIC_LR.txt"), sep = "\t", header = T, row.names = 1, check.names = F)
+
+# default settings = bic dif 200, pval 0.01
+candRegions <- rownames(lrbic)[which(lrbic[,"BIC difference"]>200 & lrbic[,"LRT adj. p-val"]<0.01)]
+
+# refined run
+conic.hm2  <- plotHistogram(conic.plot[,candRegions],e.mat,clusters=2,zscoreThreshold=4,so.annot)
+
+normal <- which(conic.hm2 == 2)
+tumor <- which(conic.hm2 == 1)
+
+redu=plotAll(e.mat,normFactor,regions[candRegions,],gene_pos,output.name,normal=normal,tumor=tumor)
+
+
+plotAllChromosomes (mat = e.mat,normal = normal,tumor = tumor,windowsize = 101,gene_pos = gene_pos,fname = output.name,patients = so.annot,breakpoints = regions)
+
+# hist(lrbic$`BIC difference`)
+plotChromosomeHeatmap(e.mat,normal = normal, plotcells = tumor, gene_pos = gene_pos, windowsize = 121, chr=T, expThresh=1, thresh = 1)
+}
+
+# plotChromosomeHeatmap(e.mat,normal = set1, plotcells =set2, gene_pos = gene_pos, windowsize = 121, chr=T, expThresh=0.2, thresh = 1)
+
+```
+
+```{r}
+hist(log(e.mat[,2]+1))
+```
+
+
+
+```{r inferCV}
+
+
+do.infercnv <- T
+
+if (do.infercnv){
+
+
+#e.mat <- as.data.frame(so.query@assays[[current.assay]]@data)
+e.mat <- as.data.frame(so.query@assays[[DefaultAssay(so.query)]]@counts)
+
+
+so.data <- e.mat
+so.genes <- infercnv::genes
+
+# Neftel 2019 preprocessing
+# a <- names(so.query@active.ident)
+# a <- stringr::str_extract(a, "[a-zA-Z]*[0-9]*")
+# so.annot <- data.frame(V2 = a)
+# rownames(so.annot) <- colnames(e.mat)
+
+
+# rownames(so.annot) <- colnames(e.mat)
+
+# get barcodes
+so.annot <-  data.frame(V2 = so.query@meta.data[["Barcode"]])
+ rownames(so.annot) <- colnames(e.mat)
+
+# create InferCNV Object
+infercnv_obj <- CreateInfercnvObject(
+  raw_counts_matrix = as.matrix(e.mat),
+  annotations_file = so.annot,
+  gene_order_file = so.genes,
+  ref_group_names = NULL
+)
+
+# filter genes
+infercnv_obj <- infercnv::run(infercnv_obj,
+                             cutoff=1,  # use 1 for smart-seq, 0.1 for 10x-genomics
+                             cluster_by_groups=F,   # cluster
+                             denoise=T,
+                             HMM=F,
+                             out_dir = output.name
+                             )
+
+}
+
+```
 
 
 
@@ -213,47 +342,6 @@ if (print.inline){
 
 
 ```
-
-```{r}
-
-#e.mat <- as.data.frame(so.query@assays[[current.assay]]@data)
-e.mat <- as.data.frame(so.query@assays[["RNA"]]@counts)
-
-
-so.data <- e.mat
-so.genes <- infercnv::genes
-
-
-# Neftel 2019 preprocessing
-a <- names(so.query@active.ident)
-a <- stringr::str_extract(a, "[a-zA-Z]*[0-9]*")
-so.annot <- data.frame(V2 = a)
-rownames(so.annot) <- colnames(e.mat)
-
-
-# create InferCNV Object
-infercnv_obj <- CreateInfercnvObject(
-  raw_counts_matrix = as.matrix(e.mat),
-  annotations_file = so.annot,
-  gene_order_file = so.genes,
-  ref_group_names = NULL
-)
-
-# filter genes
-infercnv_obj <- infercnv::run(infercnv_obj,
-                             cutoff=1,  # use 1 for smart-seq, 0.1 for 10x-genomics
-                             cluster_by_groups=T,   # cluster
-                             denoise=T,
-                             HMM=F,
-                             out_dir = "test3"
-                             )
-
-# so.query <- add_to_seurat(so.query, infercnv_output_path = "test3")
-
-```
-
-
-
 
 
 ```{r gene symbol interconversion}
