@@ -26,13 +26,13 @@ file.rt <- "HH9_rt_barcodes_20200625NewFormat168updated.txt"
 file.pcr <- "HH9_pcr_barcodes_20200623_96used.txt"
 
 # specify input directory (set input.dir = "" if files are insame folder as analysis script)
-input.dir <- "Raw_Datasets/pilots/"
+input.dir <- "../Data/Raw_Datasets/pilots/"
 
 # import data
 data <- loadMoffat(import_set = c(file.data, file.pcr, file.rt),
                    subsample_factor = 0.15,
                    input_organisms = "Mm",
-                   organism.include = "Mm",
+                   organism_include = "Mm",
                    dir = input.dir) # Hs
 
 # parse out seurat object and list mapping ENSEMBL to SYMBOL
@@ -142,6 +142,123 @@ DimPlot(
 
 
 ```
+
+
+
+
+
+```{r find clusters}
+
+so <- so.filt
+
+# find neighbours
+so <- FindNeighbors(so, dims = 1:30, reduction = "pca")
+
+# low resolution clustering
+so <- FindClusters(so, resolution = 0.1)
+
+DimPlot(
+  object = so,
+  dims = c(1, 2),
+  cells = NULL,
+  cols = NULL,
+  pt.size = NULL,
+  reduction = NULL,
+  group.by = "seurat_clusters",
+)
+
+
+# high resolution clustering
+so <- FindClusters(so, resolution = 1)
+
+DimPlot(
+  object = so,
+  dims = c(1, 2),
+  cells = NULL,
+  cols = NULL,
+  pt.size = NULL,
+  reduction = NULL,
+  group.by = "seurat_clusters",
+)
+
+```
+
+
+
+
+```{r find cluster-specific markers}
+
+
+# get differential genes
+deg <- FindAllMarkers(object  = so)
+head(deg)
+
+# convert ENSEMBL to SYMBOL
+deg$SYMBOL <- gNames.list[deg$gene]
+head(deg)
+
+# deg overlap between clusters
+deg.sig <- deg[deg$p_val_adj < 0.05, ]
+sig.tally <- data.frame(table(deg.sig$SYMBOL))
+hist(sig.tally$Freq)
+
+# Top genes method 1: logFC
+deg.topLFC <- deg.sig %>%
+  group_by(cluster) %>%
+  top_n(1, avg_logFC)
+
+deg.topLFC
+
+# Top genes method 2: differential expression fraction
+deg.sig$pct.dif <- deg.sig$pct.1 - deg.sig$pct.2
+deg.topPD <- deg.sig %>%
+  group_by(cluster) %>%
+  top_n(1, pct.dif)
+
+deg.topPD
+
+
+```
+
+
+```{r visualize top markers, fig.width = 10, fig.height = 7}
+
+# initiate empty list
+plot.list <- list()
+
+# for each gene...
+for (i in 1:nrow(deg.topPD)){
+  
+  # get current gene name
+  gene.name <- deg.topPD$SYMBOL[i]
+  
+  # generate ggplot and store in list
+  plot.list[[gene.name]] <- FeaturePlot(object = so, features = deg.topPD$gene[i]) + 
+    labs(title = gene.name, subtitle = paste0("Cluster ", deg.topPD$cluster[i]))
+}
+
+# plot method 1
+cowplot::plot_grid(plotlist = plot.list, ncol = 3)
+
+# plot method 2
+ggpubr::ggarrange(plotlist = plot.list, ncol = 3, nrow = 2, common.legend = T)
+
+
+```
+
+
+```{r identify gene modules}
+
+# independent component analysis
+so <- RunICA(so)
+
+
+# matrix 1: metaGene activity x 
+# matrix 2: metaGene x gene
+
+```
+
+
 
 
 
