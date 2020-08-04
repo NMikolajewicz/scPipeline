@@ -50,29 +50,29 @@ dir.reference <- "Reference_Datasets/"
 # Query input
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "Module1_p7_mesoderm_110620.Rdata"
-input.file <- "Module1_Neftel_ss2_GBM_160120.Rdata"
-# input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+# input.file <- "Module1_Neftel_ss2_GBM_160120.Rdata"
+input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 
 # specify reference genesets
 which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", 
                       "cancerSEA", "immune.signatures", "immuneSubtype", "GBM")
 
 # specify cluster resolution
-cluster.resolution <- 0.15 # OPTIONAL; range 0 to inf (default = 1)
+cluster.resolution <- 0.45 # OPTIONAL; range 0 to inf (default = 1)
 
-so.input.species <- "Hs" # eREQUIRED; Hs, Mm
+so.input.species <- "Mm" # eREQUIRED; Hs, Mm
 
 
 # Data subsampling
-subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
-min.geneset.size <- 5 # recommended: 2 (for TF classifcation, set to 1)
+subsample_factor <- 0.05 # OPTIONAL; range 0 to 1 (default = 1)
+min.geneset.size <- 3 # recommended: 2 (for TF classification, set to 1)
 
 # print inline
 print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 
 # specify number of workers for parallelization
 n.workers <- list(
-  scoring = 4,
+  scoring = 6,
   deg = 1
 )
 
@@ -132,7 +132,14 @@ current.assay <- DefaultAssay(so.query)
 ```{r data subsetting and clustering}
 
 # check species
-if (so.input.species != unique(so.query@meta.data[["Organism"]])) stop("Specified input species does not match with input data")
+if (so.input.species != unique(so.query@meta.data[["Organism"]])) {
+  if (length(unique(so.query@meta.data[["Organism"]])) == 1) {
+     so.input.species <- unique(so.query@meta.data[["Organism"]])
+     warning("Incorrect input species was provided, and was updated to reflect what was available in seurat object.\n")
+  } else if (length(unique(so.query@meta.data[["Organism"]])) > 1)  {
+    warning("Input species could not be verfied and is being used as-is.\n")
+  }
+}
 
 # cluster data
 so.query <- setResolution(so.query, cluster.resolution)
@@ -532,20 +539,30 @@ for (i in 1:length(u.clust)){
   
 }
 
+# assign col and row names
 colnames(e.mat) <- colnames(logfc.mat) <-  colnames(f.mat) <-  colnames(pct.mat) <- u.clust
 rownames(e.mat) <- rownames(logfc.mat) <-  rownames(f.mat) <-  rownames(pct.mat) <- rownames(ef.mat)
 
+# cast to data.frame
 df.lfc.wide <- data.frame(gene = rownames(ef.mat), data.frame(logfc.mat)); colnames(df.lfc.wide) <- c("gene", u.clust)
 df.pd.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(pct.mat)); colnames(df.pd.wide) <- c("gene", u.clust)
 df.e.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(e.mat)); colnames(df.e.wide) <- c("gene", u.clust)
 df.f.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(f.mat)); colnames(df.f.wide) <- c("gene", u.clust)
 
+# wide to long
 df.lfc.long <- pivot_longer(df.lfc.wide, colnames(df.lfc.wide)[2:ncol(df.lfc.wide)]); 
 df.pd.long <- pivot_longer(df.pd.wide, colnames(df.pd.wide)[2:ncol(df.pd.wide)])
 df.e.long <- pivot_longer(df.e.wide, colnames(df.e.wide)[2:ncol(df.e.wide)])
 df.f.long <- pivot_longer(df.f.wide, colnames(df.f.wide)[2:ncol(df.f.wide)])
 
+# assign col names to long dataframe
 colnames(df.lfc.long) <- colnames(df.pd.long) <- colnames(df.e.long) <- colnames(df.f.long) <- c("gene", "cluster", "value")
+
+# ensure clusters are ordered factors
+df.lfc.long$cluster <- factor(df.lfc.long$cluster, levels = u.clust)
+df.pd.long$cluster <- factor(df.pd.long$cluster, levels = u.clust)
+df.e.long$cluster <- factor(df.e.long$cluster, levels = u.clust)
+df.f.long$cluster <- factor(df.f.long$cluster, levels = u.clust)
 
 ```
 
@@ -575,7 +592,7 @@ doParallel::registerDoParallel(cl)
 
 # iterate through each gene signature list
 score.results <- foreach(i = 1:length(signatures.symbol), .packages = c("scMiko", "Seurat", "dplyr", "purrr", "GSVA"))  %dopar% {
-  # for (i in 1:length(signatures.symbol)){
+#for (i in 1:length(signatures.symbol)){
   
   
   # initiate score data frames
@@ -626,17 +643,17 @@ score.results <- foreach(i = 1:length(signatures.symbol), .packages = c("scMiko"
         lfc.mat.sub <- df.lfc.long[df.lfc.long$gene %in% cur.features, ]
         pct.mat.sub <- df.pd.long[df.pd.long$gene %in% cur.features, ]
         
-        per.exp <- as.vector(per.mat.sub %>% group_by(cluster) %>% summarize(mean.per= mean(value, na.rm = T)))
-        per.score[j,] <- as.vector(per.exp$mean.per)
+        per.exp <- as.data.frame(per.mat.sub %>% group_by(cluster) %>% summarize(mean.exp= mean(value, na.rm = T)))
+        per.score[j,] <- as.vector(per.exp$mean.exp)
         
         # avg expression (observed)
-        av.exp <- as.vector(exp.mat.sub %>% group_by(cluster) %>% summarize(mean.exp= mean(value, na.rm = T)))
+        av.exp <- (exp.mat.sub %>% group_by(cluster) %>% summarize(mean.exp= mean(value, na.rm = T)))
         expr.score[j,] <- as.vector(av.exp$mean.exp)
         
-        pd.exp <- as.vector(pct.mat.sub %>% group_by(cluster) %>% summarize(mean.exp= mean(value, na.rm = T)))
+        pd.exp <- (pct.mat.sub %>% group_by(cluster) %>% summarize(mean.exp= mean(value, na.rm = T)))
         pctdif.score[j,] <- as.vector(pd.exp$mean.exp)
         
-        lfc.exp <- as.vector(lfc.mat.sub %>% group_by(cluster) %>% summarize(mean.exp= mean(value, na.rm = T)))
+        lfc.exp <- (lfc.mat.sub %>% group_by(cluster) %>% summarize(mean.exp= mean(value, na.rm = T)))
         logfc.score[j,] <- as.vector(lfc.exp$mean.exp)
         
       } else {
@@ -857,99 +874,6 @@ df.dist.pd <- wrangleHelper(pd.score.list)
 
 ```
 
-```{r}
-
-
-# vstScoreThreshold.orig  <- function(x, y, label, set, percentile.threshold = 0.95, spline.df = 3, quantile.norm = T, loess.center = T){
-#   
-#   # purpose: scale and normalize gene set scores 
-#   # step 1: loess-centering
-#   #     - ensures that data is not biased and that no outliers skew score distributions
-#   # step 2: variance-stabilizing transform based on quantile spline regression
-#   #
-#   # output: normalized and scaled geneset scores 
-#   
-#   # prepare data
-#   df <- data.frame(x = x, x.log = log(x), y = y,
-#                    annotation = label, ref.set = set)
-#   df$cluster <- gsub("-", "", stringr::str_extract(df$annotation, "-c[0-9]*")) 
-#   
-#   u.set <- unique(df$ref.set)
-#   
-#   # loess-centering
-#   if (loess.center){
-#     for (i in 1:length(unique(u.set))){
-#       error.loess.mean <- loess(y ~ x.log, df[df$ref.set %in% u.set[i], ])
-#       pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$ref.set %in% u.set[i]]), se = TRUE)[["fit"]]
-#       df$y.centered[df$ref.set %in% u.set[i]] <-  df$y[df$ref.set %in% u.set[i]] - pred
-#     } 
-#   } else {
-#     df$y.centered <- df$y
-#   }
-#   
-#   # quantile-regression based variance stabilization
-#   if (quantile.norm){
-#     
-#     # import splines packages
-#     if (!require(splines)) stop("splines package not found")
-#     
-#     rqfit <- rq(y.centered ~ bs(x, df = spline.df), data = df, tau = c(percentile.threshold))
-#     df$qr95 <- predict(rqfit, data.frame(x = (df$x)))
-#     df$ratio <- df$y.centered/df$qr95
-#     df$residuals <- rqfit[["residuals"]]
-#     df$z.sig  <- (df$ratio - mean(df$ratio )) / sd(df$ratio )
-#     df$p.val <- 2*pnorm(abs(df$z.sig), lower.tail = F)
-#     df$p.adj <- p.adjust( df$p.val, method = "BH")
-#     df$sig <- (df$p.val < 0.05) & (df$z.sig > 0)
-#     
-#     df$color <- "grey"
-#     df$color[df$sig ] <- "tomato"
-#     
-#     plt.vstScore2 <- df %>%
-#       ggplot(aes(x, y.centered)) +
-#       geom_point() +
-#       geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
-#       stat_quantile(formula = y ~ bs(x, df = spline.df), quantiles = c(1-percentile.threshold, percentile.threshold), linetype = "dashed", color = "tomato", size = 1) +
-#       theme_miko(legend = F) + 
-#       ylab("Annotation Score (loess-centered)") + 
-#       xlab("Geneset Size (N)") + 
-#       labs(title = "Variance-Stabilizing Transform", subtitle = paste0("Quant.Regression; B-Spline"))
-#     
-#     plt.vstScore <- df %>%
-#       ggplot(aes(x, z.sig)) + 
-#       geom_point(color =  df$color) + 
-#       geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
-#       geom_hline(yintercept = c(1.96), color = "tomato", linetype = "dashed") + 
-#       theme_miko() + 
-#       labs(title = "Annotation Scores", subtitle = "Var.Stabilized Scores") + 
-#       xlab("Geneset Size (N)") + 
-#       ylab("Z-Score")
-#     
-#   } else {
-#     df$ratio   <- df$y.centered
-#     df$residuals   <- df$y.centered
-#     df$z.sig  <- (df$y.centered - mean(df$y.centered )) / sd(df$y.centered )
-#     
-#     plt.vstScore <- df %>%
-#       ggplot(aes(x, z.sig)) + 
-#       geom_point() + 
-#       geom_hline(yintercept = 0, color = "grey", linetype = "dashed") + 
-#       geom_hline(yintercept =c(1.96), color = "tomato", linetype = "dashed") + 
-#       theme_miko()
-#     
-#     plt.vstScore2 <- NULL
-#   }
-#   
-#   list(
-#     results = df,
-#     plot = plt.vstScore,
-#     plot.trans = plt.vstScore2
-#   )
-#   
-# }
-
-
-```
 
 
 ```{r}
