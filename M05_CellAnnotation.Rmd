@@ -64,7 +64,7 @@ so.input.species <- "Mm" # eREQUIRED; Hs, Mm
 
 
 # Data subsampling
-subsample_factor <- 0.05 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 0.75 # OPTIONAL; range 0 to 1 (default = 1)
 min.geneset.size <- 3 # recommended: 2 (for TF classification, set to 1)
 
 # print inline
