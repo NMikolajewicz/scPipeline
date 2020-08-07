@@ -30,7 +30,7 @@ start.time <- proc.time()
 # load packages
 packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", "gridExtra",
                    "DT", "flexdashboard", "ggpmisc", "ggExtra", "future", "foreach", "doParallel",
-                   "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "ggplot2", "reactome.db", "schex")
+                   "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "ggplot2", "reactome.db", "schex", "RColorBrewer")
 
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE))
@@ -53,13 +53,13 @@ which.input <- list(
   #   4: top N cluster markers
   #   5: M09_type3_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
-  query_input_format = 1,
+  query_input_format = 0,
   do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
-  which.gene.set = c("sex.specific") # character
+  which.gene.set = c("CD68", "GPNMB") # character
 )
-#c("P2RY2", "P2RX7", "P2RY1", "P2RY6")
+
 
 #############################
 
@@ -71,7 +71,7 @@ which.results <- data.frame(
   gsea.threshold = 2 ,     # 1: padj < 0.1; 2: p<0.01 & |NES| > 1; 3: top 3 pathways (sorted by NES)
   annotation.db = "Bader",    # Reactome, GO, Bader
   ontology = c("BP"),         # "BP", "MF", "CC"
-  do.hex = T               # specify whether to generate hex UMAPs (schex package)
+  do.hex = F               # specify whether to generate hex UMAPs (schex package)
 )
 
 cluster.resolution <- 0.45
@@ -83,8 +83,8 @@ default.species <- "Mm" # if multple species are detected in input, only then de
 
 dir.preprocessed <- "Preprocessed_Datasets/"
 # query.file <- "M01_NM2_R1_test_300720.Rdata"
-# query.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 query.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+#query.file <- "Module1_M16_M27_UHN_240620.Rdata"
 
 # print figures inline
 print.inline <- F
@@ -99,7 +99,7 @@ n.workers <- list(
 save.pdf <- T
 
 # downsample factor
-subsample_factor <- 1
+subsample_factor <- 0.5
 
 
 ```
@@ -213,6 +213,8 @@ which.ontology <- which.results$ontology
 if (!exists("data.path") & !exists("user")) {
   stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
 }
+
+if (!exists("query.file")) stop("query.file not specified.")
 
 # import and preprocess data
 warning("Importing data...")
@@ -501,7 +503,10 @@ if (which.input$query_input_format == 3){
 ```{r umap by cluster, warning = FALSE}
 
 # get GGplot handle for cluster umap
-plt.umap_by_cluster <- cluster.UMAP(so.query, group.by = grouping_var, pt.size = T)
+plt.umap_by_cluster <- DimPlot(so.query, reduction = "umap", group.by = "seurat_clusters", label = TRUE)  + 
+  labs(title = "UMAP", subtitle = "Stratified by Clusters") + 
+  xlab("UMAP 1") + ylab("UMAP 2") + theme_miko(legend = T)
+
 if (print.inline) plt.umap_by_cluster
 
 ```
