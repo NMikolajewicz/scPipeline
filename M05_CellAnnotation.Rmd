@@ -52,7 +52,8 @@ dir.reference <- "Reference_Datasets/"
 # input.file <- "Module1_p7_mesoderm_110620.Rdata"
 # input.file <- "Module1_Neftel_ss2_GBM_160120.Rdata"
 # input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
-input.file <- "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata"
+#input.file <- "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata"
+input.file <- "M01_NM2_R1_test_300720.Rdata"
 
 # specify reference genesets
 which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", 
@@ -161,11 +162,11 @@ if (exists("subset.df")){
 
 ```
 
+
 ```{r prep gene list}
 
 # prep gene list
-try({gNames.list <- prepGeneList(so.query, objects())}, silent = T)
-
+gNames.list <- prepGeneList(so.query, objects())
 
 ```
 
@@ -373,6 +374,7 @@ if (length(u_barcodes) > 1) {
 ```{r convert to symbol}
 
 gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+
 
 # so.temp <- so.query
 if (gene.rep == "ensembl"){
@@ -1388,8 +1390,6 @@ if (show.gene.exp){
 
 ```{r prep matrix for expression heatmap, include = FALSE}
 
-agg.mat <- aggGroupExpression(so.query)
-
 try({var1 <-  so.query@assays[["RNA"]]@var.features}, silent = T)
 try({var2 <- so.query@assays[["SCT"]]@var.features}, silent = T)
 try({var3 <- so.query@assays[["integrated"]]@var.features}, silent = T)
@@ -1399,13 +1399,22 @@ if (exists("var2") && length(var2) > 0) var.features <- var2
 if (exists("var3") && length(var3) > 0) var.features <- var3
 
 if (exists("var.features")){
+  # get scaled aggregates
+  agg.mat <- aggGroupExpression(so.query, which.data = "scale")
   agg.mat <- agg.mat[agg.mat$genes %in% var.features, ]
   agg.mat <- agg.mat[!duplicated(agg.mat$genes), ]
   rownames(agg.mat) <- agg.mat$genes
   agg.mat <- agg.mat %>% dplyr::select(-c("genes"))
   
+  # cast as matrix
+  agg.mat <- as.matrix(agg.mat)
+  
+  # windorsize matrix
+  scale.target <- 4
+  agg.mat[(agg.mat > scale.target) | (agg.mat < (-1*scale.target))] <- scale.target
+  
   plt.hm <- ggplotify::as.ggplot(pheatmap::pheatmap(agg.mat, show_rownames = F,
-                                                    main = "Expression Matrix\nx=clusters, y=genes, z=expression", scale = "row"))
+                                                    main = "Expression Matrix\nx=clusters, y=genes, z=expression", scale = "none"))
   
 } else {
   plt.hm <- NULL
