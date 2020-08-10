@@ -2011,11 +2011,12 @@ try({
 
 # combine pdfs into single binder
 if (save.pdf){
-  
-  pdf.list <- list.files (path = paste0(output.path, "PDF/") )
-  pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
-  pdf.list <- pdf.list[validUTF8(pdf.list)]
-  pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+  try({
+    pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+    pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+    pdf.list <- pdf.list[validUTF8(pdf.list)]
+    pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+  }, silent = T)
 }
 
 ```
