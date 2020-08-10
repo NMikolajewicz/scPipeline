@@ -10,10 +10,10 @@ editor_options:
 knit: (function(inputFile, encoding) {
     rmarkdown::render(input = inputFile,
       encoding = encoding,
-      output_file = paste0(
+      output_file = if (exists("user")){paste0(
         xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
-      ),
-      output_dir = paste0(data.path, "/HTML_Reports")
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", format(Sys.Date(), "%d%m%y"), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
     )
   })
 ---
@@ -393,6 +393,7 @@ if (DefaultAssay(so.query) == "integrated"){
   so.query <- FindVariableFeatures(so.query, selection.method = "vst", nfeatures = 3000)
   
   so.query@assays[["SCT"]] <- NULL
+  so.query@assays[["integrated"]] <- NULL
   invisible(gc())
 } 
 

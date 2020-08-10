@@ -10,10 +10,10 @@ editor_options:
 knit: (function(inputFile, encoding) {
     rmarkdown::render(input = inputFile,
       encoding = encoding,
-      output_file = paste0(
+      output_file = if (exists("user")){paste0(
         xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
-      ),
-      output_dir = paste0(data.path, "/HTML_Reports")
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", format(Sys.Date(), "%d%m%y"), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
     )
   })
 ---
@@ -51,7 +51,8 @@ dir.reference <- "Reference_Datasets/"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "Module1_p7_mesoderm_110620.Rdata"
 # input.file <- "Module1_Neftel_ss2_GBM_160120.Rdata"
-input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+# input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+input.file <- "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata"
 
 # specify reference genesets
 which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", 
@@ -64,7 +65,7 @@ so.input.species <- "Mm" # eREQUIRED; Hs, Mm
 
 
 # Data subsampling
-subsample_factor <- 0.75 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 0.2 # OPTIONAL; range 0 to 1 (default = 1)
 min.geneset.size <- 3 # recommended: 2 (for TF classification, set to 1)
 
 # print inline
