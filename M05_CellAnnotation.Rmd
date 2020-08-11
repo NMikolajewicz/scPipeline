@@ -166,7 +166,7 @@ if (exists("subset.df")){
 ```{r prep gene list}
 
 # prep gene list
-gNames.list <- prepGeneList(so.query, objects())
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
 
 ```
 
@@ -512,7 +512,7 @@ rcnames.2d <- function (score.mat, exp.mat, sig){
 ```{r cluster differentials}
 
 # get expression  matrix
-ef.mat <- as.matrix(so.query@assays[[DefaultAssay(so.query)]]@data)
+ef.mat <- so.query@assays[[DefaultAssay(so.query)]]@data
 sc.meta <- so.query@meta.data[["seurat_clusters"]]
 u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
 
