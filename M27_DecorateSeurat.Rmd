@@ -1,11 +1,21 @@
 ---
-title: "scRNAseq: QC and Data Preparation"
+title: "Decorate Seurat"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: fill
 editor_options: 
   chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = if (exists("user")){paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", format(Sys.Date(), "%d%m%y"), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
+    )
+  })
 ---
 
 ```{r Description}
@@ -22,6 +32,8 @@ editor_options:
 # 4) cell cycle scoring
 # 5) NMF
 # 6) GSVA
+# 7) Differential gene expression analysis (DEG)
+# 8) unweighted PCA (for rare cell populations)
 
 # Output: #######################################
 # Seurat object with precomputed intermediate results. 
@@ -33,15 +45,19 @@ editor_options:
 ```{r setup, include=FALSE}
 
 # clear global enviroment
-rm(list = ls())
+rm(list = setdiff(ls(), c("data.path", "user")))
 
 # initiate timer
 start.time <- proc.time()
 
+  library(NNLM)
+  library(foreach)
+
+# list of packages to load
+packages2load <- c('viridis', 'scMiko', 'ggpubr', 'dplyr', 'WGCNA', 'cowplot', 'schex', 'Seurat', 'sctransform', 'plyr', 'tidyr', 'reshape2', 'Matrix', 'RColorBrewer', 'ggplot2', 'gridExtra', 'DT', 'flexdashboard', 'future', 'gplots', 'NNLM')
+
 # load packages
-library(scMiko)
-modulePackages(module.number = 1)
-gc()
+invisible(lapply(packages2load, library, character.only = TRUE))
 
 ```
 
@@ -52,16 +68,17 @@ gc()
 dir.preprocessed <- "Preprocessed_Datasets/"
 
 # Query input
-input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+# input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+input.file <- "M01_NM2_R1_test_300720.Rdata"
 
 # override
 override.input <- F
 
 # output file (required only if override input = F)
-output.file <- "Module1_M16_M27_UHN_240620.Rdata"
+output.file <- "M01_M27_R1_test_110820.Rdata"
 
 # cluster resolution
-cluster.resolution <- 1
+cluster.resolution <- 0.45
 
 # print inline
 print.inline <- F
@@ -69,25 +86,22 @@ print.inline <- F
 # Data subsampling
 subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
-# gmt path for GSVA scoring
-# check current release at: http://download.baderlab.org/EM_Genesets/current_release/
-which.species <- "Hs"
-if (which.species == "Hs"){
-  gmt.path <- "http://download.baderlab.org/EM_Genesets/current_release/Human/symbol/Human_GOBP_AllPathways_no_GO_iea_July_01_2020_symbol.gmt"
-} else if (which.species == "Mm"){
- gmt.path <- "http://download.baderlab.org/EM_Genesets/current_release/Mouse/symbol/Mouse_GOBP_AllPathways_no_GO_iea_July_01_2020_symbol.gmt" 
-}
- 
+# specify species
+which.species <- "Mm"
+
+# save pdf
+save.pdf <- T
 
 # specify decorations
 decoration.list <- list(
+  uPCA = F,
   ICA = T,
   TSNE = T,
   NMF = T,
   rho.matrix = T,
   cell.cycle.scoring = T,
   DEG = T,
-  GSVA = T
+  GSVA = F
 )
 
 ```
@@ -95,11 +109,17 @@ decoration.list <- list(
 
 ```{r load data, message=FALSE, warning=FALSE}
 
+if (!exists("data.path") & !exists("user")) {
+  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+}
+if (!exists("input.file")) stop("input.file is not specified")
+
 # load query dataset
 warning("Importing dataset...")
-load(paste(dir.preprocessed, input.file, sep = ""))
+if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
+load(paste(data.path, dir.preprocessed, input.file, sep = ""))
 so <- prepSeurat(so)
-so.query <- so; so.input <- so.query; rm(so)
+so.input <- so.query <- so; rm(so)
 
 current.assay <- DefaultAssay(so.query)
 
@@ -109,6 +129,7 @@ cell.ind <- sample(x = seq(1, ncol(so.input)), size = n.subset, replace = FALSE,
 so.query <- SubsetData(so.query , cells = cell.ind)
 
 rm(so.input)
+invisible(gc())
 
 ```
 
@@ -137,7 +158,7 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 ```{r prep gene list}
 
 # prep gene list
-gNames.list <- prepGeneList( so.query, objects())
+if (!exists("gNames.list")) gNames.list <- prepGeneList( so.query, objects())
 
 # ensure gene list is available
 stopifnot(exists("gNames.list"))
@@ -159,14 +180,63 @@ if (gene.rep == "ensembl"){
 
 
 
+```{r unweighted PCA}
+
+# overrides original pca, clustering and umap; This is a destructive process. 
+if (decoration.list$uPCA){
+  
+  if (input.file == output.file) stop("Ensure that output file and input file are different so that original input is not overwritten with recomputed PCA and UMAP reductions.")
+
+  pca.var.threshold <- 0.9
+  pca.prop <- propVarPCA(so.query)
+  target.pc <- max(pca.prop$pc.id[pca.prop$pc.cum_sum<pca.var.threshold])+1
+  
+  # get new pca
+  warning("Computing PCA...\n")
+  so.query <-  RunPCA(
+    so.query,
+    assay = NULL,
+    npcs = 50,
+    rev.pca = FALSE,
+    weight.by.var = F,
+    verbose = F,
+    ndims.print = 1:5,
+    nfeatures.print = 30,
+    reduction.key = "PC_",
+    seed.use = 42,
+    approx = TRUE,
+  )
+  
+  so.query <- FindNeighbors(object = so.query, reduction = "pca", dims = 1:target.pc)
+  
+  warning("Computing clusters...\n")
+  so.query <- FindClusters(object = so.query, resolution = cluster.resolution, verbose = 0, algorithm = 1, modularity.fxn = 1)
+  
+  warning("Computing UMAP...\n")
+  so.query <- RunUMAP(so.query, dims = 1:target.pc)
+  
+  df.log <- addLogEntry("unweighted PCA computed", TRUE, df.log, "")
+  
+} else {
+  df.log <- addLogEntry("unweighted PCA computed", FALSE, df.log, "")
+}
+
+
+```
+
+
 ```{r get clusters}
 
 
 # compute clusters
-warning("Computing clusters...")
-so.query <- FindClusters(object = so.query, 
+
+if (!(decoration.list$uPCA)){
+  warning("Computing clusters...\n")
+  so.query <- FindClusters(object = so.query, 
                          resolution = cluster.resolution, 
                          verbose = 0, algorithm = 1, modularity.fxn = 1)
+}
+
 
 
 # prep query parameters with assertions
@@ -185,9 +255,7 @@ if (print.inline){
 ```
 
 
-
-
-```{r TSNE}
+```{r TSNE, fig.width = 10, fig.height =4}
 
 # tsne #####################
 
@@ -219,14 +287,16 @@ if (decoration.list$TSNE){
   df.log <- addLogEntry("TSNE computed", FALSE, df.log, "")
 }
 
-
-
+# visualize
+if (print.inline & !is.null(plt.tsne.combo)){
+  print(plt.tsne.combo)
+}
 
 
 ```
 
 
-```{r ICA}
+```{r ICA, fig.width = 10, fig.height =4}
 
 # ICA ########################
 
@@ -251,6 +321,12 @@ if (decoration.list$ICA){
   plt.ica.combo <- NULL
   df.log <- addLogEntry("ICA computed", FALSE, df.log, "")
 }
+
+# visualize
+if (print.inline & !is.null(plt.ica.combo)){
+  print(plt.ica.combo)
+}
+
 
 ```
 
@@ -318,15 +394,15 @@ if (decoration.list$cell.cycle.scoring){
   s.genes <- cc.genes$s.genes
   g2m.genes <- cc.genes$g2m.genes
   
-  which.species <- unique(so.query@meta.data[["Organism"]])
+  input.species <- unique(so.query@meta.data[["Organism"]])
   
-  if (length(unique(which.species)) > 1){
+  if (length(unique(input.species)) > 1){
     s.genes <-  toupper(s.genes)
     g2m.genes <-  toupper(g2m.genes)
-  } else if (unique(which.species) == "Mm"){
+  } else if (unique(input.species) == "Mm"){
     s.genes <-  firstup(s.genes)
     g2m.genes <-  firstup(g2m.genes)
-  } else if (unique(which.species) == "Hs"){
+  } else if (unique(input.species) == "Hs"){
     s.genes <-  toupper(s.genes)
     g2m.genes <-  toupper(g2m.genes)
   }
@@ -381,6 +457,12 @@ if (decoration.list$cell.cycle.scoring){
   df.log <- addLogEntry("cell cycle scores computed", FALSE, df.log, "")
 }
 
+# visualize
+if (print.inline & !is.null(plt.cc)){
+  print(plt.cc)
+}
+
+
 ```
 
 ```{r rho matrix}
@@ -400,17 +482,17 @@ if (decoration.list$rho.matrix){
   g2m.genes <- cc.genes$g2m.genes
   
   # ensure proper representation
-  which.species <- unique(so.query@meta.data[["Organism"]])
+  input.species <- unique(so.query@meta.data[["Organism"]])
   
-  if (length(unique(which.species)) > 1){
+  if (length(unique(input.species)) > 1){
     s.genes <-  toupper(s.genes)
     g2m.genes <-  toupper(g2m.genes)
     L1000.panel <-  toupper(L1000.panel)
-  } else if (unique(which.species) == "Mm"){
+  } else if (unique(input.species) == "Mm"){
     s.genes <-  firstup(s.genes)
     g2m.genes <-  firstup(g2m.genes)
     L1000.panel <-  firstup(L1000.panel)
-  } else if (unique(which.species) == "Hs"){
+  } else if (unique(input.species) == "Hs"){
     s.genes <-  toupper(s.genes)
     g2m.genes <-  toupper(g2m.genes)
     L1000.panel <-  toupper(L1000.panel)
@@ -509,7 +591,6 @@ if (decoration.list$rho.matrix){
 
 ```
 
-
 ```{r NMF, include = FALSE}
 # library(NMF)
 
@@ -517,9 +598,7 @@ if (decoration.list$rho.matrix){
 if (decoration.list$NMF){
   
   # https://mran.microsoft.com/snapshot/2017-01-23/web/packages/NNLM/vignettes/Fast-And-Versatile-NMF.html 
-  library(NNLM)
-  library(foreach)
-  
+
   # external panels ######################################
   # get L1000 panel
   uni.panels <- geneSets[["universal_literaturePanel"]]
@@ -531,17 +610,17 @@ if (decoration.list$NMF){
   g2m.genes <- cc.genes$g2m.genes
   
   # ensure proper representation
-  which.species <- unique(so.query@meta.data[["Organism"]])
+  input.species <- unique(so.query@meta.data[["Organism"]])
   
-  if (length(unique(which.species)) > 1){
+  if (length(unique(input.species)) > 1){
     s.genes <-  toupper(s.genes)
     g2m.genes <-  toupper(g2m.genes)
     L1000.panel <-  toupper(L1000.panel)
-  } else if (unique(which.species) == "Mm"){
+  } else if (unique(input.species) == "Mm"){
     s.genes <-  firstup(s.genes)
     g2m.genes <-  firstup(g2m.genes)
     L1000.panel <-  firstup(L1000.panel)
-  } else if (unique(which.species) == "Hs"){
+  } else if (unique(input.species) == "Hs"){
     s.genes <-  toupper(s.genes)
     g2m.genes <-  toupper(g2m.genes)
     L1000.panel <-  toupper(L1000.panel)
@@ -570,45 +649,51 @@ if (decoration.list$NMF){
   exp.mat <- exp.mat.complete[rownames(exp.mat.complete) %in% query.panel, ]
   rm(exp.mat.complete)
   exp.mat.sub <- exp.mat
-  
+  rm(exp.mat); invisible(gc());
   
   # find optimal rank (k) ######################################
-  cols <- c(1:3);
-  B <- exp.mat.sub
-  k <- c(2:15)
+  cols <- c(1:10)
+  k <- seq(2, 30, 1)
   
   warning("Searching for optimal NMF rank...")
-  cl <- parallel::makeCluster(3)
-  doParallel::registerDoParallel(cl)
-  
-  subset.n <- 0.1 * ncol(B) * nrow(B)
-  
-  err.res <- list()
-  
-  err.res <- (foreach(i = 1:length(cols), .packages = "NNLM")) %dopar% {
+  mse.grid <- c()
+  for (i in 1:length(k)){
+    
+    B <- exp.mat.sub[ ,sample(ncol(exp.mat.sub), round(0.2*ncol(exp.mat.sub)))]
+    subset.n <- 0.5 * ncol(B) * nrow(B)
     index2 <- sample(which(!is.na(B)), subset.n);
     nsclc3 <- B;
     nsclc3[index2] <- NA;
     
     mean.z <- c()
-    for (j in 1:length(k)){
-      z <- nnmf(nsclc3, k[j], verbose = T, max.iter = 50, n.threads = 0);
+    for (j in 1:length(cols)){
+      z <- nnmf(as.matrix(nsclc3), k[i], verbose = T, max.iter = 50, n.threads = 0);
       mean.z[j] <- mean((with(z, W%*%H)[index2] - B[index2])^2)
     }
     
-    err.res[[i]] <- mean.z
+    if (length(cols) > 5){
+      mse.grid[i] <- median(mean.z)
+    } else {
+      mse.grid[i] <- mean(mean.z)
+    }
     
+    # only continue running of improved error is observed
+    if (i > 4){
+      if ((mse.grid[i-2] > mse.grid[i-3]) & (mse.grid[i-1] > mse.grid[i-2]) & (mse.grid[i] > mse.grid[i-1])) break
+    }  
     
   }
-  parallel::stopCluster(cl)
+  # clean baggage
+  rm(z); rm(B); rm(nsclc3);
   
-  mse.grid <- apply(matrix(unlist(err.res), ncol = length(cols)), 1, mean)
+  k <- k[1:length(mse.grid)]
   k.opt <- k[which.min(mse.grid)]
-  df.k <- data.frame(k = k, mse = apply(matrix(unlist(err.res), ncol = length(cols)), 1, mean))
+  df.k <- data.frame(k = k, mse = mse.grid)
   
   plt.kopt <- df.k %>%
     ggplot(aes(k, mse)) + 
     geom_point() + 
+    geom_line() + 
     geom_vline(xintercept = k.opt, color = "tomato", linetype = "dashed") + 
     theme_miko() + 
     labs(title = "NMF Rank Optimization", subtitle = paste0("Optimal Rank = ", k.opt)) + 
@@ -616,7 +701,7 @@ if (decoration.list$NMF){
   
   warning("Computing NMF...")
   #  Compute optimal NMF
-  nmf.opt  <- nnmf(exp.mat.sub, k = k.opt, 
+  nmf.opt  <- nnmf(as.matrix(exp.mat.sub), k = k.opt, 
                    max.iter = 500,
                    method = "scd", 
                    loss = "mse", 
@@ -653,6 +738,7 @@ if (decoration.list$NMF){
 ```
 
 
+
 ```{r GSVA}
 
 # GSVA ###########################################################
@@ -662,6 +748,16 @@ if (decoration.list$GSVA){
   # extract expression matrices
   data.mat <- getExpressionMatrix(so.query, which.data = "data")
   scale.mat <- getExpressionMatrix(so.query, which.data = "scale")
+  
+  # gmt path for GSVA scoring
+  # check current release at: http://download.baderlab.org/EM_Genesets/current_release/
+  if (which.species == "Hs"){
+    gmt.path <- paste0("http://download.baderlab.org/EM_Genesets/current_release/Human/symbol/Human_GOBP_AllPathways_no_GO_iea_",  
+                       format(Sys.Date(), "%B_01_%Y"), "_symbol.gmt")
+  } else if (which.species == "Mm"){
+    gmt.path <- paste0("http://download.baderlab.org/EM_Genesets/current_release/Mouse/symbol/Mouse_GOBP_AllPathways_no_GO_iea_", 
+                       format(Sys.Date(), "%B_01_%Y"), "_symbol.gmt")
+  }
   
   # get pathways
   pathwaygmt <- GSEABase::getGmt(gmt.path)
@@ -684,6 +780,8 @@ if (decoration.list$GSVA){
   
 }
 ```
+
+
 
 ```{r save results}
 
@@ -709,12 +807,69 @@ save(so, gNames.list, df.log_Module_1, df.log_Module_27, file = save.filename)
 
 ```
 
+```{r central log}
+
+# update central log
+run.id <- NULL
+if (!exists("user")) user <- "guest"
+
+clog.update.success <- F
+try({
+  run.id <-  updateCentralLog(Module = "M27", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
+  clog.update.success <-  T
+}, silent = F)
+if (is.null(run.id))  {
+  warning("Central log update was unsuccessful :(\n")
+  run.id <- paste("M27_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+}
+
+```
+
+```{r setup output directories}
+
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+
+# create output directories
+dir.create(output.path)
+dir.create(paste0(output.path, "Tables/"))
+if (save.pdf) dir.create(paste0(output.path, "PDF/"))
+
+```
+
+```{r save DEG and GSVA matrices if available}
+
+# Save GSVA matrices
+if (exists("scale.scores")){
+   write.csv(data.frame(scale.scores), file = paste0(output.path, "Tables/", "GSVA_scaled_input.csv"),
+          row.names = T) 
+}
+
+if (exists("data.scores")){
+   write.csv(data.frame(data.scores), file = paste0(output.path, "Tables/", "GSVA_data_input.csv"),
+          row.names = T) 
+}
+
+# Save DEG results
+if (exists("DEG.results")){
+   write.csv(DEG.results, file = paste0(output.path, "Tables/", "DEG.csv"),
+          row.names = T) 
+}
+
+
+```
+
 
 UMAP
 ===================================== 
 ### Uniform Manifold Approximation and Projection
 ```{r}
-print(plt.umap_by_cluster + theme_miko(legend = T))
+
+plt.umap_by_cluster <- plt.umap_by_cluster + theme_miko(legend = T)  
+print(plt.umap_by_cluster)
+savePDF(file.name = paste0(output.path, "PDF/", "M27_UMAP.pdf"), plot.handle = plt.umap_by_cluster, 
+        fig.width = 7, fig.height = 5, save.flag = save.pdf)
 
 ```
 
@@ -722,7 +877,12 @@ TSNE
 ===================================== 
 ### T-Distributed Stochastic Neighbor Embedding
 ```{r tsne plots, fig.width = 10, fig.height = 5}
-plt.tsne.combo
+if (!is.null(plt.tsne.combo)){
+  plt.tsne.combo
+  savePDF(file.name = paste0(output.path, "PDF/", "M27_TSNE.pdf"), plot.handle = plt.tsne.combo, 
+          fig.width = 10, fig.height = 5, save.flag = save.pdf)
+}
+
 ```
 
 
@@ -730,14 +890,30 @@ ICA
 ===================================== 
 ### Independent Component Analysis
 ```{r ica plots, fig.width = 10, fig.height = 5}
-plt.ica.combo
+
+if (!is.null(plt.ica.combo)){
+  plt.ica.combo
+  savePDF(file.name = paste0(output.path, "PDF/", "M27_ICA.pdf"), plot.handle = plt.ica.combo, 
+          fig.width = 10, fig.height = 5, save.flag = save.pdf)
+  write.csv(data.frame(so.query@reductions[["ica"]]@cell.embeddings), file = paste0(output.path, "Tables/", "ICA_cell_embedding.csv"),
+          row.names = T)
+  write.csv(data.frame(so.query@reductions[["ica"]]@feature.loadings), file = paste0(output.path, "Tables/", "ICA_feature_loading.csv"),
+          row.names = T)
+}
+
 ```
 
 
 Cell Cycle
 ===================================== 
 ```{r cell cycle plots, fig.width = 14, fig.height = 4}
-plt.cc
+
+if (!is.null(plt.cc)){
+  print(plt.cc)
+  savePDF(file.name = paste0(output.path, "PDF/", "M27_cell_cycle.pdf"), plot.handle = plt.cc, 
+          fig.width = 14, fig.height = 4, save.flag = save.pdf)
+}
+
 ```
 
 
@@ -749,29 +925,47 @@ Row {.tabset}
 
 ### NMF Rank Optimization
 ```{r nmf plot 1}
-plt.kopt
+
+if (!is.null(plt.kopt)){
+  print(plt.kopt)
+  savePDF(file.name = paste0(output.path, "PDF/", "M27_NMF_rank_optimization.pdf"), plot.handle = plt.kopt, 
+          fig.width = 5, fig.height = 5, save.flag = save.pdf)
+}
+
 ```
 
 
 
 ### W Matrix
 ```{r wmat plot}
-plt.wmat
+
+if (!is.null(plt.wmat)){
+  print(plt.wmat)
+  savePDF(file.name = paste0(output.path, "PDF/", "M27_NMF_W_Matrix.pdf"), plot.handle = plt.wmat, 
+          fig.width = 5, fig.height = 5, save.flag = save.pdf)
+  write.csv(data.frame(nmf.opt[["W"]]), file = paste0(output.path, "Tables/", "NMF_W_Matrix.csv"),
+          row.names = T)
+}
+
 ```
-
-
 
 ### H Matrix
 ```{r hmat plot}
-plt.hmat
+
+if (!is.null(plt.hmat)){
+  print(plt.hmat)
+  savePDF(file.name = paste0(output.path, "PDF/", "M27_NMF_H_Matrix.pdf"), plot.handle = plt.hmat, 
+          fig.width = 5, fig.height = 5, save.flag = save.pdf)
+  write.csv(data.frame(nmf.opt[["H"]]), file = paste0(output.path, "Tables/", "NMF_H_Matrix.csv"),
+          row.names = T)
+}
+
 ```
 
 
 
 ```{r}
 # determine prior log history
-
-
 cur.env <- objects()
 module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 
@@ -799,3 +993,25 @@ out1 <- lapply(seq_along(module.logs), function(i) {
 `r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
 
 
+```{r save analysis log as csv}
+
+try({
+  write.csv(df.log_Module_27, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+            row.names = F)  
+}, silent = T)
+
+```
+
+```{r merge pdfs, include = FALSE}
+
+# combine pdfs into single binder
+if (save.pdf){
+  try({
+    pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+    pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+    pdf.list <- pdf.list[validUTF8(pdf.list)]
+    pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+  }, silent = T)
+}
+
+```
