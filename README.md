@@ -2,6 +2,7 @@
 Single-cell RNA seq analysis pipeline. Developed for Moffat Lab. 
 
 ## Module Status
+last updated: 10.08.20
 
 | Module Number | Name | Status | Input | Output | scPipeline Configured | Priority |
 |:---: |:---: |:---:   |:---:  |:---: | :---: | :---: |
@@ -10,7 +11,7 @@ Single-cell RNA seq analysis pipeline. Developed for Moffat Lab.
 | M03  | Reproducibility | Down | Preprocessed_Datasets | - | No | Low |
 | M05  | Cell Annotation | Up | Preprocessed_Datasets | - | Yes | High |
 | M06  | Bulk vs. Single | Down | Preprocessed_Datasets | - | No | Low |
-| M07  | CNV Analysis | In-Progress | Preprocessed_Datasets | - | No | High |
+| M07  | CNV Analysis | Down | Preprocessed_Datasets | - | No | High |
 | M09  | Gene Query | Up | Preprocessed_Datasets | - | Yes | High |
 | M10  | Group Comparison | Down | Preprocessed_Datasets | - | No | Moderate |
 | M12  | Ligand Receptor Network | Up | Preprocessed_Datasets | - | No | Moderate |
