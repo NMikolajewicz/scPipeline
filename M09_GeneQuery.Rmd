@@ -42,7 +42,7 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 
 
-# specify gene query
+# QUERY SPECIFICATION
 which.input <- list(
   
   # gene list input format options:
@@ -53,17 +53,17 @@ which.input <- list(
   #   4: top N cluster markers
   #   5: M09_type3_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
-  query_input_format = 0,
+  query_input_format = 1,
   do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
-  which.gene.set = c("CD68", "GPNMB") # character
+  which.gene.set = c("sex.specific") # character
 )
 
 
 #############################
 
-# specify which results to show
+# ANALYSIS SPECIFICATION
 which.results <- data.frame(
   umap.top.n =10,       # plot top n markers (by DEG analysis). NA if all. 
   cor.top.n = 70,
@@ -74,6 +74,19 @@ which.results <- data.frame(
   do.hex = F               # specify whether to generate hex UMAPs (schex package)
 )
 
+############################
+
+# CORRELATION SETTINGS
+correlation.settings <- list(
+  which.data = "data",                       # which data used as input for correlations; options: 'data' or 'scale'
+  check.existing = T,                        # check if correlation matrix was precomputed (M27)
+  recompute.existing.if.query.missing = F    # if pre-computed corr matrix exists, but query is missing, recompute?
+)
+
+############################
+# Miscillaneus settings
+
+# cluster resolution
 cluster.resolution <- 0.45
 
 # specify subgroup provided in M00_subgroups.csv; subgroup <- "no.subgroup" to include all data
@@ -82,8 +95,8 @@ subgroup <- "no.subset"
 default.species <- "Mm" # if multple species are detected in input, only then default is used. 
 
 dir.preprocessed <- "Preprocessed_Datasets/"
-# query.file <- "M01_NM2_R1_test_300720.Rdata"
-query.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+query.file <- "M01_NM2_R1_test_300720.Rdata"
+# query.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 #query.file <- "Module1_M16_M27_UHN_240620.Rdata"
 
 # print figures inline
@@ -94,12 +107,11 @@ n.workers <- list(
   gsea = 5
 )
 
-
 # save PDF
 save.pdf <- T
 
 # downsample factor
-subsample_factor <- 0.5
+subsample_factor <- 0.2
 
 
 ```
@@ -240,7 +252,7 @@ if (subsample_factor < 1){
 }
 
 # subset seurat object
-so.query <- subsetSeurat(so.query, subset.df)
+if (subgroup != "no.subset") so.query <- subsetSeurat(so.query, subset.df)
 
 ```
 
@@ -248,10 +260,20 @@ so.query <- subsetSeurat(so.query, subset.df)
 
 ```{r prepare query gene list (input type 1 or 2), message=FALSE, warning=FALSE}
 
-# IF multiple species available, set to specified default
-which.species <- unique(so.query@meta.data[["Organism"]])
-stopifnot(which.species == default.species)
-if (length(which.species) > 1) which.species <- default.species
+# check species
+detected.species <- unique(so.query@meta.data[["Organism"]])
+if (detected.species != default.species) {
+  if (length(detected.species) == 1) {
+    which.species <- detected.species
+    warning("Incorrect input species was provided, and was updated to reflect what was available in seurat object.\n")
+  } else if (length(detected.species) > 1)  {
+    which.species <- default.species
+    warning("Input species could not be verfied and is being used as-is.\n")
+  }
+} else {
+  which.species <- default.species
+}
+
 
 # import marker sets
 if (which.input$query_input_format == 1){
@@ -367,6 +389,17 @@ if (which.results$gsea.threshold == 1){
   df.log <- addLogEntry("GSEA threshold", "top 3 (sorted by NES)" , df.log, "gsea.threshold")
 }
 
+df.log <- addLogEntry("correlation data", correlation.settings$which.data , df.log, "which.data")
+df.log <- addLogEntry("Check for precomputed corr mat", correlation.settings$check.existing , df.log, "check.existing")
+df.log <- addLogEntry("corr mat recomputed if query missing", correlation.settings$recompute.existing.if.query.missing , df.log, "recompute.existing.if.query.missing")
+
+
+correlation.settings <- list(
+  which.data = "data",                       # which data used as input for correlations; options: 'data' or 'scale'
+  check.existing = T,                        # check if correlation matrix was precomputed (M27)
+  recompute.existing.if.query.missing = F    # if pre-computed corr matrix exists, but query is missing, recompute?
+)
+
 
 ```
 
@@ -407,6 +440,7 @@ if (exists("markers_of_interest")){
   if (is.character(markers_of_interest)){
     which.available <- unlist(lapply(markers_of_interest, function(x) isGeneAvailable(so.query,x,gNames.list)))
     genes.not.found <- markers_of_interest[!which.available]
+    try({genes.not.found <- genes.not.found[genes.not.found != ""]}, silent = T)
     markers_of_interest <- unique(markers_of_interest[which.available])
     markers_of_interest <- rmvCSVprefix(markers_of_interest)
     if (length(markers_of_interest) == 0) stop("None of queried genes found in seurat object. M09 run terminated.")
@@ -539,13 +573,8 @@ if (meta.module.flag == T){
     
     if (length(cur.features) == 0) next
     
-    # append module prefix and get module scores
-    # if (prefix.label != ""){
-    #   module.name <- paste(prefix.label, "-",cur.marker, sep = "")
-    # } else {
       module.name <- cur.marker
-    # }
-    
+
     so.query.try = NA
     so.query.try <-  try(AddModuleScore(so.query,  
                                         features = list(cur.features),
@@ -736,127 +765,6 @@ if (!is.na(which.results$umap.top.n)){
 ```
 
 
-```{r, warning = FALSE}
-
-expression.Plot.dev <- function(so, which.gene, e.mat = NULL, f.mat = NULL, which.group = "seurat_clusters", which.data = "data"){
-  
-  # get expression data
-  if (is.null(e.mat)){
-    em <- getExpressionMatrix(
-      so,
-      only.variable = F,
-      which.assay = NULL,
-      which.data = which.data,
-      use.additional.genes = NA
-    )
-  } else {
-    em <- e.mat
-  }
-  
-  # get fraction of expressing cells
-  if (is.null(f.mat)){
-    em.frac <- avgGroupExpression(
-      so,
-      which.data = "data",
-      which.center = "fraction",
-      which.group = which.group
-    )
-  } else {
-    em.frac <- f.mat
-  }
-  
-  # get meta data
-  so.meta <- so@meta.data
-  
-  # ensure grouping variable exists
-  if (!(which.group) %in% colnames(so.meta)) stop("Grouping variable does not exist.")
-  
-  # merge datasets
-  if (sum(rownames(em) %in% (which.gene)) != 1) stop("More than one gene matched query. Cannot continue.")
-  df.meta <- data.frame(id = rownames(so.meta), group = so.meta[,which.group])
-  em.mark <- as.data.frame(em[(rownames(em)) %in% (which.gene), ])
-  em.df <- data.frame(id = rownames(em.mark), query = em.mark[,1])
-  em.merge <- merge(em.df, df.meta, by = "id")
-  
-  # get summary statistics (for clustering)
-  em.sum <- em.merge %>%
-    dplyr::group_by(group) %>%
-    dplyr::summarise(x.mean = mean(query, na.rm = T),
-                     x.sd = sd(query, na.rm = T))
-  em.frac.mark <- as.data.frame(em.frac[(rownames(em.frac)) %in% (which.gene), ])
-  colnames(em.frac.mark) <- which.gene
-  # em.frac.mark <- t(em.frac.mark %>% select(-c("genes")))
-  em.frac.mark.df <- data.frame(group = rownames(em.frac.mark), frac = em.frac.mark[,1])
-  
-  if (which.group == "seurat_clusters") em.frac.mark.df$group <- gsub("c", "", em.frac.mark.df$group)
-  em.sum <- merge(em.sum, em.frac.mark.df, by = "group")
-  
-  # hierarchial clustering
-  row.names.df <- em.sum$group
-  em.sum <- em.sum %>% dplyr::select(-c("group"))
-  clust.var <- as.matrix(em.sum)
-  rownames(clust.var) <- row.names.df
-  d <- dist(as.matrix(clust.var))   # find distance matrix
-  
-  clust.success <- F
-  try({
-    hc <- hclust(d)                # apply hirarchical clustering
-    clust.success <- T
-  }, silent = T)
-  
-  if (clust.success){
-    # helper function for creating dendograms
-    ggdend.v2 <- function(df) {
-      ggplot() +
-        geom_segment(data = df, aes(x=x, y=y, xend=xend, yend=yend)) +
-        ggdendro::theme_dendro()
-    }
-    
-    # get dendromgram data from heat object
-    d.query.clust <- ggdendro::dendro_data(hc)
-    
-    # ggplot dendograms
-    p.query.clust <- ggdend.v2(d.query.clust$segments) +
-      ggtitle(paste0(which.gene, " Expression")) +
-      theme(axis.title.x=element_blank(),
-            axis.text=element_blank(),
-            axis.line=element_blank(),
-            axis.ticks=element_blank(),
-            legend.position = "none")
-    
-    # reorder data according to clusters
-    em.merge$group <- factor(as.character(em.merge$group), levels = (d.query.clust[["labels"]][["label"]]))
-    
-    # violin plots
-    plt.em <- em.merge %>%
-      group_by(group) %>%
-      ggplot(aes(x = group, y = query, fill = group)) +
-      geom_violin() + theme_bw() +
-      ylab("Expression") +
-      xlab(which.group)  +
-      theme(plot.margin = unit(c(0, 1, 0, 1), "cm"),
-            legend.position = "none")
-    
-    # combine plots
-    plt.sgExp <-  cowplot::plot_grid(p.query.clust, plt.em, ncol = 1, align = "v", rel_heights = c(1,2))
-    
-  } else {
-    plt.sgExp <- em.merge %>%
-      group_by(group) %>%
-      ggplot(aes(x = group, y = query, fill = group)) +
-      geom_violin() + theme_bw() +
-      ylab("Expression") +
-      xlab(which.group)  +
-      theme(plot.margin = unit(c(0, 1, 0, 1), "cm"),
-            legend.position = "none")
-  }
-  
-  return(plt.sgExp)
-  
-}
-
-```
-
 ```{r single cell expression, fig.width=10, fig.height=4, include = FALSE, warning = FALSE}
 
 
@@ -879,12 +787,12 @@ f.mat <- getExpressionMatrix(
 plt.sgExp.all <- list()
 for (i in 1:length(available_markers)){
   
-  plt.sgExp.clust <- expression.Plot.dev(so = so.query, e.mat = e.mat, f.mat = f.mat, 
+  plt.sgExp.clust <- expression.Plot(so = so.query, e.mat = e.mat, f.mat = f.mat, 
                                          which.gene = available_markers[i], which.group = "seurat_clusters", which.data = "data") + ylab(paste0(available_markers[i], " Expression")) + xlab("Cluster ID") + labs(title = "Violin Plots", subtitle = "Clusters")
   
   is.success <- F
   try({
-    plt.sgExp.barcode <- expression.Plot.dev(so = so.query, e.mat = e.mat, f.mat = f.mat, 
+    plt.sgExp.barcode <- expression.Plot(so = so.query, e.mat = e.mat, f.mat = f.mat, 
                                              which.gene = available_markers[i], which.group = "Barcode", which.data = "data") +  ylab(paste0(available_markers[i], " Expression"))  + xlab("Sample ID") + labs(title = "", subtitle = "Samples")
     is.success <- T
   })
@@ -906,7 +814,7 @@ for (i in 1:length(available_markers)){
 
 
 
-```{r symbol2entrez, warning = FALSE}
+```{r symbol2entrez, warning = FALSE, message = FALSE}
 
 # get symbol to entrez mapping
 my.symbol <- as.vector(rownames(so.query@assays[[current.assay]]@scale.data))
@@ -915,49 +823,174 @@ my.entrez <- my.entrez[complete.cases(my.entrez), ]
 
 ```
 
+```{r}
+# 
+# which.data <- "data"
+# 
+# # entire matrix
+# exp.mat.complete <- getExpressionMatrix(so.query, which.data = which.data)
+# 
+# # variable gene only matrix
+# use.var <- T
+# 
+# n.var <- 3000 # specify number of variable genes
+# if (use.var){
+#   # scale down number of variable features
+#         df.meta <- so.query@assays[[current.assay]]@meta.features
+#   df.meta$genes <- rownames(df.meta)
+#   
+#   if (current.assay == "SCT"){
+#     df.meta <- df.meta[order(-df.meta$sct.residual_variance), ]
+#     top.var <- df.meta$genes[1:n.var]
+#     so.query@assays[[current.assay]]@var.features <- top.var
+#   } else if (current.assay == "RNA"){
+#     df.meta <- df.meta[order(-df.meta$vst.variance.standardized), ]
+#     top.var <- df.meta$genes[1:n.var]
+#     so.query@assays[[current.assay]]@var.features <- top.var
+#   }
+# 
+#   exp.mat <- getExpressionMatrix(so.query, only.variable = use.var, which.data = which.data)
+# } else {
+#   exp.mat <- exp.mat.complete
+# }
+# 
+# # ensure no negative values (necessary condition for proportionality association metrics)
+# if (min(exp.mat.complete) < 0) {
+#   exp.mat <- exp.mat + abs(min(exp.mat.complete))
+#   exp.mat.complete <- exp.mat.complete + abs(min(exp.mat.complete))
+# }
+# 
+# df.cor.list <- NULL
+# 
+# query.cor.list <- list()
+# 
+#   if (use.var){
+#     which.missing <- available_markers[!(available_markers %in% rownames(exp.mat) )]
+#     for (i in 1:length(which.missing)){
+#       exp.missing <- exp.mat.complete[rownames(exp.mat.complete) %in% which.missing[i], ]
+#       exp.mat <- rbind(exp.mat, exp.missing)
+#       rownames(exp.mat)[rownames(exp.mat) %in% "exp.missing"] <- which.missing[i]
+#     }
+#   }
+#   
+#   cor.method <- "rho_p" # rho_p, spearman, pearson
+#   t.exp.mat <- t(exp.mat)
+#   if (cor.method == "rho_p"){
+#     query.cor.object <-  propr::perb(t.exp.mat, select = colnames(t.exp.mat))
+#     query.cor.mat <- query.cor.object@matrix
+#   } else {
+#     query.cor.mat <-  dismay::dismay(t.exp.mat, metric = cor.method)
+#   }
+#   
+#   query.cor.mat.all <- query.cor.mat[!(rownames(query.cor.mat) %in% available_markers),colnames(query.cor.mat) %in% available_markers]
+#   
+#   # assign results
+#   df.cor.list <- as.data.frame(query.cor.mat.all)
+#   if (ncol(df.cor.list) == 1) {
+#     
+#     df.cor.list$genes<-  rownames(query.cor.mat)[!(rownames(query.cor.mat) %in% available_markers)]
+#     colnames(df.cor.list)[1] <- available_markers[1]
+#   } else {
+#     df.cor.list$genes <- rownames(df.cor.list)
+#   }
+#   
+#   df.cor.list <- df.cor.list[ ,c("genes", available_markers)]
+#   
+  
+```
+
+```{r}
+
+correlation.settings <- list(
+  which.data = "data",                       # which data used as input for correlations; options: 'data' or 'scale'
+  check.existing = T,                        # check if correlation matrix was precomputed (M27)
+  recompute.existing.if.query.missing = F    # if pre-computed corr matrix exists, but query is missing, recompute?
+)
+
+
+```
 
 
 ```{r get correlations, message=FALSE, warning=FALSE}
 
-which.data <- "data"
+which.data <- correlation.settings$which.data
+stopifnot(which.data %in% c("data", "scale"))
 
-# entire matrix
-exp.mat.complete <- getExpressionMatrix(so.query, which.data = which.data)
+if (which.data == "data"){
+  query.cor <- "similarity.data"
+} else if (which.data == "scale"){
+  query.cor <- "similarity.scale"
+}
 
-# variable gene only matrix
-use.var <- T
-
-n.var <- 3000 # specify number of variable genes
-if (use.var){
-  # scale down number of variable features
-        df.meta <- so.query@assays[[current.assay]]@meta.features
-  df.meta$genes <- rownames(df.meta)
+# check for pre-computed matrix
+if (!meta.module.flag && correlation.settings$check.existing && (query.cor %in% names(so.query@misc))){
+  # get existing cor mat
+  query.cor.mat <- so.query@misc[[query.cor]][["similarity.matrix"]]
+  cor.method <- so.query@misc[[query.cor]][["metric"]]
   
-  if (current.assay == "SCT"){
-    df.meta <- df.meta[order(-df.meta$sct.residual_variance), ]
-    top.var <- df.meta$genes[1:n.var]
-    so.query@assays[[current.assay]]@var.features <- top.var
-  } else if (current.assay == "RNA"){
-    df.meta <- df.meta[order(-df.meta$vst.variance.standardized), ]
-    top.var <- df.meta$genes[1:n.var]
-    so.query@assays[[current.assay]]@var.features <- top.var
+  # check if pre-computed cor mat includes query genes
+  n.query <- length(available_markers)
+  n.included <- sum(rownames(query.cor.mat) %in% available_markers)
+  if (n.query != n.included) {
+    if (n.included == 0){
+      warning("None of queried features are avaialble in precomputed corr matrix")
+    } else {
+      warning("Only subset of queried features are avaialble in precomputed corr matrix")
+    }
+    
+    if (correlation.settings$recompute.existing.if.query.missing){
+      compute.cor <- T
+      query.cor.mat <- NULL
+    } else {
+      compute.cor <- F
+    }
+  } else {
+    compute.cor <- F
   }
-
-  exp.mat <- getExpressionMatrix(so.query, only.variable = use.var, which.data = which.data)
 } else {
-  exp.mat <- exp.mat.complete
-}
+  compute.cor <- T
+} 
 
-# ensure no negative values (necessary condition for proportionality association metrics)
-if (min(exp.mat.complete) < 0) {
-  exp.mat <- exp.mat + abs(min(exp.mat.complete))
-  exp.mat.complete <- exp.mat.complete + abs(min(exp.mat.complete))
-}
-
-df.cor.list <- NULL
-
-query.cor.list <- list()
-
+# compute correlation matrix
+if (compute.cor) {
+  
+  # entire matrix
+  exp.mat.complete <- getExpressionMatrix(so.query, which.data = which.data)
+  
+  # variable gene only matrix
+  use.var <- T
+  
+  n.var <- 3000 # specify number of variable genes
+  if (use.var){
+    # scale down number of variable features
+    df.meta <- so.query@assays[[current.assay]]@meta.features
+    df.meta$genes <- rownames(df.meta)
+    
+    if (current.assay == "SCT"){
+      df.meta <- df.meta[order(-df.meta$sct.residual_variance), ]
+      top.var <- df.meta$genes[1:n.var]
+      so.query@assays[[current.assay]]@var.features <- top.var
+    } else if (current.assay == "RNA"){
+      df.meta <- df.meta[order(-df.meta$vst.variance.standardized), ]
+      top.var <- df.meta$genes[1:n.var]
+      so.query@assays[[current.assay]]@var.features <- top.var
+    }
+    
+    exp.mat <- getExpressionMatrix(so.query, only.variable = use.var, which.data = which.data)
+  } else {
+    exp.mat <- exp.mat.complete
+  }
+  
+  # ensure no negative values (necessary condition for proportionality association metrics)
+  if (min(exp.mat.complete) < 0) {
+    exp.mat <- exp.mat + abs(min(exp.mat.complete))
+    exp.mat.complete <- exp.mat.complete + abs(min(exp.mat.complete))
+  }
+  
+  df.cor.list <- NULL
+  
+  query.cor.list <- list()
+  
   if (use.var){
     which.missing <- available_markers[!(available_markers %in% rownames(exp.mat) )]
     for (i in 1:length(which.missing)){
@@ -975,21 +1008,23 @@ query.cor.list <- list()
   } else {
     query.cor.mat <-  dismay::dismay(t.exp.mat, metric = cor.method)
   }
+}
+
+query.cor.mat.all <- query.cor.mat[!(rownames(query.cor.mat) %in% available_markers),colnames(query.cor.mat) %in% available_markers]
+if (ncol(query.cor.mat.all) == 0) stop("Correlation matrix is missing query features. If precomputed cor mat (M27) was used, try recomputing in current module (M09)")
+
+# assign results
+df.cor.list <- as.data.frame(query.cor.mat.all)
+if (ncol(df.cor.list) == 1) {
   
-  query.cor.mat.all <- query.cor.mat[!(rownames(query.cor.mat) %in% available_markers),colnames(query.cor.mat) %in% available_markers]
-  
-  # assign results
-  df.cor.list <- as.data.frame(query.cor.mat.all)
-  if (ncol(df.cor.list) == 1) {
-    
-    df.cor.list$genes<-  rownames(query.cor.mat)[!(rownames(query.cor.mat) %in% available_markers)]
-    colnames(df.cor.list)[1] <- available_markers[1]
-  } else {
-    df.cor.list$genes <- rownames(df.cor.list)
-  }
-  
-  df.cor.list <- df.cor.list[ ,c("genes", available_markers)]
-  
+  df.cor.list$genes<-  rownames(query.cor.mat)[!(rownames(query.cor.mat) %in% available_markers)]
+  colnames(df.cor.list)[1] <- available_markers[1]
+} else {
+  df.cor.list$genes <- rownames(df.cor.list)
+}
+
+df.cor.list <- df.cor.list[ ,c("genes", available_markers)]
+
 
 
 ```
