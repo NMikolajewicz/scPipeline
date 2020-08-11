@@ -779,8 +779,10 @@ if (analysis.parameters$print.inline){
 
 ```{r c18 - preliminary umap}
 
+pca.var.threshold <- 0.9
+pca.prop <- propVarPCA(so.query)
+nDim <- max(pca.prop$pc.id[pca.prop$pc.cum_sum<pca.var.threshold])+1
 
-nDim <- 30
 cluster_resolution <- analysis.parameters$cluster.resolution
 
 # ptm <- proc.time()
@@ -1124,6 +1126,7 @@ df.log <- addLogEntry("Normalization Method", norm_method, df.log, "norm_method"
 df.log <- addLogEntry("Principal Components Included", nDim, df.log, "nDim")
 df.log <- addLogEntry("Unmatched rate upper limit", unmatch.high, df.log, "unmatch.high")
 df.log <- addLogEntry("Unmatched rate lower limit", unmatch.low, df.log, "unmatch.low")
+df.log <- addLogEntry("nPCA components used", nDim, df.log, "nDim")
 
 end.time <- proc.time()
 elapsed.time <- round((end.time - start.time)[[3]], 2)
