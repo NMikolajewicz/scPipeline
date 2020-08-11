@@ -4,7 +4,7 @@ Single-cell RNA seq analysis pipeline. Developed for Moffat Lab.
 See  [scPipeline Wiki](https://github.com/NMikolajewicz/scPipeline/wiki) for instructions!
 
 ## Module Status
-last updated: 10.08.20
+last updated: 11.08.20
 
 | Module Number | Name | Status | Input | Output | scPipeline Configured | Priority |
 |:---: |:---: |:---:   |:---:  |:---: | :---: | :---: |
@@ -27,5 +27,5 @@ last updated: 10.08.20
 | M24  | Gene Modules | Up | Preprocessed_Datasets | - | No | Moderate |
 | M25  | Activity Spectrum | Up | Preprocessed_Datasets | - | No | Low |
 | M26  | Targetted Genesets | Up | Preprocessed_Datasets | - | No | High |
-| M27  | Decorate Seurat | Up | Preprocessed_Datasets | Preprocessed_Datasets | No | High |
+| M27  | Decorate Seurat | Up | Preprocessed_Datasets | Preprocessed_Datasets | Yes | High |
 | M28  | GBM Analysis | Up | Preprocessed_Datasets | - | No | Moderate |
