@@ -57,7 +57,7 @@ start.time <- proc.time()
 packages2load <- c('viridis', 'scMiko', 'ggpubr', 'dplyr', 'WGCNA', 'cowplot', 'schex', 'Seurat', 'sctransform', 'plyr', 'tidyr', 'reshape2', 'Matrix', 'RColorBrewer', 'ggplot2', 'gridExtra', 'DT', 'flexdashboard', 'future', 'gplots', 'NNLM')
 
 # load packages
-invisible(lapply(packages2load, library, character.only = TRUE))
+invisible(lapply(packages2load, library, character.only = TRUE, quietly = TRUE))
 
 ```
 
@@ -69,13 +69,14 @@ dir.preprocessed <- "Preprocessed_Datasets/"
 
 # Query input
 # input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
-input.file <- "M01_NM2_R1_test_300720.Rdata"
-
+# input.file <- "M01_NM2_R1_test_300720.Rdata"
+#input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+input.file <- "R32_M02_NM2_M02_testSet_rPCA_120820.Rdata"
 # override
 override.input <- F # if true, output.file is ignored and input.file is overwritten
 
 # output file (required only if override input = F)
-output.file <- "M01_M27_R1_test_110820.Rdata"
+output.file <- "testSet_120820.Rdata"
 
 # cluster resolution
 cluster.resolution <- 1
@@ -94,15 +95,20 @@ save.pdf <- T
 
 # specify decorations
 decoration.list <- list(
-  uPCA = F,
-  ICA = T,
+  uPCA = T,
+  ICA = F,
   TSNE = T,
   NMF = T,
-  rho.matrix = T,
+  rho.matrix = F,
   cell.cycle.scoring = T,
   DEG = T,
   GSVA = F
 )
+
+# n.workers <- list(
+#   deg = 8
+# )
+
 
 ```
 
@@ -119,17 +125,20 @@ warning("Importing dataset...")
 if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
 load(paste(data.path, dir.preprocessed, input.file, sep = ""))
 so <- prepSeurat(so)
-so.input <- so.query <- so; rm(so)
+so.query <- so; rm(so)
 
 current.assay <- DefaultAssay(so.query)
 
-# subsample (for dev purposes)
-n.subset <- round(subsample_factor *ncol(so.input))
-cell.ind <- sample(x = seq(1, ncol(so.input)), size = n.subset, replace = FALSE, prob = NULL)
-so.query <- SubsetData(so.query , cells = cell.ind)
+# subsample 
+stopifnot(exists("subsample_factor"))
+if (subsample_factor < 1){
+  so.query <- downsampleSeurat(so.query, subsample.factor = subsample_factor)
+}
 
-rm(so.input)
-invisible(gc())
+# subset data
+if (exists("subset.df")){
+  so.query <- subsetSeurat(so.query, subset.df)
+}
 
 # get original so size
 o.size <- utils::object.size(so.query)
@@ -257,6 +266,18 @@ if (print.inline){
 }
 
 ```
+```{r set assay for downstream analysis}
+
+# once PCA has been processed and clusters computed, ensure that correct assay is set as default for downstream analysis
+
+if (DefaultAssay(so.query) == "integrated"){
+  DefaultAssay(so.query) <- "RNA"
+  so.query <-NormalizeData(so.query, verbose = FALSE)
+  so.query <- ScaleData(so.query, verbose = FALSE)
+  so.query <- FindVariableFeatures(so.query, selection.method = "vst", nfeatures = 3000)
+} 
+
+```
 
 
 ```{r TSNE, fig.width = 10, fig.height =4}
@@ -353,7 +374,12 @@ if (decoration.list$DEG){
   # DEG test
   DEG.test <- "MAST" #options: wilcox, bimod, roc, t, poisson, negbinom, LR, MAST, DESeq2
   
+  # get number of clusters
+  # n.clusters <- length(unique(so.query@meta.data[["seurat_clusters"]]))
+  # if (n.workers$deg > n.clusters) n.workers$deg <- n.clusters
+  
   warning("Identifying differentally expressed genes...")
+  #FindAllMarkers.Parallel()
   DEG.results <- FindAllMarkers(so.query, 
                                 assay = DefaultAssay(so.query),
                                 slot = "data",
@@ -476,6 +502,7 @@ if (print.inline & !is.null(plt.cc)){
 if (decoration.list$rho.matrix){
   
   # external panels ######################################
+  warning("Getting external gene panel for correlation matrix...\n")
   # get L1000 panel
   uni.panels <- geneSets[["universal_literaturePanel"]]
   L1000.panel <- uni.panels$Subramanian2017_L1000_Universal
@@ -506,12 +533,23 @@ if (decoration.list$rho.matrix){
   ext.panel <- unique(c(s.genes, g2m.genes, L1000.panel))
   
   # internal panel ######################################
+  warning("Getting internal gene panel for correlation matrix...\n")
   # get top variable genes
   top.n.var.genes <- 8000
   df.var.meta <- so.query@assays[[DefaultAssay(so.query)]]@meta.features
   df.var.meta$genes <- rownames(df.var.meta)
-  df.var.meta <- df.var.meta %>% arrange(-sct.residual_variance)
+  if (DefaultAssay(so.query) == "SCT"){
+  df.var.meta <- df.var.meta %>% arrange(-sct.residual_variance)  
+  } else if (DefaultAssay(so.query) == "RNA"){
+  df.var.meta <- df.var.meta %>% arrange(-vst.variance.standardized)    
+  }
+  
   int.panel <- df.var.meta$genes[1:top.n.var.genes]
+  
+  # append integration anchors if data were integrated as well
+  if ("integrated" %in% names(so.query@assays)){
+    try({int.panel <- unique(c(int.panel, so.query@assays[["integrated"]]@var.features))}, silent = T)
+  }
   
   # combine internal and external panels
   query.panel <- unique(c(ext.panel, int.panel))
@@ -638,8 +676,18 @@ if (decoration.list$NMF){
   top.n.var.genes <- 8000
   df.var.meta <- so.query@assays[[DefaultAssay(so.query)]]@meta.features
   df.var.meta$genes <- rownames(df.var.meta)
-  df.var.meta <- df.var.meta %>% arrange(-sct.residual_variance)
+    if (DefaultAssay(so.query) == "SCT"){
+  df.var.meta <- df.var.meta %>% arrange(-sct.residual_variance)  
+  } else if (DefaultAssay(so.query) == "RNA"){
+  df.var.meta <- df.var.meta %>% arrange(-vst.variance.standardized)    
+  }
+
   int.panel <- df.var.meta$genes[1:top.n.var.genes]
+
+    # append integration anchors if data were integrated as well
+  if ("integrated" %in% names(so.query@assays)){
+    try({int.panel <- unique(c(int.panel, so.query@assays[["integrated"]]@var.features))}, silent = T)
+  }
   
   # combine internal and external panels
   query.panel <- unique(c(ext.panel, int.panel))
@@ -823,6 +871,8 @@ if (override.input){
   output.file <- input.file
 }
 
+output.file <- paste0(run.id, "_", output.file)
+
 so <- so.query
 rm(so.query)
 
@@ -844,7 +894,12 @@ df.log_Module_27 <- df.log
 
 save.filename <- paste(data.path, dir.preprocessed , output.file, sep = "")
 
-save(so, gNames.list, df.log_Module_1, df.log_Module_27, file = save.filename)
+if (exists("df.log_Module_1")){
+  save(so, gNames.list, df.log_Module_1, df.log_Module_27, file = save.filename)
+} else if (exists("df.log_Module_2")){
+  save(so, gNames.list, df.log_Module_2, df.log_Module_27, file = save.filename)
+} 
+
 
 so.query <- so
 rm(so);
