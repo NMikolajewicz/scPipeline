@@ -9,7 +9,7 @@ last updated: 11.08.20
 | Module Number | Name | Status | Input | Output | scPipeline Configured | Priority |
 |:---: |:---: |:---:   |:---:  |:---: | :---: | :---: |
 | M01  | QC | Up | Raw_Data | Preprocessed_Datasets | Yes | High |
-| M02  | Data Integration | Up | Preprocessed_Datasets | Preprocessed_Datasets | No | High |
+| M02  | Data Integration | Up | Preprocessed_Datasets | Preprocessed_Datasets | Yes | High |
 | M03  | Reproducibility | Down | Preprocessed_Datasets | - | No | Low |
 | M05  | Cell Annotation | Up | Preprocessed_Datasets | - | Yes | High |
 | M06  | Bulk vs. Single | Down | Preprocessed_Datasets | - | No | Low |
