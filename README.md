@@ -4,7 +4,6 @@ Single-cell RNA seq analysis pipeline. Developed for Moffat Lab.
 See  [scPipeline Wiki](https://github.com/NMikolajewicz/scPipeline/wiki) for instructions!
 
 ## Module Status
-last updated: 11.08.20
 
 | Module Number | Name | Status | Input | Output | scPipeline Configured | Priority |
 |:---: |:---: |:---:   |:---:  |:---: | :---: | :---: |
