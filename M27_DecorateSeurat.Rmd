@@ -72,13 +72,13 @@ dir.preprocessed <- "Preprocessed_Datasets/"
 input.file <- "M01_NM2_R1_test_300720.Rdata"
 
 # override
-override.input <- F
+override.input <- F # if true, output.file is ignored and input.file is overwritten
 
 # output file (required only if override input = F)
 output.file <- "M01_M27_R1_test_110820.Rdata"
 
 # cluster resolution
-cluster.resolution <- 0.45
+cluster.resolution <- 1
 
 # print inline
 print.inline <- F
@@ -130,6 +130,10 @@ so.query <- SubsetData(so.query , cells = cell.ind)
 
 rm(so.input)
 invisible(gc())
+
+# get original so size
+o.size <- utils::object.size(so.query)
+
 
 ```
 
@@ -782,31 +786,6 @@ if (decoration.list$GSVA){
 ```
 
 
-
-```{r save results}
-
-if (override.input){
-  output.file <- input.file
-}
-
-so <- so.query
-rm(so.query)
-
-# Run time
-end.time <- proc.time()
-elapsed.time <- round((end.time - start.time)[[3]], 2)
-df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
-
-df.log <- addLogEntry("output file", output.file, df.log, "output.file")
-df.log_Module_27 <- df.log
-
-save.filename <- paste(dir.preprocessed , output.file, sep = "")
-
-save(so, gNames.list, df.log_Module_1, df.log_Module_27, file = save.filename)
-
-
-```
-
 ```{r central log}
 
 # update central log
@@ -835,6 +814,42 @@ output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys
 dir.create(output.path)
 dir.create(paste0(output.path, "Tables/"))
 if (save.pdf) dir.create(paste0(output.path, "PDF/"))
+
+```
+
+```{r save results}
+
+if (override.input){
+  output.file <- input.file
+}
+
+so <- so.query
+rm(so.query)
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+
+n.size <- utils::object.size(so)
+df.log <- addLogEntry("original size", o.size, df.log, "o.size")
+df.log <- addLogEntry("updated size", n.size, df.log, "n.size")
+
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
+
+df.log <- addLogEntry("output file", output.file, df.log, "output.file")
+df.log_Module_27 <- df.log
+
+save.filename <- paste(data.path, dir.preprocessed , output.file, sep = "")
+
+save(so, gNames.list, df.log_Module_1, df.log_Module_27, file = save.filename)
+
+so.query <- so
+rm(so);
+invisible(gc())
+
 
 ```
 
@@ -878,7 +893,14 @@ TSNE
 ### T-Distributed Stochastic Neighbor Embedding
 ```{r tsne plots, fig.width = 10, fig.height = 5}
 if (!is.null(plt.tsne.combo)){
-  plt.tsne.combo
+  print(plt.tsne.combo)
+}
+
+```
+
+```{r save tsne}
+
+if (!is.null(plt.tsne.combo)){
   savePDF(file.name = paste0(output.path, "PDF/", "M27_TSNE.pdf"), plot.handle = plt.tsne.combo, 
           fig.width = 10, fig.height = 5, save.flag = save.pdf)
 }
@@ -892,17 +914,23 @@ ICA
 ```{r ica plots, fig.width = 10, fig.height = 5}
 
 if (!is.null(plt.ica.combo)){
-  plt.ica.combo
-  savePDF(file.name = paste0(output.path, "PDF/", "M27_ICA.pdf"), plot.handle = plt.ica.combo, 
-          fig.width = 10, fig.height = 5, save.flag = save.pdf)
-  write.csv(data.frame(so.query@reductions[["ica"]]@cell.embeddings), file = paste0(output.path, "Tables/", "ICA_cell_embedding.csv"),
-          row.names = T)
-  write.csv(data.frame(so.query@reductions[["ica"]]@feature.loadings), file = paste0(output.path, "Tables/", "ICA_feature_loading.csv"),
-          row.names = T)
+  print(plt.ica.combo)
 }
 
 ```
 
+```{r save ica}
+
+if (!is.null(plt.ica.combo)){
+  savePDF(file.name = paste0(output.path, "PDF/", "M27_ICA.pdf"), plot.handle = plt.ica.combo, 
+          fig.width = 10, fig.height = 5, save.flag = save.pdf)
+  write.csv(data.frame(so.query@reductions[["ica"]]@cell.embeddings), file = paste0(output.path, "Tables/", "ICA_cell_embedding.csv"),
+            row.names = T)
+  write.csv(data.frame(so.query@reductions[["ica"]]@feature.loadings), file = paste0(output.path, "Tables/", "ICA_feature_loading.csv"),
+            row.names = T)
+}
+
+```
 
 Cell Cycle
 ===================================== 
@@ -961,8 +989,6 @@ if (!is.null(plt.hmat)){
 }
 
 ```
-
-
 
 ```{r}
 # determine prior log history
