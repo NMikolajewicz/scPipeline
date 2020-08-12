@@ -779,6 +779,7 @@ if (analysis.parameters$print.inline){
 
 ```{r c18 - preliminary umap}
 
+# specify number of PCA components to use for downstream analysis
 pca.var.threshold <- 0.9
 pca.prop <- propVarPCA(so.query)
 nDim <- max(pca.prop$pc.id[pca.prop$pc.cum_sum<pca.var.threshold])+1
