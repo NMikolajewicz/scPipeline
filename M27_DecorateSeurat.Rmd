@@ -771,6 +771,7 @@ if (decoration.list$NMF){
   so.query@misc$nmf <- list(
     nmf = nmf.opt,
     ranks.tested = k,
+    rank.optimal = k.opt,
     w.mat.plot = plt.wmat,
     h.mat.plot = plt.hmat,
     optimization.curve = nmf.opt
@@ -778,7 +779,7 @@ if (decoration.list$NMF){
   
   # log
   df.log <- addLogEntry("NMF computed", TRUE, df.log, "")
-  df.log <- addLogEntry("NMF optimal rank", k, df.log, "k")
+  df.log <- addLogEntry("NMF optimal rank", k.opt, df.log, "k.opt")
   
 } else {
   plt.wmat <- NULL
@@ -830,6 +831,10 @@ if (decoration.list$GSVA){
     gsva.data = data.scores
   )
   
+   df.log <- addLogEntry("GSVA computed", TRUE, df.log, "")
+  
+} else {
+  df.log <- addLogEntry("GSVA computed", FALSE, df.log, "")
 }
 ```
 
