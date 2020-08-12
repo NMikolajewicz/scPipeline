@@ -20,9 +20,9 @@ knit: (function(inputFile, encoding) {
 
 ```{r Description}
 
-# DECORATE SEURAT ###############################
+# DECORATE SEURAT ##############################################################
 
-# Purpose: ######################################
+# Purpose: #####################################################################
 # Generate intermediary results that are computationally expensive and 
 # frequently required in difference analyses. This includes: 
 #
@@ -35,7 +35,7 @@ knit: (function(inputFile, encoding) {
 # 7) Differential gene expression analysis (DEG)
 # 8) unweighted PCA (for rare cell populations)
 
-# Output: #######################################
+# Output: ######################################################################
 # Seurat object with precomputed intermediate results. 
 
 
@@ -64,28 +64,31 @@ invisible(lapply(packages2load, library, character.only = TRUE, quietly = TRUE))
 
 ```{r parameter specifications}
 
+################################################################################
 # Specify data directories
 dir.preprocessed <- "Preprocessed_Datasets/"
 
 # Query input
 # input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-#input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
-input.file <- "R32_M02_NM2_M02_testSet_rPCA_120820.Rdata"
+input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+# input.file <- "R32_M02_NM2_M02_testSet_rPCA_120820.Rdata"
+
+################################################################################
 # override
 override.input <- F # if true, output.file is ignored and input.file is overwritten
 
 # output file (required only if override input = F)
-output.file <- "testSet_120820.Rdata"
+output.file <- "0_01ds_p4789_allGBM_120820.Rdata" # note that run id, module number and user name will automatically be appended as prefix. 
 
 # cluster resolution
-cluster.resolution <- 1
+cluster.resolution <- 0.45
 
 # print inline
 print.inline <- F
 
 # Data subsampling
-subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 0.05 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify species
 which.species <- "Mm"
@@ -96,18 +99,14 @@ save.pdf <- T
 # specify decorations
 decoration.list <- list(
   uPCA = T,
-  ICA = F,
+  ICA = T,
   TSNE = T,
   NMF = T,
-  rho.matrix = F,
+  rho.matrix = T,
   cell.cycle.scoring = T,
   DEG = T,
   GSVA = F
 )
-
-# n.workers <- list(
-#   deg = 8
-# )
 
 
 ```
@@ -774,7 +773,7 @@ if (decoration.list$NMF){
     rank.optimal = k.opt,
     w.mat.plot = plt.wmat,
     h.mat.plot = plt.hmat,
-    optimization.curve = nmf.opt
+    optimization.curve = plt.kopt
   )
   
   # log
