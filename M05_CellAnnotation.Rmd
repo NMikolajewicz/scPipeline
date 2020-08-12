@@ -906,20 +906,12 @@ vstScoreThreshold  <- function(x, y, label, set, percentile.threshold = 0.95,
   # loess-centering
   if (loess.center){
     if (center.by.group){
-      # for (i in 1:length(unique(u.set))){
-      #   error.loess.mean <- loess(y ~ x.log, df[df$ref.set %in% u.set[i], ])
-      #   pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$ref.set %in% u.set[i]]), se = TRUE)[["fit"]]
-      #   df$y.centered[df$ref.set %in% u.set[i]] <-  df$y[df$ref.set %in% u.set[i]] - pred
-      # } 
+
       for (i in 1:length(uni.clust)){
         error.loess.mean <- loess(y ~ x.log, df[df$cluster %in% uni.clust[i], ], span = loess.span)
         pred <- predict(error.loess.mean, data.frame(x.log = df$x.log[df$cluster %in% uni.clust[i]]), se = TRUE)[["fit"]]
         df$y.centered[df$cluster %in% uni.clust[i]] <-  df$y[df$cluster %in% uni.clust[i]] - pred
-        
-        # df %>%
-        #   filter(cluster == uni.clust[i]) %>%
-        #   ggplot(aes(x = x, y = y.centered)) + 
-        #   geom_point()
+
       } 
     } else {
       error.loess.mean <- loess(y ~ x.log, df)
@@ -1099,9 +1091,6 @@ plt.rank.cor <- GGally::ggpairs(vst.merge[ ,c(names(vst.list), "composite")], ti
   ggtitle("Score Correlations")
 
 if (print.inline){
-  # plt.score.thresholds
-  # plt.score.thresholds.resids
-  
   cowplot::plot_grid(plt.score.thresholds, plt.score.thresholds.resids)
 }
 
