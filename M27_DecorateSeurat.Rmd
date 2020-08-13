@@ -79,7 +79,7 @@ input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 override.input <- F # if true, output.file is ignored and input.file is overwritten
 
 # output file (required only if override input = F)
-output.file <- "p4789_allGBM_120820.Rdata" # note that run id, module number and user name will automatically be appended as prefix. 
+output.file <- "p4789_allGBM_uwPCA_130820.Rdata" # note that run id, module number and user name will automatically be appended as prefix. 
 
 # cluster resolution
 cluster.resolution <- 0.45
@@ -93,16 +93,19 @@ subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 # specify species
 which.species <- "Mm"
 
+# If applicable, switch integrated to RNA assay (always set as T)
+do.assay.switch <- F
+
 # save pdf
 save.pdf <- T
 
 # specify decorations
 decoration.list <- list(
-  uPCA = F,
-  ICA = T,
+  uPCA = T,
+  ICA = F,
   TSNE = F,
-  NMF = T,
-  rho.matrix = T,
+  NMF = F,
+  rho.matrix = F,
   cell.cycle.scoring = F,
   DEG = F,
   GSVA = F
@@ -273,7 +276,8 @@ if (print.inline){
 
 # once PCA has been processed and clusters computed, ensure that correct assay is set as default for downstream analysis
 
-if (DefaultAssay(so.query) == "integrated"){
+
+if (do.assay.switch && DefaultAssay(so.query) == "integrated"){
   DefaultAssay(so.query) <- "RNA"
   so.query <-NormalizeData(so.query, verbose = FALSE)
   so.query <- ScaleData(so.query, verbose = FALSE)
@@ -561,47 +565,47 @@ if (decoration.list$rho.matrix){
   
   warning("Computing similarity matrix (scale)...")
   # scale matrix
-  exp.mat.scale <- getExpressionMatrix(so.query, which.data = "scale")
-  exp.mat.s <- exp.mat.scale[rownames(exp.mat.scale) %in% query.panel, ]
-  rm(exp.mat.scale)
-  t.exp.mat.s <- t(exp.mat.s)
-  e.mat.s <- as.matrix(t.exp.mat.s)
-  if (min(e.mat.s) < 0) e.mat.s <- e.mat.s + abs(min(e.mat.s))
-  SubGeneNames=colnames(e.mat.s)
-  s.mat.s <-  dismay::dismay(e.mat.s, metric = which.cor)
-  rm(e.mat.s)
+  exp.mat.s <- getExpressionMatrix(so.query, which.data = "scale")
+  exp.mat.s <- exp.mat.s[rownames(exp.mat.s) %in% query.panel, ]
+  exp.mat.s <- t(exp.mat.s)
+  exp.mat.s <- as.matrix(exp.mat.s)
+  if (min(exp.mat.s) < 0) exp.mat.s <- exp.mat.s + abs(min(exp.mat.s))
+  SubGeneNames=colnames(exp.mat.s)
+  s.mat.s <-  dismay::dismay(exp.mat.s, metric = which.cor)
+  rm(exp.mat.s)
   
-  warning("Computing similarity matrix (data)...")
-  # data matrix
-  exp.mat.data <- getExpressionMatrix(so.query, which.data = "data")
-  exp.mat.d <- exp.mat.data[rownames(exp.mat.data) %in% query.panel, ]
-  rm(exp.mat.data)
-  t.exp.mat.d <- t(exp.mat.d)
-  e.mat.d <- as.matrix(t.exp.mat.d)
-  SubGeneNames=colnames(e.mat.d)
-  s.mat.d <-  dismay::dismay(e.mat.d, metric = which.cor)
-  rm(e.mat.d)
+  # warning("Computing similarity matrix (data)...")
+  # # data matrix
+  # exp.mat.d <- getExpressionMatrix(so.query, which.data = "data")
+  # exp.mat.d <- exp.mat.d[rownames(exp.mat.d) %in% query.panel, ]
+  # exp.mat.d <- t(exp.mat.d)
+  # 
+  # # a <- as.matrix(as.data.frame(exp.mat.d))
+  # exp.mat.d <- as.matrix((exp.mat.d))
+  # SubGeneNames=colnames(exp.mat.d)
+  # s.mat.d <-  dismay::dismay(exp.mat.d, metric = which.cor)
+  # rm(exp.mat.d)
   
   
   # omit duplicates
   s.mat.s <- s.mat.s[!duplicated(rownames(s.mat.s)), !duplicated(colnames(s.mat.s))]
-  s.mat.d <- s.mat.d[!duplicated(rownames(s.mat.d)), !duplicated(colnames(s.mat.d))]
+  # s.mat.d <- s.mat.d[!duplicated(rownames(s.mat.d)), !duplicated(colnames(s.mat.d))]
   
-  cor.list <- list(
-    similarity.matrix = s.mat.d,
-    metric = which.cor,
-    slot = "data",
-    assay = DefaultAssay(so.query),
-    top.n.var.genes = top.n.var.genes,
-    internal.panel = "variable genes",
-    external.panel = c("L1000", "cell cycling genes"),
-    internal.panel.genes = int.panel,
-    external.panel.genes = ext.panel,
-    all.genes = query.panel
-  )
+  # cor.list <- list(
+  #   similarity.matrix = s.mat.d,
+  #   metric = which.cor,
+  #   slot = "data",
+  #   assay = DefaultAssay(so.query),
+  #   top.n.var.genes = top.n.var.genes,
+  #   internal.panel = "variable genes",
+  #   external.panel = c("L1000", "cell cycling genes"),
+  #   internal.panel.genes = int.panel,
+  #   external.panel.genes = ext.panel,
+  #   all.genes = query.panel
+  # )
   
   # store results
-  so.query@misc$similarity.data <- cor.list
+  # so.query@misc$similarity.data <- cor.list
   
   cor.list <- list(
     similarity.matrix = s.mat.s,
@@ -891,6 +895,8 @@ df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
 n.size <- utils::object.size(so)
 df.log <- addLogEntry("original size", o.size, df.log, "o.size")
 df.log <- addLogEntry("updated size", n.size, df.log, "n.size")
+
+df.log <- addLogEntry("Integrated to RNA assay switch permitted", do.assay.switch, df.log, "do.assay.switch")
 
 df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
 df.log <- addLogEntry("User", user, df.log, "user")
