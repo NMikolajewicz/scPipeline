@@ -28,10 +28,11 @@ rm(list = setdiff(ls(), c("data.path", "user")))
 start.time <- proc.time()
 
 # List of packages to load
-packages2load <- c("scMiko", "Seurat", "sctransform",
+packages2load <- c("scMiko", "Seurat", "sctransform", "clustree", 
                    "plyr", "dplyr", "tidyr", "reshape2", "RColorBrewer", "ggplot2", "gridExtra", 
                    "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", 
-                   "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "readxl", "MAST", "future", "cluster", "doParallel", "parallel", "foreach")
+                   "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "readxl", "MAST", 
+                   "future", "cluster", "doParallel", "parallel", "foreach")
 
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE))
@@ -46,14 +47,16 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 dir.preprocessed <- "Preprocessed_Datasets/"
 
 # Query input
-input.file <- "M01_NM2_R1_test_300720.Rdata"
+# input.file <- "M01_NM2_R1_test_300720.Rdata"
+input.file <- "Module1_m27_p7_mesoderm_070420.Rdata"
 
 # Rapid marker finding (logical flag)
 quick_markers <- TRUE 
 
 # specify cluster resolution
 # cluster_resolution <- c(0.01, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
-cluster_resolution <- c(0.01, 0.15, 0.45)
+cluster_resolution <- c(0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1)
+# cluster_resolution <- c(0.01, 0.15, 0.45, 0.7, 1)
 
 # log fold change threshold
 lfc.threshold <- 0.5
@@ -64,13 +67,16 @@ p.threshold <- 0.01
 # print inline
 print.inline <- FALSE
 
+# markers to visualize on cluster tree (set as NA if none specified)
+cluster.tree.markers <- c("CD34" , "Sox2")
+
 # Data subsampling
 subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify number of workers (for parallelization)
 n.workers <- list(
-  clustering = 3, # data clustering
-  deg = 3         # DEG analysis
+  clustering = 8, # data clustering
+  deg = 5         # DEG analysis
 )
 
 # which markers to return
@@ -141,10 +147,8 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 ```{r prep gene list}
 
 # prep gene sets
-gNames.list <- prepGeneList( so.query, objects())
+if (!exists("gNames.list")) gNames.list <- prepGeneList( so.query, objects())
 
-# # ensure gene list is available
-stopifnot(exists("gNames.list"))
 ```
 
 
@@ -424,6 +428,7 @@ for (i in 1:length(query_markers.list)){
 }
 
 # omit resolution where no DEGs were observed
+cr_original <- cluster_resolution
 cluster_resolution <-cluster_resolution[!(cluster_resolution  %in% which.res2rmv)]
 
 ```
@@ -718,6 +723,9 @@ for (i in 1:length(cluster_resolution)){
   }
 }
 
+# free up some space
+try({rm(so.query_small)}, silent = T)
+
 
 
 ```
@@ -883,6 +891,92 @@ if (print.inline){
 }
 ```
 
+
+
+```{r hierarchial deg, fig.width = 12, fig.height = 8}
+
+
+
+# prep cluster data
+meta.cols <- names(so.query@meta.data)
+#
+meta.clust.entries <- paste0(DefaultAssay(so.query), "_snn_res.", cluster_resolution)
+df.meta <- so.query@meta.data
+df.meta <- df.meta[, meta.cols %in% meta.clust.entries]
+df.meta[ ,paste0(DefaultAssay(so.query), "_snn_res.", 0)] <- 0
+df.meta$umap.x <- so.query@reductions[["umap"]]@cell.embeddings[ ,1]
+df.meta$umap.y <- so.query@reductions[["umap"]]@cell.embeddings[ ,2]
+
+so.query@meta.data[[paste0(DefaultAssay(so.query), "_snn_res.", 0)]] <- 0
+
+# plot cluster trees
+plt.clusttree <- clustree(so.query, prefix =  paste0(DefaultAssay(so.query), "_snn_res."))
+
+if (print.inline) print(plt.clusttree)
+
+plt.umap.tree <- clustree_overlay(df.meta, prefix =  paste0(DefaultAssay(so.query), "_snn_res."), 
+                                  x_value = "umap.x", y_value = "umap.y", ) + 
+  xlab("UMAP 1") + ylab("UMAP 2") + labs(title = "UMAP with cluster-splits") + theme_miko(legend = T)
+
+# fig.width = 12, fig.height = 8
+if (print.inline) print(plt.umap.tree)
+```
+
+```{r get specificity markers}
+
+pct.threshold <- 0.05
+pct.dif.threshold <- 0.3
+
+markers4tree <- c()
+for (i in 1:length(top_markers_res.list)){
+  df.deg <- top_markers_res.list[[i]]
+  df.deg$pct.dif <- df.deg$pct.1 - df.deg$pct.2
+  df.deg <- df.deg[(abs(df.deg$pct.dif) > pct.dif.threshold) & ((df.deg$pct.1 < pct.threshold) | (df.deg$pct.2 < pct.threshold)), ]
+  markers4tree <- c(markers4tree, (df.deg %>%
+    dplyr::group_by(cluster) %>%
+    top_n(1, abs(pct.dif)))$gene)
+}
+
+markers4tree <- unique(markers4tree)
+
+```
+
+
+```{r cluster tree with markers of interest, fig.width = 12, fig.height = 8}
+
+if (!exists("cluster.tree.markers")) cluster.tree.markers <- NA
+cluster.tree.markers <- c(cluster.tree.markers, markers4tree)
+cluster.tree.markers <- cluster.tree.markers[!is.na(cluster.tree.markers)]
+
+species <- unique(so.query@meta.data[["Organism"]])
+if (length(species) == 1 && !is.na(cluster.tree.markers)){
+  if (species  == "Hs"){
+    cluster.tree.markers <- toupper(cluster.tree.markers)
+  } else {
+    cluster.tree.markers <- firstup(cluster.tree.markers)
+  }
+}
+
+
+plt.clusttree.markers <- list()
+
+if (!is.na(cluster.tree.markers)){
+  for (i in 1:length(cluster.tree.markers)){
+    
+    try({
+    plt.clusttree.markers[[cluster.tree.markers[i]]] <- clustree(so.query, prefix =  paste0(DefaultAssay(so.query), "_snn_res."), 
+                                                                 node_colour = cluster.tree.markers[i], node_colour_aggr = "mean") + 
+      labs(title = cluster.tree.markers[i]) + viridis::scale_color_viridis(cluster.tree.markers[i], option = "B", begin = 0.3)
+    if (print.inline) print( plt.clusttree.markers[[cluster.tree.markers[i]]])
+    }, silent = T)
+  }
+}
+
+
+```
+
+
+
 ```{r central log}
 
 # update central log
@@ -955,6 +1049,71 @@ for (i in 1:length(cr_names)){
 
 ```
 
+Cluster Tree
+
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Cluster Tree
+
+```{r tree, fig.width = 12, fig.height = 8}
+
+print(plt.clusttree)
+
+savePDF(file.name = paste0(output.path, "PDF/", "cluster_tree.pdf"), plot.handle =  plt.clusttree, 
+        fig.width = 12, fig.height = 8, save.flag = save.pdf)
+
+```
+
+### UMAP Tree
+
+```{r umap tree, fig.width = 12, fig.height = 8}
+
+print(plt.umap.tree)
+
+savePDF(file.name = paste0(output.path, "PDF/", "cluster_tree_UMAP.pdf"), plot.handle =  plt.umap.tree, 
+        fig.width = 12, fig.height = 8, save.flag = save.pdf)
+
+```
+
+
+```{r plot tree markers, message=FALSE, warning=FALSE}
+
+out <- NULL
+
+if (length(plt.clusttree.markers) > 0){
+  out <- lapply(seq_along(plt.clusttree.markers), function(i) {
+    
+    a1 <- knitr::knit_expand(text = sprintf("\n### %s\n", names(plt.clusttree.markers)[i])) # tab header
+    a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=12, fig.height=8 , message=FALSE, warning=FALSE}", paste("clustreTreeMark_", i, sep = ""))) # start r chunk
+    a3 <- knitr::knit_expand(text = sprintf("\nprint(plt.clusttree.markers[[ names(plt.clusttree.markers)[%d]]])",i)) 
+    a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+    paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+    
+  })  
+}
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+```{r save cluster tree markers}
+
+if (length(plt.clusttree.markers) > 0){
+  invisible({
+    for (i in 1:length(plt.clusttree.markers)){
+      
+      plot.name <- paste0("M18_specificMarker_clusterTree_", names(plt.clusttree.markers)[i], ".pdf")
+      savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+              plot.handle =  plt.clusttree.markers[[i]], 
+              fig.width = 12, fig.height = 8, save.flag = save.pdf)
+    }
+  })
+}
+
+```
 
 
 Heatmap (cell-level)
