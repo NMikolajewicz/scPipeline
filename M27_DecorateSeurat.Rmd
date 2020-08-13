@@ -79,7 +79,7 @@ input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 override.input <- F # if true, output.file is ignored and input.file is overwritten
 
 # output file (required only if override input = F)
-output.file <- "0_01ds_p4789_allGBM_120820.Rdata" # note that run id, module number and user name will automatically be appended as prefix. 
+output.file <- "p4789_allGBM_120820.Rdata" # note that run id, module number and user name will automatically be appended as prefix. 
 
 # cluster resolution
 cluster.resolution <- 0.45
@@ -88,7 +88,7 @@ cluster.resolution <- 0.45
 print.inline <- F
 
 # Data subsampling
-subsample_factor <- 0.05 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify species
 which.species <- "Mm"
@@ -98,13 +98,13 @@ save.pdf <- T
 
 # specify decorations
 decoration.list <- list(
-  uPCA = T,
+  uPCA = F,
   ICA = T,
-  TSNE = T,
+  TSNE = F,
   NMF = T,
   rho.matrix = T,
-  cell.cycle.scoring = T,
-  DEG = T,
+  cell.cycle.scoring = F,
+  DEG = F,
   GSVA = F
 )
 
@@ -142,6 +142,9 @@ if (exists("subset.df")){
 # get original so size
 o.size <- utils::object.size(so.query)
 
+# number of cells provided
+n.cells <- ncol(so.query)
+
 
 ```
 
@@ -155,6 +158,7 @@ df.log <- addLogEntry("Default Assay", (current.assay), df.log, "current.assay")
 df.log <- addLogEntry("Cluster Resolution", (cluster.resolution), df.log, "cluster.resolution")
 df.log <- addLogEntry("Subsample Factor", (subsample_factor), df.log, "subsample_factor")
 df.log <- addLogEntry("Override input", (override.input), df.log, "override.input")
+df.log <- addLogEntry("Cell Number", n.cells, df.log, "n.cells")
 
 ```
 
@@ -553,34 +557,31 @@ if (decoration.list$rho.matrix){
   # combine internal and external panels
   query.panel <- unique(c(ext.panel, int.panel))
   
+  which.cor <- "rho_p"
   
-  # entire matrix
-  which.data <- "data"
-  exp.mat.data <- getExpressionMatrix(so.query, which.data = "data")
+  warning("Computing similarity matrix (scale)...")
+  # scale matrix
   exp.mat.scale <- getExpressionMatrix(so.query, which.data = "scale")
-  
-  # filter matrix
-  exp.mat.d <- exp.mat.data[rownames(exp.mat.data) %in% query.panel, ]
   exp.mat.s <- exp.mat.scale[rownames(exp.mat.scale) %in% query.panel, ]
-  rm(exp.mat.data)
   rm(exp.mat.scale)
-  
-  # transpose expressio matrix (genes are columns)
   t.exp.mat.s <- t(exp.mat.s)
   e.mat.s <- as.matrix(t.exp.mat.s)
-  # transform matrix if necessary
   if (min(e.mat.s) < 0) e.mat.s <- e.mat.s + abs(min(e.mat.s))
   SubGeneNames=colnames(e.mat.s)
+  s.mat.s <-  dismay::dismay(e.mat.s, metric = which.cor)
+  rm(e.mat.s)
   
+  warning("Computing similarity matrix (data)...")
+  # data matrix
+  exp.mat.data <- getExpressionMatrix(so.query, which.data = "data")
+  exp.mat.d <- exp.mat.data[rownames(exp.mat.data) %in% query.panel, ]
+  rm(exp.mat.data)
   t.exp.mat.d <- t(exp.mat.d)
   e.mat.d <- as.matrix(t.exp.mat.d)
   SubGeneNames=colnames(e.mat.d)
-  
-  
-  warning("Computing similarity matrix...")
-  which.cor <- "rho_p"
-  s.mat.s <-  dismay::dismay(e.mat.s, metric = which.cor)
   s.mat.d <-  dismay::dismay(e.mat.d, metric = which.cor)
+  rm(e.mat.d)
+  
   
   # omit duplicates
   s.mat.s <- s.mat.s[!duplicated(rownames(s.mat.s)), !duplicated(colnames(s.mat.s))]
@@ -703,7 +704,8 @@ if (decoration.list$NMF){
   rm(exp.mat); invisible(gc());
   
   # find optimal rank (k) ######################################
-  cols <- c(1:10)
+  #cols <- c(1:10)
+  cols <- c(1:3)
   k <- seq(2, 30, 1)
   
   warning("Searching for optimal NMF rank...")
@@ -779,6 +781,7 @@ if (decoration.list$NMF){
   # log
   df.log <- addLogEntry("NMF computed", TRUE, df.log, "")
   df.log <- addLogEntry("NMF optimal rank", k.opt, df.log, "k.opt")
+  df.log <- addLogEntry("N runs per rank", length(cols), df.log, " ")
   
 } else {
   plt.wmat <- NULL
