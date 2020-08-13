@@ -78,7 +78,7 @@ which.results <- data.frame(
 
 # CORRELATION SETTINGS
 correlation.settings <- list(
-  which.data = "data",                       # which data used as input for correlations; options: 'data' or 'scale'
+  which.data = "scale",                     # which data used as input for correlations; options: 'data' or 'scale'
   check.existing = T,                        # check if correlation matrix was precomputed (M27)
   recompute.existing.if.query.missing = F    # if pre-computed corr matrix exists, but query is missing, recompute?
 )
@@ -95,8 +95,8 @@ subgroup <- "no.subset"
 default.species <- "Mm" # if multple species are detected in input, only then default is used. 
 
 dir.preprocessed <- "Preprocessed_Datasets/"
-query.file <- "M01_NM2_R1_test_300720.Rdata"
-# query.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+# query.file <- "M01_NM2_R1_test_300720.Rdata"
+query.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 #query.file <- "Module1_M16_M27_UHN_240620.Rdata"
 
 # print figures inline
@@ -104,14 +104,14 @@ print.inline <- F
 
 # n workers
 n.workers <- list(
-  gsea = 5
+  gsea = 1
 )
 
 # save PDF
 save.pdf <- T
 
 # downsample factor
-subsample_factor <- 0.2
+subsample_factor <- 1
 
 
 ```
@@ -151,7 +151,7 @@ for (i in 1:nrow(subset.input)){
   }
 }
 
-subset.df <- subset.list[["no.subset"]] # NA specified as "no.subset"
+subset.df <- subset.list[[subgroup]] # NA specified as "no.subset"
 ```
 
 ```{r}
@@ -392,13 +392,6 @@ if (which.results$gsea.threshold == 1){
 df.log <- addLogEntry("correlation data", correlation.settings$which.data , df.log, "which.data")
 df.log <- addLogEntry("Check for precomputed corr mat", correlation.settings$check.existing , df.log, "check.existing")
 df.log <- addLogEntry("corr mat recomputed if query missing", correlation.settings$recompute.existing.if.query.missing , df.log, "recompute.existing.if.query.missing")
-
-
-correlation.settings <- list(
-  which.data = "data",                       # which data used as input for correlations; options: 'data' or 'scale'
-  check.existing = T,                        # check if correlation matrix was precomputed (M27)
-  recompute.existing.if.query.missing = F    # if pre-computed corr matrix exists, but query is missing, recompute?
-)
 
 
 ```
