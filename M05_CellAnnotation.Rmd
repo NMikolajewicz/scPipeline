@@ -154,7 +154,25 @@ if (subsample_factor < 1){
   so.query <- downsampleSeurat(so.query, subsample.factor = subsample_factor)
 }
 
-# subset data
+
+# subgroup data
+if (exists("subgroup")) {
+  subset.input <- read.csv("M00_subgroups.csv", header = TRUE)
+  colnames(subset.input) <- rmvCSVprefix(colnames(subset.input))
+  
+  subset.list <- list()
+  for (i in 1:nrow(subset.input)){
+    subset.list[[subset.input$subset[i]]] <- data.frame(
+      field = subset.input$field[i],
+      subgroups =  stringr::str_trim(unlist(strsplit(as.character(subset.input$subgroups[i]), ","))) 
+    )
+    if (!is.na(subset.input$field[i]) && subset.input$field[i] == "seurat_clusters"){
+      subset.list[[subset.input$subset[i]]]$subgroups <- as.numeric(subset.list[[subset.input$subset[i]]]$subgroups)
+    }
+  }
+  subset.df <- subset.list[[subgroup]] # NA specified as "no.subset"
+}
+
 if (exists("subset.df")){
   so.query <- subsetSeurat(so.query, subset.df)
 }
