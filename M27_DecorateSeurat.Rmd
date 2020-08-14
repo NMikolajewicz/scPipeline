@@ -126,27 +126,44 @@ if (!exists("input.file")) stop("input.file is not specified")
 warning("Importing dataset...")
 if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
 load(paste(data.path, dir.preprocessed, input.file, sep = ""))
-so <- prepSeurat(so)
-so.query <- so; rm(so)
 
-current.assay <- DefaultAssay(so.query)
-
-# subsample 
-stopifnot(exists("subsample_factor"))
-if (subsample_factor < 1){
-  so.query <- downsampleSeurat(so.query, subsample.factor = subsample_factor)
-}
-
-# subset data
-if (exists("subset.df")){
-  so.query <- subsetSeurat(so.query, subset.df)
-}
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
 
 # get original so size
-o.size <- utils::object.size(so.query)
+o.size <- utils::object.size(so)
 
-# number of cells provided
-n.cells <- ncol(so.query)
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                             species = which.species, cr= NULL, subset = subset.df, 
+                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv")
+
+# unpack results
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+
+
+
+# so <- prepSeurat(so)
+# so.query <- so; rm(so)
+
+# current.assay <- DefaultAssay(so.query)
+
+# subsample 
+# stopifnot(exists("subsample_factor"))
+# if (subsample_factor < 1){
+#   so.query <- downsampleSeurat(so.query, subsample.factor = subsample_factor)
+# }
+# 
+# # subset data
+# if (exists("subset.df")){
+#   so.query <- subsetSeurat(so.query, subset.df)
+# }
+
+# 
+# 
+# # number of cells provided
+# n.cells <- ncol(so.query)
 
 
 ```
@@ -175,24 +192,24 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 
 
 ```{r prep gene list}
-
-# prep gene list
-if (!exists("gNames.list")) gNames.list <- prepGeneList( so.query, objects())
-
-# ensure gene list is available
-stopifnot(exists("gNames.list"))
+# 
+# # prep gene list
+# if (!exists("gNames.list")) gNames.list <- prepGeneList( so.query, objects())
+# 
+# # ensure gene list is available
+# stopifnot(exists("gNames.list"))
 ```
 
 
 ```{r convert to symbol}
 
-gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-
-if (gene.rep == "ensembl"){
-  warning("converting ENSEMBL to SYMBOL...")
-  so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list, convert.RNA = TRUE)
-  gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-}
+# gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+# 
+# if (gene.rep == "ensembl"){
+#   warning("converting ENSEMBL to SYMBOL...")
+#   so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list, convert.RNA = TRUE)
+#   gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+# }
 
 
 ```
