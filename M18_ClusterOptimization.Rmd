@@ -48,7 +48,7 @@ dir.preprocessed <- "Preprocessed_Datasets/"
 
 # Query input
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-input.file <- "Module1_m27_p7_mesoderm_070420.Rdata"
+input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
 
 # Rapid marker finding (logical flag)
 quick_markers <- TRUE 
@@ -68,14 +68,17 @@ p.threshold <- 0.01
 print.inline <- FALSE
 
 # markers to visualize on cluster tree (set as NA if none specified)
-cluster.tree.markers <- c("CD34" , "Sox2")
+cluster.tree.markers <- c("GPNMB", "CD68")
+
+# 
+which.species <- "Mm"
 
 # Data subsampling
 subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify number of workers (for parallelization)
 n.workers <- list(
-  clustering = 8, # data clustering
+  clustering = 4, # data clustering
   deg = 5         # DEG analysis
 )
 
@@ -124,14 +127,20 @@ warning("Importing data...")
 if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
 load(paste(data.path, dir.preprocessed, input.file, sep = ""))
 
-so.query <- prepSeurat(so)
+
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
+
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                             species = which.species, cr= NULL, subset = NULL, 
+                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv")
+
+# unpack results
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+
 rm(so)
-
-
-# subsample (for dev purposes)
-n.subset <- round(subsample_factor *ncol(so.query))
-cell.ind <- sample(x = seq(1, ncol(so.query)), size = n.subset, replace = FALSE, prob = NULL)
-so.query <- SubsetData(so.query , cells = cell.ind)
 
 ```
 
@@ -144,14 +153,6 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 ```
 
 
-```{r prep gene list}
-
-# prep gene sets
-if (!exists("gNames.list")) gNames.list <- prepGeneList( so.query, objects())
-
-```
-
-
 ```{r cluster data}
 
 # initiate list to store cluster plots
@@ -159,6 +160,11 @@ plt.umap_by_cluster <- list()
 cluster.name <- c()
 
 # get cluster identify pattern
+assay.names <- names(so.query@assays)
+assay.holder <- DefaultAssay(so.query)
+if ("integrated" %in% assay.names){
+  DefaultAssay(so.query) <- "integrated"
+} 
 current.assay <- DefaultAssay(so.query)
 assay.pattern <- paste0(current.assay, "_snn_res.")
 
@@ -201,6 +207,8 @@ plt.umap_by_cluster[[length(plt.umap_by_cluster)+1]] <- plt.umap_by_barcode
 if (print.inline){
   print(plt.umap_by_barcode)
 }
+
+DefaultAssay(so.query) <- assay.holder
 
 cr_names <- c(cluster_resolution, "barcodes")
 ```
@@ -473,7 +481,7 @@ sil.list <- list()
 plt.heatmap.parameters <- list()
 # generate heatmap
 for (i in 1:length(cluster_resolution)){
-  cur.cluster.name <- paste(DefaultAssay(so.query), "_snn_res.", cluster_resolution[i], sep = "")
+  cur.cluster.name <- paste(assay.pattern, cluster_resolution[i], sep = "")
   cluster.name[i] <- cur.cluster.name
   Idents(so.query) <- so.query@meta.data[[cluster.name[i]]]
   so.query_small <- downsample_cells(so.query = so.query, clust.name = cluster.name[i])
@@ -579,7 +587,7 @@ plt.heatmap.cluster.parameters <- list()
 # generate heatmap
 for (i in 1:length(cluster_resolution)){
   
-  query.res <- paste(DefaultAssay(so.query), "_snn_res.", cluster_resolution[i], sep = "")
+  query.res <- paste(assay.pattern, cluster_resolution[i], sep = "")
   cluster.membership <- so.query@meta.data[[query.res]]
   u.clusters <- unique(as.numeric(as.character((cluster.membership))))
   u.clusters <- u.clusters[order(u.clusters)]
@@ -758,7 +766,7 @@ for (i in 1:length(sil.list)){
 ```
 
 
-```{r}
+```{r silhouette summaries}
 
 df.silw <- NULL
 for (i in 1:length(sil.plot)){
@@ -806,7 +814,6 @@ if (print.inline) print(plt.silw.dep)
 # get resolutions
 clust.names <- names(query_markers.list)
 current.assay <- DefaultAssay(so.query)
-assay.pattern <- paste0(current.assay, "_snn_res.")
 clust.res <- as.numeric(gsub(assay.pattern, "",clust.names))
 
 # get cluster number
@@ -900,21 +907,21 @@ if (print.inline){
 # prep cluster data
 meta.cols <- names(so.query@meta.data)
 #
-meta.clust.entries <- paste0(DefaultAssay(so.query), "_snn_res.", cluster_resolution)
+meta.clust.entries <- paste0(assay.pattern, cluster_resolution)
 df.meta <- so.query@meta.data
 df.meta <- df.meta[, meta.cols %in% meta.clust.entries]
-df.meta[ ,paste0(DefaultAssay(so.query), "_snn_res.", 0)] <- 0
+df.meta[ ,paste0(assay.pattern, 0)] <- 0
 df.meta$umap.x <- so.query@reductions[["umap"]]@cell.embeddings[ ,1]
 df.meta$umap.y <- so.query@reductions[["umap"]]@cell.embeddings[ ,2]
 
-so.query@meta.data[[paste0(DefaultAssay(so.query), "_snn_res.", 0)]] <- 0
+so.query@meta.data[[paste0(assay.pattern, 0)]] <- 0
 
 # plot cluster trees
-plt.clusttree <- clustree(so.query, prefix =  paste0(DefaultAssay(so.query), "_snn_res."))
+plt.clusttree <- clustree(so.query, prefix = assay.pattern, layout = "tree")
 
 if (print.inline) print(plt.clusttree)
 
-plt.umap.tree <- clustree_overlay(df.meta, prefix =  paste0(DefaultAssay(so.query), "_snn_res."), 
+plt.umap.tree <- clustree_overlay(df.meta, prefix =  assay.pattern, 
                                   x_value = "umap.x", y_value = "umap.y", ) + 
   xlab("UMAP 1") + ylab("UMAP 2") + labs(title = "UMAP with cluster-splits") + theme_miko(legend = T)
 
@@ -964,7 +971,7 @@ if (!is.na(cluster.tree.markers)){
   for (i in 1:length(cluster.tree.markers)){
     
     try({
-    plt.clusttree.markers[[cluster.tree.markers[i]]] <- clustree(so.query, prefix =  paste0(DefaultAssay(so.query), "_snn_res."), 
+    plt.clusttree.markers[[cluster.tree.markers[i]]] <- clustree(so.query, prefix =  assay.pattern, 
                                                                  node_colour = cluster.tree.markers[i], node_colour_aggr = "mean") + 
       labs(title = cluster.tree.markers[i]) + viridis::scale_color_viridis(cluster.tree.markers[i], option = "B", begin = 0.3)
     if (print.inline) print( plt.clusttree.markers[[cluster.tree.markers[i]]])
