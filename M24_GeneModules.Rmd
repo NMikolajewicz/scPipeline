@@ -27,8 +27,7 @@ rm(list = setdiff(ls(), c("data.path", "user")))
 start.time <- proc.time()
 
 # load packages
-# "RCy3", 
-packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", "gridExtra", "WGCNA", "topGO", "ape", 
+packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", "gridExtra", "WGCNA", "topGO", "ape", "flashClust",
                    "DT", "flexdashboard", "ggpmisc", "ggExtra", "future", "foreach", "doParallel",  "fdrtool", "e1071", 
                    "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "ggplot2", "reactome.db", "schex", "RColorBrewer")
 
@@ -48,8 +47,8 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # input.file <- "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata"
 # input.file <- "Module1_m27_p7_mesoderm_070420.Rdata"
 # input.file <- "Module1_M16_M27_UHN_070620.Rdata"
-input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
-
+# input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
+# input.file <- "R44_M27_NM2_p4789_allGBM_immuneSubpop_140820.Rdata"
 dir.preprocessed <- "Preprocessed_Datasets/"
 
 ################################################################################
@@ -189,7 +188,7 @@ prepSeurat2.dev <- function (so, e2s, species, cr= NULL, subset = NULL, subsampl
 
 
 
-```{r load data}
+```{r load data, warning = FALSE}
 
 if (!exists("data.path") & !exists("user")) {
   stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
@@ -198,20 +197,20 @@ if (!exists("input.file")) stop("input.file is not specified")
 
 # import and preprocess data
 load(paste0(data.path,dir.preprocessed, input.file))
-so.query <- so; rm(so)
 
-if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 
 # prep seurat object
-prep.list <- prepSeurat2.dev(so.query, e2s = gNames.list, 
-                             species = which.species, cr= cluster.resolution, subset = subgroup, 
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                             species = which.species, resolution= cluster.resolution, subset = subgroup, 
                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv")
 
 # unpack results
+rm(so); 
 so.query <- prep.list$so
 current.assay <- prep.list$assay
 n.cells <- prep.list$n.cell
-
+rm(prep.list); 
 
 ```
 
@@ -441,8 +440,6 @@ d.mat <- 1-w.mat
 
 
 ```{r WGCNA - cluster network,warning = F, echo= F}
-
-library(flashClust)
 
 # get dendrograms
 geneTree.wgcna <- dist2hclust(as.matrix(d.mat))
@@ -2526,9 +2523,6 @@ Row {.tabset}
 9) NMF
 ===================================== 
 
-Row {.tabset}
--------------------------------------
-
 ### Module Similarity
 
 ```{r}
@@ -2536,6 +2530,7 @@ Row {.tabset}
                      color  = viridis::inferno(20))
 
 ```
+
 10) Consensus
 ===================================== 
 
@@ -2548,7 +2543,7 @@ Row {.tabset}
 print(plt.umap.mod.clusters)
 
 savePDF(file.name = paste0(output.path, "PDF/", "M24_gene_network_clusters_umap.pdf"), 
-        plot.handle =  plt.umap.mod.clusters, save.flag = save.pdf)
+        plot.handle =  plt.umap.mod.clusters, save.flag = save.pdf, fig.width = 7, fig.height = 5)
 
 ```
 
@@ -2581,7 +2576,7 @@ if (length(plt.umap.mod.list) > 0){
       
       plot.name <- paste0("M24_consensus_network_umap_", names(plt.umap.mod.list)[i], ".pdf")
       savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
-              plot.handle =  plt.umap.mod.list[[i]], save.flag = save.pdf)
+              plot.handle =  plt.umap.mod.list[[i]], save.flag = save.pdf, fig.width = 7, fig.height = 5)
     }
   })
 }
