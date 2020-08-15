@@ -79,7 +79,7 @@ input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 override.input <- F # if true, output.file is ignored and input.file is overwritten
 
 # output file (required only if override input = F)
-output.file <- "p4789_allGBM_uwPCA_130820.Rdata" # note that run id, module number and user name will automatically be appended as prefix. 
+output.file <- "p4789_allGBM_immuneSubpop_140820.Rdata" # note that run id, module number and user name will automatically be appended as prefix. 
 
 # cluster resolution
 cluster.resolution <- 0.45
@@ -93,26 +93,34 @@ subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 # specify species
 which.species <- "Mm"
 
-# If applicable, switch integrated to RNA assay (always set as T)
-do.assay.switch <- F
+# specify subseting 
+which.subset <- "p4789_immune_cr0_45"
+
 
 # save pdf
 save.pdf <- T
 
 # specify decorations
 decoration.list <- list(
-  uPCA = T,
-  ICA = F,
-  TSNE = F,
-  NMF = F,
-  rho.matrix = F,
-  cell.cycle.scoring = F,
-  DEG = F,
-  GSVA = F
+  PCA = T,
+  ICA = T,
+  TSNE = T,
+  NMF = T,
+  rho.matrix = T,
+  cell.cycle.scoring = T,
+  DEG = T,
+  GSVA = T
+)
+
+# secondary analysis parameters
+parameter.list <- list(
+  PCA.weight.by.var = T,  # is pca unweighted?
+  PCA.var.explained = 0.9 
 )
 
 
 ```
+
 
 
 ```{r load data, message=FALSE, warning=FALSE}
@@ -133,38 +141,19 @@ if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
 o.size <- utils::object.size(so)
 
 # prep seurat object
-prep.list <- prepSeurat2(so, e2s = gNames.list, 
-                             species = which.species, cr= NULL, subset = subset.df, 
+warning("Prepping seurat object...\n")
+# so.query <- so; 
+prep.list <- prepSeurat2(so = so, e2s = gNames.list, 
+                             species = which.species, resolution= cluster.resolution, subset = which.subset, 
                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv")
 
+
 # unpack results
+rm(so)
 so.query <- prep.list$so
 current.assay <- prep.list$assay
 n.cells <- prep.list$n.cell
-
-
-
-# so <- prepSeurat(so)
-# so.query <- so; rm(so)
-
-# current.assay <- DefaultAssay(so.query)
-
-# subsample 
-# stopifnot(exists("subsample_factor"))
-# if (subsample_factor < 1){
-#   so.query <- downsampleSeurat(so.query, subsample.factor = subsample_factor)
-# }
-# 
-# # subset data
-# if (exists("subset.df")){
-#   so.query <- subsetSeurat(so.query, subset.df)
-# }
-
-# 
-# 
-# # number of cells provided
-# n.cells <- ncol(so.query)
-
+rm(prep.list);
 
 ```
 
@@ -172,58 +161,45 @@ n.cells <- prep.list$n.cell
 ```{r analysis log}
 
 # Module
+warning("Initiating analysis log...\n")
 df.log <- initiateLog("27, Seurat Decoration")
 df.log <- addLogEntry("Query File (.Rdata)", (input.file), df.log, "input.file")
 df.log <- addLogEntry("Default Assay", (current.assay), df.log, "current.assay")
 df.log <- addLogEntry("Cluster Resolution", (cluster.resolution), df.log, "cluster.resolution")
 df.log <- addLogEntry("Subsample Factor", (subsample_factor), df.log, "subsample_factor")
+if (exists("which.subset")) df.log <- addLogEntry("Subgroup", (which.subset), df.log, "which.subset")
 df.log <- addLogEntry("Override input", (override.input), df.log, "override.input")
 df.log <- addLogEntry("Cell Number", n.cells, df.log, "n.cells")
+
+
 
 ```
 
 
-```{r}
+```{r get log history}
 # determine prior log history
+warning("Getting log history...\n")
 cur.env <- objects()
 module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 
 ```
 
 
-```{r prep gene list}
-# 
-# # prep gene list
-# if (!exists("gNames.list")) gNames.list <- prepGeneList( so.query, objects())
-# 
-# # ensure gene list is available
-# stopifnot(exists("gNames.list"))
-```
-
-
-```{r convert to symbol}
-
-# gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-# 
-# if (gene.rep == "ensembl"){
-#   warning("converting ENSEMBL to SYMBOL...")
-#   so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list, convert.RNA = TRUE)
-#   gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-# }
-
-
-```
-
-
-
-```{r unweighted PCA}
+```{r PCA}
 
 # overrides original pca, clustering and umap; This is a destructive process. 
-if (decoration.list$uPCA){
+if (decoration.list$PCA){
   
+  # get cluster assay
+  assay.names <- names(so.query@assays)
+  assay.holder <- DefaultAssay(so.query)
+  if ("integrated" %in% assay.names){
+    DefaultAssay(so.query) <- "integrated"
+  } 
+
   if (input.file == output.file) stop("Ensure that output file and input file are different so that original input is not overwritten with recomputed PCA and UMAP reductions.")
 
-  pca.var.threshold <- 0.9
+  pca.var.threshold <- parameter.list$PCA.var.explained
   pca.prop <- propVarPCA(so.query)
   target.pc <- max(pca.prop$pc.id[pca.prop$pc.cum_sum<pca.var.threshold])+1
   
@@ -234,7 +210,7 @@ if (decoration.list$uPCA){
     assay = NULL,
     npcs = 50,
     rev.pca = FALSE,
-    weight.by.var = F,
+    weight.by.var = parameter.list$PCA.weight.by.var,
     verbose = F,
     ndims.print = 1:5,
     nfeatures.print = 30,
@@ -251,7 +227,13 @@ if (decoration.list$uPCA){
   warning("Computing UMAP...\n")
   so.query <- RunUMAP(so.query, dims = 1:target.pc)
   
+  # set assay back to input
+  DefaultAssay(so.query) <- assay.holder
+  
   df.log <- addLogEntry("unweighted PCA computed", TRUE, df.log, "")
+  df.log <- addLogEntry("Proportion of variance explained", parameter.list$PCA.var.explained, df.log, "PCA.var.explained")
+  df.log <- addLogEntry("PCA weight by var", parameter.list$PCA.weight.by.var, df.log, "PCA.weight.by.var")
+
   
 } else {
   df.log <- addLogEntry("unweighted PCA computed", FALSE, df.log, "")
@@ -263,20 +245,37 @@ if (decoration.list$uPCA){
 
 ```{r get clusters}
 
-
 # compute clusters
-
-if (!(decoration.list$uPCA)){
+if (!(decoration.list$PCA)){
+  
+  # get cluster assay
+  assay.names <- names(so.query@assays)
+  assay.holder <- DefaultAssay(so.query)
+  if ("integrated" %in% assay.names){
+    DefaultAssay(so.query) <- "integrated"
+  } 
+  
   warning("Computing clusters...\n")
   so.query <- FindClusters(object = so.query, 
-                         resolution = cluster.resolution, 
-                         verbose = 0, algorithm = 1, modularity.fxn = 1)
-}
+                           resolution = cluster.resolution, 
+                           verbose = 0, algorithm = 1, modularity.fxn = 1)
+  
+  DefaultAssay(so.query) <- assay.holder
+} 
+
+
 
 
 
 # prep query parameters with assertions
-cur.cluster.field <- paste(DefaultAssay(so.query), "_snn_res.", cluster.resolution, sep = "")
+  assay.names <- names(so.query@assays)
+  if ("integrated" %in% assay.names){
+    cluster.assay <- "integrated"
+  }  else {
+    cluster.assay <- DefaultAssay(so.query)
+  }
+  
+cur.cluster.field <- paste(cluster.assay, "_snn_res.", cluster.resolution, sep = "")
 stopifnot(cur.cluster.field %in% names(so.query@meta.data))
 
 # get umap
@@ -294,12 +293,14 @@ if (print.inline){
 # once PCA has been processed and clusters computed, ensure that correct assay is set as default for downstream analysis
 
 
-if (do.assay.switch && DefaultAssay(so.query) == "integrated"){
-  DefaultAssay(so.query) <- "RNA"
-  so.query <-NormalizeData(so.query, verbose = FALSE)
-  so.query <- ScaleData(so.query, verbose = FALSE)
-  so.query <- FindVariableFeatures(so.query, selection.method = "vst", nfeatures = 3000)
-} 
+# If applicable, switch integrated to RNA assay (always set as T)
+# do.assay.switch <- F
+# if (do.assay.switch && DefaultAssay(so.query) == "integrated"){
+#   DefaultAssay(so.query) <- "RNA"
+#   so.query <-NormalizeData(so.query, verbose = FALSE)
+#   so.query <- ScaleData(so.query, verbose = FALSE)
+#   so.query <- FindVariableFeatures(so.query, selection.method = "vst", nfeatures = 3000)
+# } 
 
 ```
 
@@ -913,7 +914,7 @@ n.size <- utils::object.size(so)
 df.log <- addLogEntry("original size", o.size, df.log, "o.size")
 df.log <- addLogEntry("updated size", n.size, df.log, "n.size")
 
-df.log <- addLogEntry("Integrated to RNA assay switch permitted", do.assay.switch, df.log, "do.assay.switch")
+# df.log <- addLogEntry("Integrated to RNA assay switch permitted", do.assay.switch, df.log, "do.assay.switch")
 
 df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
 df.log <- addLogEntry("User", user, df.log, "user")
