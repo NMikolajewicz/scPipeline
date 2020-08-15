@@ -53,20 +53,22 @@ dir.reference <- "Reference_Datasets/"
 # input.file <- "Module1_Neftel_ss2_GBM_160120.Rdata"
 # input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 #input.file <- "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata"
-input.file <- "M01_NM2_R1_test_300720.Rdata"
+# input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
+# input.file <- "R35_M27_NM2_p4789_allGBM_uwPCA_130820.Rdata"
+input.file <- "R44_M27_NM2_p4789_allGBM_immuneSubpop_140820.Rdata"
 
 # specify reference genesets
 which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", 
                       "cancerSEA", "immune.signatures", "immuneSubtype", "GBM")
 
 # specify cluster resolution
-cluster.resolution <- 0.45 # OPTIONAL; range 0 to inf (default = 1)
+cluster.resolution <- 1 # OPTIONAL; range 0 to inf (default = 1)
 
 so.input.species <- "Mm" # eREQUIRED; Hs, Mm
 
 
 # Data subsampling
-subsample_factor <- 0.2 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 min.geneset.size <- 3 # recommended: 2 (for TF classification, set to 1)
 
 # print inline
@@ -74,8 +76,8 @@ print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 
 # specify number of workers for parallelization
 n.workers <- list(
-  scoring = 6,
-  deg = 1
+  scoring = 2,
+  deg = 2
 )
 
 #logical indicating whether to generate gene expression dot plots (computationally intensive)
@@ -114,11 +116,22 @@ warning("Importing data...")
 if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
 load(paste(data.path, dir.preprocessed, input.file, sep = ""));
 
-so.query <- prepSeurat(so)
-rm(so)
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
 
-invisible(gc())
-current.assay <- DefaultAssay(so.query)
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                             species = so.input.species, resolution= cluster.resolution, subset = NULL, 
+                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
+                             terms2drop = c("ica", "tsne", "nmf", "corr", "gsva", "deg", "counts"))
+
+
+# unpack results
+rm(so)
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+rm(prep.list);
+invisible({gc()})
 
 ```
 
@@ -131,62 +144,6 @@ current.assay <- DefaultAssay(so.query)
 # table(a)
 ```
 
-
-
-```{r data subsetting and clustering}
-
-# check species
-if (so.input.species != unique(so.query@meta.data[["Organism"]])) {
-  if (length(unique(so.query@meta.data[["Organism"]])) == 1) {
-     so.input.species <- unique(so.query@meta.data[["Organism"]])
-     warning("Incorrect input species was provided, and was updated to reflect what was available in seurat object.\n")
-  } else if (length(unique(so.query@meta.data[["Organism"]])) > 1)  {
-    warning("Input species could not be verfied and is being used as-is.\n")
-  }
-}
-
-# cluster data
-so.query <- setResolution(so.query, cluster.resolution)
-
-# subsample 
-stopifnot(exists("subsample_factor"))
-if (subsample_factor < 1){
-  so.query <- downsampleSeurat(so.query, subsample.factor = subsample_factor)
-}
-
-
-# subgroup data
-if (exists("subgroup")) {
-  subset.input <- read.csv("M00_subgroups.csv", header = TRUE)
-  colnames(subset.input) <- rmvCSVprefix(colnames(subset.input))
-  
-  subset.list <- list()
-  for (i in 1:nrow(subset.input)){
-    subset.list[[subset.input$subset[i]]] <- data.frame(
-      field = subset.input$field[i],
-      subgroups =  stringr::str_trim(unlist(strsplit(as.character(subset.input$subgroups[i]), ","))) 
-    )
-    if (!is.na(subset.input$field[i]) && subset.input$field[i] == "seurat_clusters"){
-      subset.list[[subset.input$subset[i]]]$subgroups <- as.numeric(subset.list[[subset.input$subset[i]]]$subgroups)
-    }
-  }
-  subset.df <- subset.list[[subgroup]] # NA specified as "no.subset"
-}
-
-if (exists("subset.df")){
-  so.query <- subsetSeurat(so.query, subset.df)
-}
-
-
-```
-
-
-```{r prep gene list}
-
-# prep gene list
-if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
-
-```
 
 
 ```{r analysis log}
@@ -242,13 +199,16 @@ if (print.inline){
 
 ```{r normalized and scale data}
 
-if (DefaultAssay(so.query) == "integrated"){
-  DefaultAssay(so.query) <- "RNA"
-  so.query <-NormalizeData(so.query, verbose = FALSE)
-  so.query <- ScaleData(so.query, verbose = FALSE)
-}
-
-current.assay =  DefaultAssay(so.query)
+# if (DefaultAssay(so.query) == "integrated"){
+#   warning("integrated data set detected...\n")
+#   DefaultAssay(so.query) <- "RNA"
+#   warning("normalizing data...\n")
+#   so.query <-NormalizeData(so.query, verbose = FALSE)
+#   warning("scaling data...\n")
+#   so.query <- ScaleData(so.query, verbose = FALSE)
+# }
+# 
+# current.assay =  DefaultAssay(so.query)
 
 ```
 
@@ -391,14 +351,14 @@ if (length(u_barcodes) > 1) {
 
 ```{r convert to symbol}
 
-gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-
-
-# so.temp <- so.query
-if (gene.rep == "ensembl"){
-  so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list,  convert.RNA = TRUE)
-  gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-}
+# gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+# 
+# 
+# # so.temp <- so.query
+# if (gene.rep == "ensembl"){
+#   so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list,  convert.RNA = TRUE)
+#   gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
+# }
 
 
 ```
