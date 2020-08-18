@@ -65,13 +65,12 @@ invisible(lapply(packages2load, library, character.only = TRUE, quietly = TRUE))
 ```{r parameter specifications}
 
 ################################################################################
-# Specify data directories
-dir.preprocessed <- "Preprocessed_Datasets/"
 
 # Query input
 # input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+# input.file <- "R44_M27_NM2_p4789_allGBM_tumorSubpop1_150820.Rdata"
 # input.file <- "R32_M02_NM2_M02_testSet_rPCA_120820.Rdata"
 
 ################################################################################
@@ -79,7 +78,7 @@ input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 override.input <- F # if true, output.file is ignored and input.file is overwritten
 
 # output file (required only if override input = F)
-output.file <- "p4789_allGBM_immuneSubpop_140820.Rdata" # note that run id, module number and user name will automatically be appended as prefix. 
+output.file <- "p4789_allGBM_tumorSubpop1_170820.Rdata" # note that run id, module number and user name will automatically be appended as prefix. 
 
 # cluster resolution
 cluster.resolution <- 0.45
@@ -94,7 +93,8 @@ subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 which.species <- "Mm"
 
 # specify subseting 
-which.subset <- "p4789_immune_cr0_45"
+# which.subset <- "p4789_immune_cr0_45"
+which.subset <- "p4789_tumorImmuneSubpop1_cr0_45"
 
 
 # save pdf
@@ -108,8 +108,8 @@ decoration.list <- list(
   NMF = T,
   rho.matrix = T,
   cell.cycle.scoring = T,
-  DEG = T,
-  GSVA = T
+  DEG = F,
+  GSVA = F
 )
 
 # secondary analysis parameters
@@ -122,8 +122,9 @@ parameter.list <- list(
 ```
 
 
+```{r load data, message=FALSE, warning=TRUE}
 
-```{r load data, message=FALSE, warning=FALSE}
+dir.preprocessed <- "Preprocessed_Datasets/"
 
 if (!exists("data.path") & !exists("user")) {
   stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
@@ -133,6 +134,7 @@ if (!exists("input.file")) stop("input.file is not specified")
 # load query dataset
 warning("Importing dataset...")
 if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
+invisible({gc()})
 load(paste(data.path, dir.preprocessed, input.file, sep = ""))
 
 if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
@@ -142,18 +144,25 @@ o.size <- utils::object.size(so)
 
 # prep seurat object
 warning("Prepping seurat object...\n")
-# so.query <- so; 
-prep.list <- prepSeurat2(so = so, e2s = gNames.list, 
-                             species = which.species, resolution= cluster.resolution, subset = which.subset, 
-                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv")
 
+which.terms <- c()
+if ("integrated" %in% names(so@assays)){
+  which.terms <- c("sct", "integration.anchors")
+} 
+
+# prepSeurat2.loc <- prepSeurat2
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                             species = which.species, resolution= cluster.resolution, subset.data = which.subset, 
+                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv", terms2drop = which.terms)
 
 # unpack results
 rm(so)
 so.query <- prep.list$so
 current.assay <- prep.list$assay
 n.cells <- prep.list$n.cell
+data.rescaled <- prep.list$data.rescaled
 rm(prep.list);
+invisible({gc()})
 
 ```
 
@@ -170,8 +179,7 @@ df.log <- addLogEntry("Subsample Factor", (subsample_factor), df.log, "subsample
 if (exists("which.subset")) df.log <- addLogEntry("Subgroup", (which.subset), df.log, "which.subset")
 df.log <- addLogEntry("Override input", (override.input), df.log, "override.input")
 df.log <- addLogEntry("Cell Number", n.cells, df.log, "n.cells")
-
-
+df.log <- addLogEntry("Data Rescaled", data.rescaled, df.log, "data.rescaled")
 
 ```
 
@@ -286,21 +294,6 @@ plt.umap_by_cluster <- DimPlot(so.query, reduction = "umap", label = TRUE)  +
 if (print.inline){
   plt.umap_by_cluster
 }
-
-```
-```{r set assay for downstream analysis}
-
-# once PCA has been processed and clusters computed, ensure that correct assay is set as default for downstream analysis
-
-
-# If applicable, switch integrated to RNA assay (always set as T)
-# do.assay.switch <- F
-# if (do.assay.switch && DefaultAssay(so.query) == "integrated"){
-#   DefaultAssay(so.query) <- "RNA"
-#   so.query <-NormalizeData(so.query, verbose = FALSE)
-#   so.query <- ScaleData(so.query, verbose = FALSE)
-#   so.query <- FindVariableFeatures(so.query, selection.method = "vst", nfeatures = 3000)
-# } 
 
 ```
 
