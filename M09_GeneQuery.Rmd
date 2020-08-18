@@ -59,7 +59,7 @@ which.input <- list(
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
   which.gene.set = c("sex.specific") # character
 )
-
+# which.gene.set = c("Gpnmb", "Cd68",  "Bnc2", "Ptgs2", "Unc5b", "Twist2", "Efs", "Plxnb3", "Gjb3", "Lancl3", "Gas1", "Pdpn", "Stc2")
 
 #############################
 
@@ -94,10 +94,9 @@ subgroup <- "no.subset"
 
 default.species <- "Mm" # if multple species are detected in input, only then default is used. 
 
-dir.preprocessed <- "Preprocessed_Datasets/"
-# query.file <- "M01_NM2_R1_test_300720.Rdata"
-query.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
-#query.file <- "Module1_M16_M27_UHN_240620.Rdata"
+input.file <- "M01_NM2_R1_test_300720.Rdata"
+# input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+#input.file <- "Module1_M16_M27_UHN_240620.Rdata"
 
 # print figures inline
 print.inline <- F
@@ -222,16 +221,19 @@ which.ontology <- which.results$ontology
 
 ```{r import seurat object}
 
+
+dir.preprocessed <- "Preprocessed_Datasets/"
+
 if (!exists("data.path") & !exists("user")) {
   stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
 }
 
-if (!exists("query.file")) stop("query.file not specified.")
+if (!exists("input.file")) stop("input.file not specified.")
 
 # import and preprocess data
 warning("Importing data...")
-if (!grepl(".Rdata|.RData", query.file)) query.file <- paste0(query.file, ".Rdata")
-load(getLoadPath(query.file, paste0(data.path, dir.preprocessed)))
+if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
+load(getLoadPath(input.file, paste0(data.path, dir.preprocessed)))
 so.query <- prepSeurat(so)
 rm(so)
 
@@ -362,7 +364,7 @@ n_group_members <- length(u_groups)
 
 df.log <- initiateLog("9, Query Marker Exploration")
 
-df.log <- addLogEntry("Query File", query.file, df.log, "query.file")
+df.log <- addLogEntry("Query File", input.file, df.log, "input.file")
 df.log <- addLogEntry("Gene Set Name", which.gene.set, df.log, "which.gene.set")
 df.log <- addLogEntry("Compute geneset module score", meta.module.flag, df.log, "meta.module.flag")
 df.log <- addLogEntry("Default Species", default.species, df.log, "default.species")
@@ -1545,7 +1547,7 @@ if (!exists("user")) user <- "guest"
 
 clog.update.success <- F
 try({
-  run.id <-  updateCentralLog(Module = "M09", input.data = query.file, input.subset = NA, pdf.flag = save.pdf)
+  run.id <-  updateCentralLog(Module = "M09", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
   clog.update.success <-  T
 }, silent = F)
 if (is.null(run.id))  {

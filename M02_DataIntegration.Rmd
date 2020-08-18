@@ -61,7 +61,6 @@ n.workers <- list(
   do.memory.limit <- T # specify whether to limit max memory (set T if local)
   max.memory <- 100 # numeric, in terms of Gb (set to 100 for cluster)
 
-dir <- "Preprocessed_Datasets/"
 
 
 target.species <- "Mm" #if mixed input, specify target as 'Hs' for best performance
@@ -294,6 +293,8 @@ save.pdf <- T
 
 ```{r parameter assignment and assertion statements}
 
+
+dir <- "Preprocessed_Datasets/"
 
 if (exists("k.filter")){
   stopifnot(is.numeric(k.filter))

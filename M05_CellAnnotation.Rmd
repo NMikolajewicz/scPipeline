@@ -43,9 +43,7 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 ```{r analysis specifications}
 
-# Specify data directories
-dir.preprocessed <- "Preprocessed_Datasets/"
-dir.reference <- "Reference_Datasets/"
+
 
 # Query input
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
@@ -55,11 +53,11 @@ dir.reference <- "Reference_Datasets/"
 #input.file <- "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata"
 # input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
 # input.file <- "R35_M27_NM2_p4789_allGBM_uwPCA_130820.Rdata"
-input.file <- "R44_M27_NM2_p4789_allGBM_immuneSubpop_140820.Rdata"
+input.file <- "R49_M27_NM2_p4789_allGBM_immuneSubpop_150820.Rdata"
 
 # specify reference genesets
-which.references <- c("MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", 
-                      "cancerSEA", "immune.signatures", "immuneSubtype", "GBM")
+# "MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", 
+which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat")
 
 # specify cluster resolution
 cluster.resolution <- 1 # OPTIONAL; range 0 to inf (default = 1)
@@ -76,17 +74,14 @@ print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 
 # specify number of workers for parallelization
 n.workers <- list(
-  scoring = 2,
-  deg = 2
+  scoring = 6,
+  deg = 6
 )
 
-#logical indicating whether to generate gene expression dot plots (computationally intensive)
-show.gene.exp <- T 
 
 # save PDF
 save.pdf <- T
 
-# I MAde A CHANGE
 
 ```
 
@@ -104,7 +99,13 @@ names(csv_input) <- as.vector(query.references$names)
 ```
 
 
-```{r load data}
+
+
+```{r load data, warning = FALSE}
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed_Datasets/"
+dir.reference <- "Reference_Datasets/"
 
 if (!exists("data.path") & !exists("user")) {
   stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
@@ -120,7 +121,7 @@ if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
 
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
-                             species = so.input.species, resolution= cluster.resolution, subset = NULL, 
+                             species = so.input.species, resolution= cluster.resolution, subset.data = NULL, 
                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
                              terms2drop = c("ica", "tsne", "nmf", "corr", "gsva", "deg", "counts"))
 
@@ -134,17 +135,6 @@ rm(prep.list);
 invisible({gc()})
 
 ```
-
-```{r}
-
-# Neftel 2019 preprocessing
-# a <- names(so.query@active.ident)
-# a <- gsub(".", "", stringr::str_extract(a, "[a-zA-Z]*[0-9]*"))
-# a <- stringr::str_extract(a, "[a-zA-Z]*[0-9]*")
-# table(a)
-```
-
-
 
 ```{r analysis log}
 
@@ -194,25 +184,6 @@ if (print.inline){
 
 ```
 
-
-
-
-```{r normalized and scale data}
-
-# if (DefaultAssay(so.query) == "integrated"){
-#   warning("integrated data set detected...\n")
-#   DefaultAssay(so.query) <- "RNA"
-#   warning("normalizing data...\n")
-#   so.query <-NormalizeData(so.query, verbose = FALSE)
-#   warning("scaling data...\n")
-#   so.query <- ScaleData(so.query, verbose = FALSE)
-# }
-# 
-# current.assay =  DefaultAssay(so.query)
-
-```
-
-
 ```{r function for long to wide annotation table}
 
 # function to convert long to wide df
@@ -256,9 +227,6 @@ genes4species <- function(x, target.species) {
 
 
 ```
-
-
-
 
 
 ```{r plot cluster composition alt}
@@ -347,23 +315,6 @@ if (length(u_barcodes) > 1) {
 
 
 ```
-
-
-```{r convert to symbol}
-
-# gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-# 
-# 
-# # so.temp <- so.query
-# if (gene.rep == "ensembl"){
-#   so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list,  convert.RNA = TRUE)
-#   gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-# }
-
-
-```
-
-
 
 ```{r prep gene set helper function}
 
@@ -487,26 +438,34 @@ rcnames.2d <- function (score.mat, exp.mat, sig){
 ```
 
 
+
+
 ```{r cluster differentials}
 
 # get expression  matrix
 ef.mat <- so.query@assays[[DefaultAssay(so.query)]]@data
+es.mat <- so.query@assays[[DefaultAssay(so.query)]]@scale.data
 sc.meta <- so.query@meta.data[["seurat_clusters"]]
 u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
 
 # initiate empty matrices
-logfc.mat <- matrix(nrow = nrow(so.query), ncol = length(u.clust))
-pct.mat <- matrix(nrow = nrow(so.query), ncol = length(u.clust))
-e.mat <- matrix(nrow = nrow(so.query), ncol = length(u.clust))
-f.mat <- matrix(nrow = nrow(so.query), ncol = length(u.clust))
+logfc.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
+pct.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
+e.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
+s.mat <- matrix(nrow = nrow(es.mat), ncol = length(u.clust))
+f.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
 
 # get cluster-level aggregate scores
 for (i in 1:length(u.clust)){
   which.cells <- sc.meta %in% u.clust[i]
   
-  # log expression
+  # log data expression
   e1 <- log(rowMeans(expm1(x = ef.mat[, which.cells])) + 1)
   e.mat[ ,i] <- e1
+  
+  # scaled data
+  s1 <- rowMeans(es.mat[, which.cells])
+  s.mat[ ,i] <- s1
   
   # logfc
   e2 <- log(rowMeans(expm1(x = ef.mat[, !which.cells])) + 1)
@@ -523,13 +482,15 @@ for (i in 1:length(u.clust)){
 }
 
 # assign col and row names
-colnames(e.mat) <- colnames(logfc.mat) <-  colnames(f.mat) <-  colnames(pct.mat) <- u.clust
-rownames(e.mat) <- rownames(logfc.mat) <-  rownames(f.mat) <-  rownames(pct.mat) <- rownames(ef.mat)
+colnames(e.mat) <- colnames(s.mat) <- colnames(logfc.mat) <-  colnames(f.mat) <-  colnames(pct.mat) <- u.clust
+rownames(e.mat) <-  rownames(logfc.mat) <-  rownames(f.mat) <-  rownames(pct.mat) <- rownames(ef.mat)
+rownames(s.mat) <-  rownames(es.mat)
 
 # cast to data.frame
 df.lfc.wide <- data.frame(gene = rownames(ef.mat), data.frame(logfc.mat)); colnames(df.lfc.wide) <- c("gene", u.clust)
 df.pd.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(pct.mat)); colnames(df.pd.wide) <- c("gene", u.clust)
 df.e.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(e.mat)); colnames(df.e.wide) <- c("gene", u.clust)
+df.s.wide <- data.frame(gene = rownames(es.mat), as.data.frame(s.mat)); colnames(df.s.wide) <- c("gene", u.clust)
 df.f.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(f.mat)); colnames(df.f.wide) <- c("gene", u.clust)
 
 # wide to long
@@ -546,6 +507,54 @@ df.lfc.long$cluster <- factor(df.lfc.long$cluster, levels = u.clust)
 df.pd.long$cluster <- factor(df.pd.long$cluster, levels = u.clust)
 df.e.long$cluster <- factor(df.e.long$cluster, levels = u.clust)
 df.f.long$cluster <- factor(df.f.long$cluster, levels = u.clust)
+
+# clear baggage
+rm(es.mat); invisible({gc()})
+
+```
+
+
+```{r expression heatmap, include = FALSE, fig.width = 12, fig.height = 5}
+
+# get var features
+var.features <- so.query@assays[[DefaultAssay(so.query)]]@var.features
+
+# scaled expression plots
+df.s4plt <- as.matrix(df.s.wide %>% select(-c("gene")))
+df.s4plt <- df.s4plt[rownames(df.s4plt) %in% var.features, ]
+
+scale.lim <- 2 
+df.s4plt[df.s4plt > scale.lim] <- scale.lim
+df.s4plt[df.s4plt < (-1*scale.lim)] <- (-1*scale.lim)
+
+my.breaks <- seq((-1*scale.lim), scale.lim, by = 0.2)
+my.col <- colorRampPalette(c(scales::muted("blue"), "white",scales::muted("red")))(length(my.breaks))
+
+plt.heat.scaled <- pheatmap::pheatmap(df.s4plt,
+                    breaks = my.breaks,
+                   color = my.col,
+                   show_rownames = F,
+                   main = "Scaled Expression\nx=cluster, y=gene, z=scaled expression")
+
+plt.heat.scaled <- ggplotify::as.ggplot(plt.heat.scaled)
+
+# normalized expression plots
+df.e4plt <- as.matrix(df.e.wide %>% select(-c("gene")))
+df.e4plt <- df.e4plt[rownames(df.e4plt) %in% var.features, ]
+
+plt.heat.data <- pheatmap::pheatmap(df.e4plt,
+                   show_rownames = F,
+                   main = "Normalized Expression\nx=cluster, y=gene, z=lognorm expression", 
+                   color = viridis::inferno(20))
+
+plt.heat.data <- ggplotify::as.ggplot(plt.heat.data)
+
+
+plt.heat.all <- cowplot::plot_grid(plt.heat.scaled, plt.heat.data)
+
+if (print.inline) print(plt.heat.all)
+
+rm(df.s4plt); rm(df.e4plt);
 
 ```
 
@@ -1311,6 +1320,10 @@ for (i in 1:length(signature.dot.list)){
 
 signature.dot.list.all[["all"]] <- unique(signature.dot.list.all[["all"]])
 
+
+#logical indicating whether to generate gene expression dot plots (computationally intensive)
+show.gene.exp <- T 
+
 plt.expression.all.dotplots <- list()
 if (show.gene.exp){
   
@@ -1357,39 +1370,39 @@ if (show.gene.exp){
 
 ```{r prep matrix for expression heatmap, include = FALSE}
 
-try({var1 <-  so.query@assays[["RNA"]]@var.features}, silent = T)
-try({var2 <- so.query@assays[["SCT"]]@var.features}, silent = T)
-try({var3 <- so.query@assays[["integrated"]]@var.features}, silent = T)
-
-if (exists("var1") && length(var1) > 0) var.features <- var1
-if (exists("var2") && length(var2) > 0) var.features <- var2
-if (exists("var3") && length(var3) > 0) var.features <- var3
-
-if (exists("var.features")){
-  # get scaled aggregates
-  agg.mat <- aggGroupExpression(so.query, which.data = "scale")
-  agg.mat <- agg.mat[agg.mat$genes %in% var.features, ]
-  agg.mat <- agg.mat[!duplicated(agg.mat$genes), ]
-  rownames(agg.mat) <- agg.mat$genes
-  agg.mat <- agg.mat %>% dplyr::select(-c("genes"))
-  
-  # cast as matrix
-  agg.mat <- as.matrix(agg.mat)
-  
-  # windorsize matrix
-  scale.target <- 4
-  agg.mat[(agg.mat > scale.target) | (agg.mat < (-1*scale.target))] <- scale.target
-  
-  plt.hm <- ggplotify::as.ggplot(pheatmap::pheatmap(agg.mat, show_rownames = F,
-                                                    main = "Expression Matrix\nx=clusters, y=genes, z=expression", scale = "none"))
-  
-} else {
-  plt.hm <- NULL
-}
-
-if (print.inline){
-  print(plt.hm)
-}
+# try({var1 <-  so.query@assays[["RNA"]]@var.features}, silent = T)
+# try({var2 <- so.query@assays[["SCT"]]@var.features}, silent = T)
+# try({var3 <- so.query@assays[["integrated"]]@var.features}, silent = T)
+# 
+# if (exists("var1") && length(var1) > 0) var.features <- var1
+# if (exists("var2") && length(var2) > 0) var.features <- var2
+# if (exists("var3") && length(var3) > 0) var.features <- var3
+# 
+# if (exists("var.features")){
+#   # get scaled aggregates
+#   agg.mat <- aggGroupExpression(so.query, which.data = "scale")
+#   agg.mat <- agg.mat[agg.mat$genes %in% var.features, ]
+#   agg.mat <- agg.mat[!duplicated(agg.mat$genes), ]
+#   rownames(agg.mat) <- agg.mat$genes
+#   agg.mat <- agg.mat %>% dplyr::select(-c("genes"))
+#   
+#   # cast as matrix
+#   agg.mat <- as.matrix(agg.mat)
+#   
+#   # windorsize matrix
+#   scale.target <- 4
+#   agg.mat[(agg.mat > scale.target) | (agg.mat < (-1*scale.target))] <- scale.target
+#   
+#   plt.hm <- ggplotify::as.ggplot(pheatmap::pheatmap(agg.mat, show_rownames = F,
+#                                                     main = "Expression Matrix\nx=clusters, y=genes, z=expression", scale = "none"))
+#   
+# } else {
+#   plt.hm <- NULL
+# }
+# 
+# if (print.inline){
+#   print(plt.hm)
+# }
 
 
 ```
@@ -1796,10 +1809,10 @@ Row {.tabset}
 
 ### Heatmap
 
-```{r exp mat, warning = F, message = F}
+```{r exp mat, fig.width = 12, fig.height =5,  warning = FALSE, message = FALSE}
 
 try({
-  print(plt.hm)
+  print(plt.heat.all)
 }, silent = T)
 
 
@@ -1809,8 +1822,8 @@ try({
 
 try({
   savePDF(file.name = paste0(output.path, "PDF/", "M05_expression_heatmap.pdf"), 
-          plot.handle = (plt.hm), 
-          fig.width = 10, fig.height = 8, save.flag = save.pdf)
+          plot.handle = (plt.heat.all), 
+          fig.width = 12, fig.height = 5, save.flag = save.pdf)
 }, silent = T)
 
 ```

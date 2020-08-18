@@ -49,28 +49,23 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # input.file <- "Module1_M16_M27_UHN_070620.Rdata"
 # input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
 # input.file <- "R44_M27_NM2_p4789_allGBM_immuneSubpop_140820.Rdata"
-dir.preprocessed <- "Preprocessed_Datasets/"
+
+input.file <- "R49_M27_NM2_p4789_allGBM_immuneSubpop_150820.Rdata"
 
 ################################################################################
 
-cluster.resolution <- 0.45
-# cluster.resolution <- 0.4
+# cluster.resolution <- 0.45
+cluster.resolution <- 1
 
 subgroup <- "no.subset"
 subsample_factor <-1 # 1 if unspecified
 
 which.species <- "Mm"
 
-
-# flag to use topological overlap for clustering
-use.TOM <- T
-
 # enrichment thresholds
-p.threshold = 0.01 # GO enrichment threshold (p.value)
-padj.threshold = 0.2 # GO enrichment threshold (p.adj)
+p.threshold <- 0.01 # GO enrichment threshold (p.value)
+padj.threshold <- 0.2 # GO enrichment threshold (p.adj)
 
-# variable gene only matrix (T recommended)
-use.var <- T
 
 # save pdf
 save.pdf <- T
@@ -86,109 +81,9 @@ print.inline <- F
 ```
 
 
-```{r}
-
-prepSeurat2.dev <- function (so, e2s, species, cr= NULL, subset = NULL, subsample = 1, M00_subgroup.path = "M00_subgroups.csv"){
-    
-
-  warning("Checking seurat object...\n")
-  # assertion
-  if (class(so) != "Seurat") stop("input must be Seurat Object")
-  
-  # general object handling ####################################################
-
-  so <- fixBarcodeLabel(so)
-  
-  try({
-    so <- UpdateSeuratObject(so) # required after Seurat 3.1.2 update
-  }, silent = T)
-  
-  so <- updateDimNames(so) # required after Seurat 3.1.2 update
-  
-  # species
-  if (species != unique(so@meta.data[["Organism"]])) {
-    if (length(unique(so@meta.data[["Organism"]])) == 1) {
-      species <- unique(so@meta.data[["Organism"]])
-      warning("Incorrect input species was provided, and was updated to reflect what was available in seurat object.\n")
-    } else if (length(unique(so@meta.data[["Organism"]])) > 1)  {
-      warning("Input species could not be verfied and is being used as-is.\n")
-    }
-  }
-  
-  # subsample ##################################################################
-  if (subsample < 1 && is.numeric(subsample)){
-      warning("subsampling data...\n")
-    so <- downsampleSeurat(so, subsample.factor = subsample)
-  }
-  
-  # subgroup data ##############################################################
-  if (!is.null(subset) && is.character(subset)) {
-    subset.input <- read.csv(M00_subgroup.path, header = TRUE)
-    colnames(subset.input) <- rmvCSVprefix(colnames(subset.input))
-    
-    subset.list <- list()
-    for (i in 1:nrow(subset.input)){
-      subset.list[[subset.input$subset[i]]] <- data.frame(
-        field = subset.input$field[i],
-        subgroups =  stringr::str_trim(unlist(strsplit(as.character(subset.input$subgroups[i]), ","))) 
-      )
-      if (!is.na(subset.input$field[i]) && subset.input$field[i] == "seurat_clusters"){
-        subset.list[[subset.input$subset[i]]]$subgroups <- as.numeric(subset.list[[subset.input$subset[i]]]$subgroups)
-      }
-    }
-    subset <- as.data.frame(subset.list[[subgroup]]) # NA specified as "no.subset"
-  }
-  
-  if (!is.null(subset) && ("data.frame" %in% class(subset))) {
-    warning("subsetting data...\n")
-    so <- subsetSeurat(so, subset)
-  }
-  
-  # set resolution #############################################################
-  if (!is.null(cr) && is.numeric(cr)){
-    warning("setting cluster resolution...\n")
-    so <-   scMiko::setResolution(so, cluster.resolution = cr)
-  }
-  
-  # convert ENSEBLE to GENE names in Seurat object #############################
-  warning("converting ENSEMBL to SYMBOL...\n")
-  gene.rep <-  checkGeneRep(e2s, as.vector(rownames(so)))
-  
-  if (gene.rep == "ensembl"){
-    so <- ens2sym.so(so = so, gNames.list = e2s)
-    gene.rep <-  checkGeneRep(e2s, as.vector(rownames(so)))
-  }
-  
-  # integrated data object handling ############################################
-  all.assays <- names(so@assays)
-  all.commands <- names(so@commands)
-  if (("integrated" %in% all.assays) & ("NormalizeData.RNA" %in% all.commands) & ("ScaleData.RNA" %in% all.commands)){
-    warning("ensuring correct assays are setL...\n")
-    if (DefaultAssay(so) != "RNA") {
-      warning("Setting default assay to 'RNA'")
-      DefaultAssay(so) <- "RNA"
-    }
-    if (length(so@assays[["RNA"]]@var.features) == 0){
-      so <- FindVariableFeatures(so, selection.method = "vst", nfeatures = 3000)
-    }
-  } else if (("integrated" %in% all.assays) & !("NormalizeData.RNA" %in% all.commands) & !("ScaleData.RNA" %in% all.commands)){
-    DefaultAssay(so) <- "RNA"
-    so <-NormalizeData(so, verbose = FALSE)
-    so <- ScaleData(so, verbose = FALSE)
-    so <- FindVariableFeatures(so, selection.method = "vst", nfeatures = 3000)
-  }
-  
-  return(list(
-    so = so,
-    assay = DefaultAssay(so),
-    n.cell = ncol(so)
-  ))
-}
-```
-
-
-
 ```{r load data, warning = FALSE}
+
+dir.preprocessed <- "Preprocessed_Datasets/"
 
 if (!exists("data.path") & !exists("user")) {
   stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
@@ -202,7 +97,7 @@ if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
-                             species = which.species, resolution= cluster.resolution, subset = subgroup, 
+                             species = which.species, resolution= cluster.resolution, subset.data = subgroup, 
                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv")
 
 # unpack results
@@ -211,10 +106,17 @@ so.query <- prep.list$so
 current.assay <- prep.list$assay
 n.cells <- prep.list$n.cell
 rm(prep.list); 
+invisible({gc()})
 
 ```
 
 ```{r GENERAL - nalysis log}
+
+# variable gene only matrix (T recommended)
+use.var <- T
+
+# flag to use topological overlap for clustering
+use.TOM <- T
 
 df.log <- initiateLog("24, WCGNA Network Analysis")
 
