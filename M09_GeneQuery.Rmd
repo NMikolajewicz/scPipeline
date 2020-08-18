@@ -87,7 +87,7 @@ correlation.settings <- list(
 # Miscillaneus settings
 
 # cluster resolution
-cluster.resolution <- 0.45
+cluster.resolution <- 0.5
 
 # specify subgroup provided in M00_subgroups.csv; subgroup <- "no.subgroup" to include all data
 subgroup <- "no.subset"
