@@ -9,3 +9,5 @@ invivo.screen.BALB,Condition,BALB
 tumor.emt6.invivo,seurat_clusters,"1,2,3"
 p7.meso,seurat_clusters,"0,1,2,3,4,5,6,7"
 p4789_immune_cr0_45,seurat_clusters,"11,19"
+p4789_R44_immune_cr0_3,seurat_clusters,"0,1,2,6"
+p4789_tumorImmuneSubpop1_cr0_45,seurat_clusters,"8,9,23,46,39,11,19,6,40,0,42"
