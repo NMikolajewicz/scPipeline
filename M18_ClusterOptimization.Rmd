@@ -47,7 +47,7 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # Query input
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-input.file <- "R49_M27_NM2_p4789_allGBM_immuneSubpop_150820.Rdata"
+input.file <- "R54_M27_NM2_p4789_allGBM_tumorSubpop_iter1_190820.Rdata"
 # input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
 
 # Rapid marker finding (logical flag)
@@ -68,7 +68,7 @@ p.threshold <- 0.01
 print.inline <- FALSE
 
 # markers to visualize on cluster tree (set as NA if none specified)
-cluster.tree.markers <- c("cd68", "cd3", "cd45", "cd279", "cd81", "cd80", "cd27", "Gpnmb")
+cluster.tree.markers <- c("cd68", "cd3", "cd45", "cd279", "cd81", "cd80", "cd27", "Gpnmb", "Sox6", "Ptprz1", "Cd133")
 # cluster.tree.markers <- c("Bnc2", "Ptgs2", "Unc5b", "Twist2", "Efs", "Plxnb3", "Gjb3", "Lancl3", "Gas1", "Pdpn", "Stc2")
 
 # 
@@ -79,8 +79,8 @@ subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify number of workers (for parallelization)
 n.workers <- list(
-  clustering = 3, # data clustering
-  deg = 3         # DEG analysis
+  clustering = 4, # data clustering
+  deg = 2         # DEG analysis
 )
 
 # which markers to return
