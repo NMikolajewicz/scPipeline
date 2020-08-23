@@ -53,14 +53,14 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 #input.file <- "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata"
 # input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
 # input.file <- "R35_M27_NM2_p4789_allGBM_uwPCA_130820.Rdata"
-input.file <- "R49_M27_NM2_p4789_allGBM_immuneSubpop_150820.Rdata"
+input.file <- "R54_M27_NM2_p4789_allGBM_tumorSubpop_iter1_190820.Rdata"
 
 # specify reference genesets
 # "MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat", 
 which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat")
 
 # specify cluster resolution
-cluster.resolution <- 1 # OPTIONAL; range 0 to inf (default = 1)
+cluster.resolution <- 0.5 # OPTIONAL; range 0 to inf (default = 1)
 
 so.input.species <- "Mm" # eREQUIRED; Hs, Mm
 
@@ -75,7 +75,7 @@ print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 # specify number of workers for parallelization
 n.workers <- list(
   scoring = 6,
-  deg = 6
+  deg = 1
 )
 
 
