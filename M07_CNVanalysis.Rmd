@@ -14,6 +14,7 @@ editor_options:
 
 # clear global enviroment
 rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
 
 # initiate timer
 start.time <- proc.time()
@@ -34,70 +35,64 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 dir.preprocessed <- "Preprocessed_Datasets/"
 
 # Query input
-input.file <- "Module1_M16_M27_UHN_070620.Rdata"
+input.file <- "R54_M27_NM2_p4789_allGBM_tumorSubpop_iter1_190820.Rdata"
 # input.file <- "Module1_Neftel_ss2_GBM_160120.Rdata"
 
 # cluster resolution
-cluster.resolution <- 0.15
+cluster.resolution <- 0.5
 
 # print inline
 print.inline <- F
 
 # Data subsampling
-subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 0.2 # OPTIONAL; range 0 to 1 (default = 1)
 
 
 # subset.df <- data.frame(field = "Barcode", subgroups = c("ctrl.0231", "TRA.0231", "TR.0231"))
 subset.df <- data.frame(field = "Barcode", subgroups = c("ctrl.0238", "TR.0238"))
 
 # species
-which.species <- "Hs"
+which.species <- "Mm"
 
 ```
 
 
-```{r load data, message=FALSE, warning=FALSE}
+```{r load data, warning = FALSE}
 
-if (!exists("data.path") & !exists("user")) {
-  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
-}
+# Specify data directories
+dir.preprocessed <- "Preprocessed_Datasets/"
+dir.reference <- "Reference_Datasets/"
+
+# if (!exists("data.path") & !exists("user")) {
+#   stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+# }
+if (!exists("input.file")) stop("input.file is not specified")
 
 # load query dataset
-warning("Importing dataset...")
+warning("Importing data...")
 if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
 load(paste(data.path, dir.preprocessed, input.file, sep = ""));
 
-so.query <- prepSeurat(so)
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
+
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                             species = which.species, resolution= cluster.resolution, subset.data = NULL, 
+                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
+                             terms2drop = c("ica", "tsne", "nmf", "corr", "gsva", "deg"))
+
+
+# unpack results
 rm(so)
-
-current.assay <- DefaultAssay(so.query)
-
-```
-
-
-
-```{r data subsetting and clustering}
-
-# check species
-if (which.species != unique(so.query@meta.data[["Organism"]])) stop("Specified input species does not match with input data")
-
-# cluster data
-warning("Computing clusters...")
-so.query <- setResolution(so = so.query, cluster.resolution)
-
-# subsample 
-stopifnot(exists("subsample_factor"))
-if (subsample_factor < 1){
-  so.query <- downsampleSeurat(so.query, subsample.factor = subsample_factor)
-}
-
-# subset data
-if (exists("subset.df")){
-  so.query <- subsetSeurat(so.query, subset.df)
-}
-
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+rm(prep.list);
+invisible({gc()})
 
 ```
+
+
 
 ```{r analysis log}
 
@@ -107,6 +102,7 @@ df.log <- addLogEntry("Query File (.Rdata)", (input.file), df.log, "input.file")
 df.log <- addLogEntry("Default Assay", (current.assay), df.log, "current.assay")
 df.log <- addLogEntry("Cluster Resolution", (cluster.resolution), df.log, "cluster.resolution")
 df.log <- addLogEntry("Subsample Factor", (subsample_factor), df.log, "subsample_factor")
+try({df.log <- addLogEntry("Subsetting", (subset.df), df.log, "subset.df")}, silent = T)
 
 ```
 
@@ -119,42 +115,10 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 ```
 
 
-```{r prep gene list, warning = FALSE}
-
-# prep gene list
-try({so.query <- UpdateSeuratObject(so.query)}, silent = T)
-gNames.list <- tryCatch({gNames.list <- prepGeneList( so.query, objects())},
-                        error = function(e){
-                          return(gNames.list)
-                        })
-
-# ensure gene list is available
-stopifnot(exists("gNames.list"))
-```
-
-
-```{r convert to symbol}
-
-gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-
-if (gene.rep == "ensembl"){
-  warning("converting ENSEMBL to SYMBOL...")
-  so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list, convert.RNA = TRUE)
-  gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-}
-
-
-```
-
-
 
 ```{r get clusters, fig.width=10, fig.height=4}
 
 # compute clusters
-
-# prep query parameters with assertions
-cur.cluster.field <- paste(DefaultAssay(so.query), "_snn_res.", cluster.resolution, sep = "")
-stopifnot(cur.cluster.field %in% names(so.query@meta.data))
 
 # get umap
 plt.umap_by_cluster <- cluster.UMAP(
@@ -188,15 +152,210 @@ if (print.inline){
 
 ```
 
+```{r helper function (adopted from CONICSmat)}
+
+geneChrPosition <- function (gene_names, ensembl_version = "dec2016.archive.ensembl.org", 
+  species = "human") 
+{
+  if (species == "human") {
+    ensembl = biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL", 
+      dataset = "hsapiens_gene_ensembl", host = ensembl_version)
+    gene_positions <- biomaRt::getBM(attributes = c("ensembl_gene_id", 
+      "hgnc_symbol", "chromosome_name", "start_position", 
+      "end_position"), filters = "hgnc_symbol", values = gene_names, 
+      mart = ensembl)
+  }
+  else {
+    ensembl = biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL", 
+      dataset = "mmusculus_gene_ensembl", host = ensembl_version)
+    gene_positions <- biomaRt::getBM(attributes = c("ensembl_gene_id", 
+      "mgi_symbol", "chromosome_name", "start_position", 
+      "end_position"), filters = "mgi_symbol", values = gene_names, 
+      mart = ensembl)
+  }
+  gene_positions = gene_positions[!duplicated(gene_positions[, 
+    2]), ]
+  gene_positions[which(gene_positions[, 3] == "X"), 3] = 23
+  gene_positions[which(gene_positions[, 3] == "Y"), 3] = 24
+  gene_positions[which(gene_positions[, 3] == "MT"), 3] = 0
+  gene_positions[which(nchar(gene_positions[, 3]) > 2), 3] = 0
+  gene_positions = gene_positions[order(as.numeric(gene_positions[, 
+    3]), decreasing = F), ]
+  return(gene_positions)
+}
+
+filterGenes <- function (mat1, genelist, minExp = 10, minCells = 5) 
+{
+  mat1 = mat1[intersect(genelist, rownames(mat1)), ]
+  mat1 = mat1[which(rowSums(mat1) > minExp), ]
+  percentgenes = apply(mat1, 1, function(x) {
+    sum(x > 0)
+  })
+  mat1 = mat1[percentgenes > minCells, ]
+  return(mat1)
+}
+
+```
+
+
+```{r loess-based CNV}
+
+
+# get barcodes
+so.annot <- so.query@meta.data[["Barcode"]]
+
+# e.mat <- as.matrix(Seurat::GetAssayData(so.query, assay = DefaultAssay(so.query), slot = "data"))
+e.mat <- as.matrix(so.query@assays[["RNA"]]@scale.data)
+
+n.cells <- 100
+e.mat <- e.mat[ , sample(c(1:ncol(e.mat)), n.cells)]
+
+# get regions
+regions=read.table("M07_chromosome_arm_positions_grch38.txt",sep="\t",row.names = 1,header = T)
+
+# get gene positions
+gene_pos <- geneChrPosition(rownames(e.mat), species = if (which.species == "Hs") "human" else "mouse")
+
+# filter matrix
+# e.mat <- filterGenes(e.mat,gene_pos[,2],minCells=5)
+
+# get cluster averages
+df.meta <- so.query@meta.data
+u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
+c.mat <- matrix(nrow = nrow(e.mat), ncol = length(u.clust))
+# for (i in 1:length(u.clust)){
+#   which.cells <- rownames(df.meta)[df.meta$seurat_clusters %in% u.clust[i]]
+#   e.mat.sub <- e.mat[ , colnames(e.mat) %in% which.cells]
+#   c.mat[,i] <- rowMeans(e.mat.sub)
+# }
+
+# windsorize
+c.mat <- e.mat
+c.mat[c.mat > 3] <- 3
+c.mat[c.mat < -3] <- -3
+
+
+# assign column and row names
+rownames(c.mat) <- rownames(e.mat)
+# colnames(c.mat) <- paste0("c", u.clust)
+
+# sort genes and fit chr-level loess
+chr.seg <- rownames(regions)
+
+  co.mat <- NULL
+  for (i in 1:nrow(regions)){
+  current.seg <- chr.seg[i]
+  chr.genes <- gene_pos[gene_pos$chromosome_name %in% regions$Chrom[i], 2]
+  
+  if (length(chr.genes) == 0) next
+  c.mat.sub <- c.mat[rownames(c.mat) %in% chr.genes, ]
+  
+  df.query <- data.frame(genes = rownames(c.mat.sub), ind = c(1:nrow(c.mat.sub)))
+  df.ref <- data.frame(genes = gene_pos[,2], start.pos = gene_pos$start_position)
+  df.match <- merge(df.query,df.ref, by = "genes")
+  df.match <- df.match %>% dplyr::arrange(start.pos)
+  
+  c.mat.sub <- c.mat.sub[df.match$ind, ]
+  
+  co.mat <- rbind(co.mat, c.mat.sub)
+
+  }
+  
+  df.cnv.all <- NULL
+  df.cnv <- NULL
+  for (j in 1:ncol(co.mat)){
+    
+    print(paste0("Progress: ",j, "..."))
+    # df.data <- data.frame(x = c(1:nrow(co.mat)), y = (co.mat[, j]), genes = rownames(co.mat))
+    # 
+    # loess.span <- 50
+    # error.loess.mean <- loess(y ~ x, df.data, span = loess.span, degree = 2)
+    # pred <- predict(error.loess.mean, data.frame(x = df.data$x), se = F)
+    
+    pred <- zoo::rollmean(co.mat[, j], k= 100)
+    
+    df.cnv <- bind_cols(df.cnv, data.frame(pred))
+  }
+  
+  colnames(df.cnv) <-  colnames(co.mat)
+  df.cnv.all <- bind_rows(df.cnv.all, df.cnv)
+
+  # which.ref <- c("c4")
+  # which.match <-  which(colnames(df.cnv.all) %in% which.ref)
+  
+  # mean.ref <- df.cnv.all[ ,which.match]
+  # mean.ref <- apply(df.cnv.all[ ,which.match], 1, function(x) mean(x))
+  # ci.thresh.ref <- apply(df.cnv.all[ ,which.match], 1, function(x) sd(x))
+  # ci.thresh.ref <- 0.15
+  
+  # df.cnv.thresh <- df.cnv.all - mean.ref
+  # df.cnv.thresh[abs(df.cnv.thresh) < ci.thresh.ref] <- 0
+  
+# color = viridis::inferno(20),
+  
+ df.cnv.all.t <- t(df.cnv.all)
+  # df.cnv.all.t <- t(df.cnv.thresh)
+ df.cnv.all.t <- t(apply(df.cnv.all.t, 1, function(x) (x-mean(x))/sd(x)))
+ df.cnv.all.t <- (apply(df.cnv.all.t, 2, function(x) (x-mean(x))/sd(x)))
+ 
+ threshold.score <- 3
+ df.cnv.all.t <- (df.cnv.all.t^2) *sign(df.cnv.all.t)
+ df.cnv.all.t[df.cnv.all.t > threshold.score] <- threshold.score
+ df.cnv.all.t[df.cnv.all.t < -1*threshold.score] <- -1*threshold.score
+ # df.cnv.all.t[abs(df.cnv.all.t) < threshold.score] <- 0
+ 
+  pheatmap::pheatmap(df.cnv.all.t, cluster_rows =T, cluster_cols = F,  scale = "none", show_rownames = F)
+
+```
+
+
+
+```{r}
+plt.umap_by_cluster
+```
+
+```{r cluster-level means}
+
+# get barcodes
+so.annot <- so.query@meta.data[["Barcode"]]
+
+e.mat <- as.matrix(Seurat::GetAssayData(so.query, assay = DefaultAssay(so.query), slot = "data"))
+
+# get regions
+regions=read.table("M07_chromosome_arm_positions_grch38.txt",sep="\t",row.names = 1,header = T)
+
+# get gene positions
+gene_pos <- geneChrPosition(rownames(e.mat), species = if (which.species == "Hs") "human" else "mouse")
+
+# filter matrix
+e.mat <- filterGenes(e.mat,gene_pos[,2],minCells=5)
+
+# get cluster averages
+df.meta <- so.query@meta.data
+u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
+c.mat <- matrix(nrow = nrow(e.mat), ncol = length(u.clust))
+for (i in 1:length(u.clust)){
+  which.cells <- rownames(df.meta)[df.meta$seurat_clusters %in% u.clust[i]]
+  e.mat.sub <- e.mat[ , colnames(e.mat) %in% which.cells]
+  c.mat[,i] <- rowMeans(e.mat.sub)
+}
+
+# assign column and row names
+rownames(c.mat) <- rownames(e.mat)
+colnames(c.mat) <- paste0("c", u.clust)
+
+```
+
+
+
 ```{r CONICmat}
 
 do.CONICmat <- T
 
 if (do.CONICmat){
 
-#e.mat <- log1p(as.data.frame(so.query@assays[["RNA"]]@data))
-e.mat <- CONICSmat::normMat(as.matrix(Seurat::GetAssayData(so.query, assay = DefaultAssay(so.query), slot = "counts")))
-# e.mat <-so.query@assays[["SCT"]]@scale.data
+# e.mat <- CONICSmat::normMat(as.matrix(Seurat::GetAssayData(so.query, assay = DefaultAssay(so.query), slot = "counts")))
+  e.mat <- log1p(c.mat)
 
 # Neftel 2019 preprocessing (should be barcodes)
 # a <- names(so.query@active.ident)
@@ -205,37 +364,40 @@ e.mat <- CONICSmat::normMat(as.matrix(Seurat::GetAssayData(so.query, assay = Def
 # rownames(so.annot) <- colnames(e.mat)
 
 # get barcodes
-so.annot <- so.query@meta.data[["Barcode"]]
+# so.annot <- so.query@meta.data[["Barcode"]]
+  so.annot <- colnames(c.mat)
 
 # get regions
 regions=read.table("M07_chromosome_arm_positions_grch38.txt",sep="\t",row.names = 1,header = T)
 
 # get gene positions
-gene_pos <- getGenePositions(rownames(e.mat))
+gene_pos <- getGenePositions(rownames(e.mat), species = if (which.species == "Hs") "human" else "mouse")
 
 # filter matrix
-e.mat <- filterMatrix(e.mat,gene_pos[,"hgnc_symbol"],minCells=5)
+# e.mat <- filterMatrix(e.mat,gene_pos[,2],minCells=5)
+# e.mat <- filterMatrix(e.mat,gene_pos[,2],minCells=0)
 
 # norm factors
 normFactor <- calcNormFactors(e.mat)
 
 #  specify output names
-output.name <- "BT799v2"
+output.name <- "clusterAgg_v3"
 
 # initial run
 conic.plot <- plotAll(e.mat,normFactor,regions,gene_pos,output.name)
 
 # visualize clusters
-conic.hm  <- plotHistogram(conic.plot,e.mat,clusters=2,zscoreThreshold=2,so.annot)
+conic.hm  <- plotHistogram(conic.plot,e.mat,clusters=3,zscoreThreshold=2,so.annot)
 
 # identify candidates
 lrbic <- read.table(paste0(output.name, "_BIC_LR.txt"), sep = "\t", header = T, row.names = 1, check.names = F)
 
 # default settings = bic dif 200, pval 0.01
-candRegions <- rownames(lrbic)[which(lrbic[,"BIC difference"]>200 & lrbic[,"LRT adj. p-val"]<0.01)]
+# which(lrbic[,"BIC difference"]>200 & 
+candRegions <- rownames(lrbic)[lrbic[,"LRT adj. p-val"]<0.5]
 
 # refined run
-conic.hm2  <- plotHistogram(conic.plot[,candRegions],e.mat,clusters=2,zscoreThreshold=4,so.annot)
+conic.hm2  <- plotHistogram(conic.plot[,candRegions],e.mat,clusters=3,zscoreThreshold=3,so.annot)
 
 normal <- which(conic.hm2 == 2)
 tumor <- which(conic.hm2 == 1)
@@ -243,7 +405,7 @@ tumor <- which(conic.hm2 == 1)
 redu=plotAll(e.mat,normFactor,regions[candRegions,],gene_pos,output.name,normal=normal,tumor=tumor)
 
 
-plotAllChromosomes (mat = e.mat,normal = normal,tumor = tumor,windowsize = 101,gene_pos = gene_pos,fname = output.name,patients = so.annot,breakpoints = regions)
+plotAllChromosomes (mat = e.mat,normal = normal,tumor = tumor,windowsize = 101,gene_pos = gene_pos,fname = paste0(output.name, "v2)"),patients = so.annot,breakpoints = regions)
 
 # hist(lrbic$`BIC difference`)
 plotChromosomeHeatmap(e.mat,normal = normal, plotcells = tumor, gene_pos = gene_pos, windowsize = 121, chr=T, expThresh=1, thresh = 1)
@@ -251,6 +413,10 @@ plotChromosomeHeatmap(e.mat,normal = normal, plotcells = tumor, gene_pos = gene_
 
 # plotChromosomeHeatmap(e.mat,normal = set1, plotcells =set2, gene_pos = gene_pos, windowsize = 121, chr=T, expThresh=0.2, thresh = 1)
 
+```
+```{r}
+
+plt.umap_by_cluster
 ```
 
 ```{r}
@@ -268,7 +434,8 @@ if (do.infercnv){
 
 
 #e.mat <- as.data.frame(so.query@assays[[current.assay]]@data)
-e.mat <- as.data.frame(so.query@assays[[DefaultAssay(so.query)]]@counts)
+# e.mat <- as.data.frame(so.query@assays[[DefaultAssay(so.query)]]@counts)
+  e.mat <- c.mat
 
 
 so.data <- e.mat
@@ -284,12 +451,14 @@ so.genes <- infercnv::genes
 # rownames(so.annot) <- colnames(e.mat)
 
 # get barcodes
-so.annot <-  data.frame(V2 = so.query@meta.data[["Barcode"]])
+
+so.annot <-  data.frame(V2 = colnames(e.mat))
+# so.annot <-  data.frame(V2 = so.query@meta.data[["Barcode"]])
  rownames(so.annot) <- colnames(e.mat)
 
 # create InferCNV Object
 infercnv_obj <- CreateInfercnvObject(
-  raw_counts_matrix = as.matrix(e.mat),
+  raw_counts_matrix = as.matrix(log1p(e.mat)),
   annotations_file = so.annot,
   gene_order_file = so.genes,
   ref_group_names = NULL
