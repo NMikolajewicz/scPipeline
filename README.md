@@ -13,7 +13,7 @@ See  [scPipeline Wiki](https://github.com/NMikolajewicz/scPipeline/wiki) for ins
 | M09  | Gene Query | Up | Preprocessed_Datasets | - | Yes | High |
 | M13  | Trajectory Inference | Up | Preprocessed_Datasets | - | No | Moderate |
 | M18  | Cluster Optimization | Up | Preprocessed_Datasets | - | Yes | High |
-| M24  | Gene Modules | Up | Preprocessed_Datasets | - | No | Moderate |
+| M24  | Gene Modules | Up | Preprocessed_Datasets | - | Yes | Moderate |
 | M27  | Decorate Seurat | Up | Preprocessed_Datasets | Preprocessed_Datasets | Yes | High |
 
 
