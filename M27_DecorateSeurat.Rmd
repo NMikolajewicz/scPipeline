@@ -78,7 +78,7 @@ input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 override.input <- F # if true, output.file is ignored and input.file is overwritten
 
 # output file (required only if override input = F)
-output.file <- "p4789_allGBM_tumorSubpop1_170820.Rdata" # note that run id, module number and user name will automatically be appended as prefix. 
+output.file <- "p4789_allGBM_tumorSubpop_iter1_190820.Rdata" # note that run id, module number and user name will automatically be appended as prefix. 
 
 # cluster resolution
 cluster.resolution <- 0.45
@@ -95,6 +95,7 @@ which.species <- "Mm"
 # specify subseting 
 # which.subset <- "p4789_immune_cr0_45"
 which.subset <- "p4789_tumorImmuneSubpop1_cr0_45"
+# which.subset <- "no.subset"
 
 
 # save pdf
@@ -103,10 +104,10 @@ save.pdf <- T
 # specify decorations
 decoration.list <- list(
   PCA = T,
-  ICA = T,
+  ICA = F,
   TSNE = T,
-  NMF = T,
-  rho.matrix = T,
+  NMF = F,
+  rho.matrix = F,
   cell.cycle.scoring = T,
   DEG = F,
   GSVA = F
@@ -115,7 +116,8 @@ decoration.list <- list(
 # secondary analysis parameters
 parameter.list <- list(
   PCA.weight.by.var = T,  # is pca unweighted?
-  PCA.var.explained = 0.9 
+  PCA.var.explained = 0.9,
+  NMF.n.iterations = 3  # number of iterations per rank (during optimization step)
 )
 
 
@@ -145,12 +147,12 @@ o.size <- utils::object.size(so)
 # prep seurat object
 warning("Prepping seurat object...\n")
 
-which.terms <- c()
+which.terms <- NULL
 if ("integrated" %in% names(so@assays)){
   which.terms <- c("sct", "integration.anchors")
 } 
 
-# prepSeurat2.loc <- prepSeurat2
+invisible({gc()})
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
                              species = which.species, resolution= cluster.resolution, subset.data = which.subset, 
                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv", terms2drop = which.terms)
@@ -439,8 +441,8 @@ if (decoration.list$DEG){
 if (decoration.list$cell.cycle.scoring){
   
   # get cell cycle genes
-  s.genes <- cc.genes$s.genes
-  g2m.genes <- cc.genes$g2m.genes
+  s.genes <- cc.genes.updated.2019$s.genes
+  g2m.genes <- cc.genes.updated.2019$g2m.genes
   
   input.species <- unique(so.query@meta.data[["Organism"]])
   
@@ -584,40 +586,7 @@ if (decoration.list$rho.matrix){
   SubGeneNames=colnames(exp.mat.s)
   s.mat.s <-  dismay::dismay(exp.mat.s, metric = which.cor)
   rm(exp.mat.s)
-  
-  # warning("Computing similarity matrix (data)...")
-  # # data matrix
-  # exp.mat.d <- getExpressionMatrix(so.query, which.data = "data")
-  # exp.mat.d <- exp.mat.d[rownames(exp.mat.d) %in% query.panel, ]
-  # exp.mat.d <- t(exp.mat.d)
-  # 
-  # # a <- as.matrix(as.data.frame(exp.mat.d))
-  # exp.mat.d <- as.matrix((exp.mat.d))
-  # SubGeneNames=colnames(exp.mat.d)
-  # s.mat.d <-  dismay::dismay(exp.mat.d, metric = which.cor)
-  # rm(exp.mat.d)
-  
-  
-  # omit duplicates
-  s.mat.s <- s.mat.s[!duplicated(rownames(s.mat.s)), !duplicated(colnames(s.mat.s))]
-  # s.mat.d <- s.mat.d[!duplicated(rownames(s.mat.d)), !duplicated(colnames(s.mat.d))]
-  
-  # cor.list <- list(
-  #   similarity.matrix = s.mat.d,
-  #   metric = which.cor,
-  #   slot = "data",
-  #   assay = DefaultAssay(so.query),
-  #   top.n.var.genes = top.n.var.genes,
-  #   internal.panel = "variable genes",
-  #   external.panel = c("L1000", "cell cycling genes"),
-  #   internal.panel.genes = int.panel,
-  #   external.panel.genes = ext.panel,
-  #   all.genes = query.panel
-  # )
-  
-  # store results
-  # so.query@misc$similarity.data <- cor.list
-  
+
   cor.list <- list(
     similarity.matrix = s.mat.s,
     metric = which.cor,
@@ -649,7 +618,6 @@ if (decoration.list$rho.matrix){
 ```
 
 ```{r NMF, include = FALSE}
-# library(NMF)
 
 # NMF #####################
 if (decoration.list$NMF){
@@ -718,9 +686,10 @@ if (decoration.list$NMF){
   exp.mat.sub <- exp.mat
   rm(exp.mat); invisible(gc());
   
+
   # find optimal rank (k) ######################################
-  #cols <- c(1:10)
-  cols <- c(1:3)
+  n.rerun <- parameter.list$NMF.n.iterations
+  cols <- c(1:n.rerun)
   k <- seq(2, 30, 1)
   
   warning("Searching for optimal NMF rank...")
@@ -785,18 +754,21 @@ if (decoration.list$NMF){
   
   # store results
   so.query@misc$nmf <- list(
-    nmf = nmf.opt,
+    nmf = list(
+      W = so.query@misc[["nmf"]][["nmf"]][["W"]],
+      H = so.query@misc[["nmf"]][["nmf"]][["H"]]
+    ),
     ranks.tested = k,
-    rank.optimal = k.opt,
-    w.mat.plot = plt.wmat,
-    h.mat.plot = plt.hmat,
-    optimization.curve = plt.kopt
+    rank.optimal = k.opt
   )
   
   # log
   df.log <- addLogEntry("NMF computed", TRUE, df.log, "")
+  df.log <- addLogEntry("NMF N reruns/rank (optimization step)",n.rerun, df.log, "n.rerun")
   df.log <- addLogEntry("NMF optimal rank", k.opt, df.log, "k.opt")
-  df.log <- addLogEntry("N runs per rank", length(cols), df.log, " ")
+  df.log <- addLogEntry("N runs per rank", length(cols), df.log, "")
+  
+  
   
 } else {
   plt.wmat <- NULL
@@ -1033,11 +1005,14 @@ Row {.tabset}
 ### NMF Rank Optimization
 ```{r nmf plot 1}
 
-if (!is.null(plt.kopt)){
-  print(plt.kopt)
-  savePDF(file.name = paste0(output.path, "PDF/", "M27_NMF_rank_optimization.pdf"), plot.handle = plt.kopt, 
-          fig.width = 5, fig.height = 5, save.flag = save.pdf)
-}
+try({
+  if (!is.null(plt.kopt)){
+    print(plt.kopt)
+    savePDF(file.name = paste0(output.path, "PDF/", "M27_NMF_rank_optimization.pdf"), plot.handle = plt.kopt, 
+            fig.width = 5, fig.height = 5, save.flag = save.pdf)
+  }  
+}, silent = T)
+
 
 ```
 
@@ -1046,26 +1021,30 @@ if (!is.null(plt.kopt)){
 ### W Matrix
 ```{r wmat plot}
 
-if (!is.null(plt.wmat)){
-  print(plt.wmat)
-  savePDF(file.name = paste0(output.path, "PDF/", "M27_NMF_W_Matrix.pdf"), plot.handle = plt.wmat, 
-          fig.width = 5, fig.height = 5, save.flag = save.pdf)
-  write.csv(data.frame(nmf.opt[["W"]]), file = paste0(output.path, "Tables/", "NMF_W_Matrix.csv"),
-          row.names = T)
-}
+try({
+  if (!is.null(plt.wmat)){
+    print(plt.wmat)
+    savePDF(file.name = paste0(output.path, "PDF/", "M27_NMF_W_Matrix.pdf"), plot.handle = plt.wmat, 
+            fig.width = 5, fig.height = 5, save.flag = save.pdf)
+    write.csv(data.frame(nmf.opt[["W"]]), file = paste0(output.path, "Tables/", "NMF_W_Matrix.csv"),
+              row.names = T)
+  }
+}, silent = T)
 
 ```
 
 ### H Matrix
 ```{r hmat plot}
 
-if (!is.null(plt.hmat)){
-  print(plt.hmat)
-  savePDF(file.name = paste0(output.path, "PDF/", "M27_NMF_H_Matrix.pdf"), plot.handle = plt.hmat, 
-          fig.width = 5, fig.height = 5, save.flag = save.pdf)
-  write.csv(data.frame(nmf.opt[["H"]]), file = paste0(output.path, "Tables/", "NMF_H_Matrix.csv"),
-          row.names = T)
-}
+try({
+  if (!is.null(plt.hmat)){
+    print(plt.hmat)
+    savePDF(file.name = paste0(output.path, "PDF/", "M27_NMF_H_Matrix.pdf"), plot.handle = plt.hmat, 
+            fig.width = 5, fig.height = 5, save.flag = save.pdf)
+    write.csv(data.frame(nmf.opt[["H"]]), file = paste0(output.path, "Tables/", "NMF_H_Matrix.csv"),
+              row.names = T)
+  }
+}, silent = T)
 
 ```
 
