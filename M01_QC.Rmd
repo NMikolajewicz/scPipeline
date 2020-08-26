@@ -72,13 +72,13 @@ if (!exists("data.path") & !exists("user")) {
 # get input data files paths
 inputDataSpecification <- function(inputs = "M01_inputs.csv", subsets = "M01_subsets.csv"){
   
-  input.data <- read.csv(inputs)
+  input.data <- read.csv(inputs, stringsAsFactors = F)
   colnames(input.data) <- rmvCSVprefix(colnames(input.data))
   input.data <- apply(input.data, 2, function(x) gsub("Â", "", x))
   input.data <- as.data.frame(input.data)
   
   # get subsets
-  input.subset <- read.csv(subsets)
+  input.subset <- read.csv(subsets, stringsAsFactors = F)
   
   # wrangle into list
   u.samples <- unique(input.subset$sample)
@@ -232,7 +232,7 @@ loadMatdev <- function(import_set, input_organisms, dir) {
   
   is.kumal <- F # specificy fixes made to accomodate Kumal 2018 EMT6 data
   if (is.kumal){
-    expression_matrix<-read.csv(import_set_path[1],header=F)
+    expression_matrix<-read.csv(import_set_path[1],header=F, stringsAsFactors = F)
     expression_matrix <- as.data.frame(t(expression_matrix))
   } else {
     expression_matrix<-read.table(import_set_path[1],header=TRUE)
@@ -244,8 +244,8 @@ loadMatdev <- function(import_set, input_organisms, dir) {
   
   # get gene and ensembl names
   if (is.kumal){
-    features.df<-read.csv(import_set_path[3],header=T)
-    cell.df <-read.csv(import_set_path[2],header=T)
+    features.df<-read.csv(import_set_path[3],header=T, stringsAsFactors = F)
+    cell.df <-read.csv(import_set_path[2],header=T, stringsAsFactors = F)
     colnames(expression_matrix) <- cell.df$NM_ID
     expression_matrix$GENE <- as.character(features.df$GeneSymbol)
   } 

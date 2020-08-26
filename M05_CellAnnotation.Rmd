@@ -89,7 +89,7 @@ save.pdf <- T
 ```{r specify input references}
 
 # import geneset path file
-all.references <- read.csv("M05_genesets.csv")
+all.references <- read.csv("M05_genesets.csv", stringsAsFactors = F)
 
 # get input references
 query.references <- all.references[all.references$names %in% which.references, ]
@@ -320,7 +320,7 @@ if (length(u_barcodes) > 1) {
 
 prepGeneSet <- function(gs.file, gs.dir, gs.species, gs.available.genes){
   
-  gs.data <- read.csv(paste(gs.dir, gs.file, sep = ""), header = TRUE)
+  gs.data <- read.csv(paste(gs.dir, gs.file, sep = ""), header = TRUE, stringsAsFactors = F)
   gs.long <- pivot_longer(gs.data, colnames(gs.data))
   
   #clean up

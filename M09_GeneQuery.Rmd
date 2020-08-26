@@ -118,10 +118,10 @@ subsample_factor <- 1
 ```{r import appropriate csv files}
 
 if (which.input$query_input_format==1){
-  gene.sets.type1 <- read.csv("M09_type1_queries.csv", header = TRUE)
+  gene.sets.type1 <- read.csv("M09_type1_queries.csv", header = TRUE, stringsAsFactors = F)
   colnames(gene.sets.type1) <- rmvCSVprefix(colnames(gene.sets.type1))
 } else if (which.input$query_input_format==2){
-  gene.sets.type2.df <- read.csv("M09_type2_queries.csv", header = TRUE)
+  gene.sets.type2.df <- read.csv("M09_type2_queries.csv", header = TRUE, stringsAsFactors = F)
   colnames(gene.sets.type2.df) <- rmvCSVprefix(colnames(gene.sets.type2.df))
   gene.sets.type2 <- list()
   for (i in 1:nrow(gene.sets.type2.df)){
@@ -131,12 +131,12 @@ if (which.input$query_input_format==1){
                                            module = gene.sets.type2.df$module[i])
   }
 } else if (which.input$query_input_format==5){
-  gene.sets.type5 <- read.csv("M09_type5_queries.csv", header = TRUE)
+  gene.sets.type5 <- read.csv("M09_type5_queries.csv", header = TRUE, stringsAsFactors = F)
   colnames(gene.sets.type5) <- rmvCSVprefix(colnames(gene.sets.type5))
 }
 
 if (!exists("subgroup")) subgroup <- "no.subset"
-subset.input <- read.csv("M00_subgroups.csv", header = TRUE)
+subset.input <- read.csv("M00_subgroups.csv", header = TRUE, stringsAsFactors = F)
 colnames(subset.input) <- rmvCSVprefix(colnames(subset.input))
 
 subset.list <- list()
