@@ -1,0 +1,3 @@
+data.path = "path/to/data/directory"
+user = "you_initials"
+
