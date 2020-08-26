@@ -765,8 +765,6 @@ plt.pre_post_2 <- FeatureScatter(so, feature1 = "nFeature_RNA", feature2 = "nFea
   xlab("Genes/cell (raw)") + ylab("Genes/cell (normalized)")
 
 plt.pre_post_norm <- CombinePlots(plots = list(plt.pre_post_1, plt.pre_post_2), ncol = 2, legend = 'none')
-# print(paste("Post-normalization statistics (sec): " , round((proc.time() - ptm)[[3]],2)))
-
 
 if (analysis.parameters$print.inline){
   print(plt.UMI_per_cell)
@@ -779,15 +777,16 @@ if (analysis.parameters$print.inline){
 
 ```{r c18 - preliminary umap}
 
+# Run pca
+so <- RunPCA(so, verbose = FALSE)
+
 # specify number of PCA components to use for downstream analysis
 pca.var.threshold <- 0.9
-pca.prop <- propVarPCA(so.query)
+pca.prop <- propVarPCA(so)
 nDim <- max(pca.prop$pc.id[pca.prop$pc.cum_sum<pca.var.threshold])+1
 
 cluster_resolution <- analysis.parameters$cluster.resolution
 
-# ptm <- proc.time()
-so <- RunPCA(so, verbose = FALSE)
 so <- FindNeighbors(object = so, reduction = "pca", dims = 1:nDim)
 so <- FindClusters(object = so, resolution = cluster_resolution, verbose = 0, algorithm = 1, modularity.fxn = 1)
 so <- RunUMAP(so, dims = 1:nDim)
