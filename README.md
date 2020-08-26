@@ -25,7 +25,7 @@ See  [scPipeline Wiki](https://github.com/NMikolajewicz/scPipeline/wiki) for ins
 | M06  | Bulk vs. Single | Down | Preprocessed_Datasets | - | No | Low |
 | M07  | CNV Analysis | Down | Preprocessed_Datasets | - | No | High |
 | M10  | Group Comparison | Down | Preprocessed_Datasets | - | No | Moderate |
-| M12  | Ligand Receptor Network | Up | Preprocessed_Datasets | - | No | Moderate |
+| M12  | Ligand Receptor Network | Up | Preprocessed_Datasets | - | No | High |
 | M14  | Map Embedding | Down | Preprocessed_Datasets | - | No | Low |
 | M20  | 3D UMAP | Up | Preprocessed_Datasets | - | No | Low |
 | M21  | Cluster Composition | Up | Preprocessed_Datasets | - | No | Low |
