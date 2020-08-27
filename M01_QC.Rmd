@@ -997,7 +997,7 @@ if (length(u_barcodes) > 1) {
   
 }
 
-if (print.inline) print(plt.cluster_composition_barcodes)
+if (analysis.parameters$print.inline) print(plt.cluster_composition_barcodes)
 
 ```
 
