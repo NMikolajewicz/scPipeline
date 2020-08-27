@@ -39,12 +39,12 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # specify parameters
 analysis.parameters <- analysisParameters(
-  which.data = c("pilot6"),
-  which.strata = c("GBM"),
+  which.data = c("pilot11.Mm"),
+  which.strata = c("neural"),
   organism.filter.flag = F,                             
   organism.include = c("Mm"),
   save.flag = T,                                                              # OPTIONAL; logical (default = T)  # save results
-  save.filename = "test_300720.Rdata", # note that prefix containing module number and run ID is appended to save file. 
+  save.filename = "p11_neural_DIV7_270820.Rdata", # note that prefix containing module number and run ID is appended to save file. 
   save.directory = "Preprocessed_Datasets/",
   cluster.resolution = 1,
   gene.upperlimit = 9000,
@@ -727,8 +727,7 @@ if (analysis.parameters$print.inline){
 ```{r c16 - normalize_data, warning = FALSE}
 
 # Run data normalization
-# normalization_method_ps <- "SCT" # "NFS" or "SCT"
-normalization_method_ps <- "SCT"
+normalization_method_ps <- "SCT" # "NFS" or "SCT"
 
 enable.parallelization <- T
 if (n.workers$normScale == 1) enable.parallelization <- F
@@ -845,7 +844,7 @@ if (analysis.parameters$print.inline){
 ```{r c19 - PCA}
 
 pc.elbow_min_difference_ps <- 0.001
-pc.cum_var_explained_threshold_ps <- 0.8
+pc.cum_var_explained_threshold_ps <- pca.var.threshold
 PC_number_method_ps <- 2
 
 # calculate proportion of variance explained by each PC ---------------------
@@ -887,6 +886,121 @@ if (analysis.parameters$print.inline){
 }
 
 ```
+
+
+
+```{r helper functions}
+
+# alternative function to plot cluster composition
+plot.cluster_composition_alt <- function(df.cluster_annotations, other_threshold = 0.05, set_color = 2, lab_color = NULL, label_order = NULL){
+  levels(df.cluster_annotations$predicted_labels) <- c(levels(df.cluster_annotations$predicted_labels), "other")
+  df.cluster_annotations$predicted_labels[df.cluster_annotations$freq < other_threshold] <- as.character("other")
+  
+  # create graph to visualize representation across clusters
+  u_predictions <- unique(df.cluster_annotations$predicted_labels)
+  n_subgroups <- length(u_predictions)
+  
+  if (is.null(lab_color)){
+    color_count <- max(n_subgroups)
+    my_cols = colorRampPalette(brewer.pal(8, paste("Set", set_color, sep = "")))(color_count)
+  } else {
+    my_cols <- lab_color
+  }
+  
+  if (is.null(label_order)){
+    label_order <- unique(df.cluster_annotations$predicted_labels)
+  } 
+  
+  
+  # ensure that clusters are ordered numerically
+  reordered_clusters <- order(as.numeric(as.vector(df.cluster_annotations$cluster_membership)))
+  df.cluster_annotations <- df.cluster_annotations[reordered_clusters, ]
+  df.cluster_annotations$cluster_membership <- as.numeric(as.vector(df.cluster_annotations$cluster_membership))
+  cluster_chart_labels <- unique(df.cluster_annotations$cluster_membership)
+  
+  plt.cluster_composition <- ggplot(df.cluster_annotations, aes(x = cluster_membership, fill = factor(predicted_labels, levels = label_order), y = freq)) +
+    geom_bar(position = "fill", stat = "identity") + 
+    scale_x_continuous("Cluster", labels = as.character(cluster_chart_labels), breaks = cluster_chart_labels) + 
+    scale_fill_manual(values = my_cols) + 
+    xlab("Cluster ID") + ylab("Cluster Representation") + ggtitle("Cluster Annotations")
+  
+  return(plt.cluster_composition)
+}
+
+
+# function to convert long to wide df
+long2wide <- function(df){
+  
+  # create wide version (for output to excel), reorder factors, and get basic descriptive stats
+  df.wide <- dcast(df, cluster_membership ~ predicted_labels, value.var = "n")
+  df.wide[is.na(df.wide)] <- 0
+  reordered_factors <- order(as.numeric(as.vector(df.wide$cluster_membership)))
+  df.wide <- df.wide[reordered_factors, ]
+  rownames(df.wide) <- df.wide$cluster_membership
+  df.wide <- as.data.frame(t(df.wide))
+  df.wide <- df.wide[2:dim(df.wide)[1], ]
+  df_id_rnames <- rownames(df.wide)
+  colnames(df.wide) <- paste("cluster", colnames(df.wide), sep = "")
+  df.wide <- data.frame(apply(df.wide, 2, function(x) as.numeric(as.character(x))))
+  df.wide[dim(df.wide)[1]+1, ] <- apply(df.wide, 2, sum)
+  rownames(df.wide) <- c(df_id_rnames, "TOTAL")
+  df.wide[, dim(df.wide)[2]+1] <- apply(df.wide, 1, sum)
+  colnames(df.wide)[dim(df.wide)[2]] <- "TOTAL"
+  
+  return(df.wide)
+}
+
+
+```
+
+
+
+
+```{r cluster composition by barcode, warning = FALSE}
+
+# get barcode labels and clusters
+cluster_membership <- as.vector(so@meta.data[["seurat_clusters"]])
+barcode_labels <- as.vector(so@meta.data[["Barcode"]])
+df.bar_codes <- data.frame(cluster_membership, barcode_labels)
+
+# tally up cluster compositions
+df.all_barcodes <- df.bar_codes %>% 
+  dplyr::group_by(cluster_membership, barcode_labels) %>%
+  tally() %>% 
+  dplyr::mutate(freq = n / sum(n)) 
+
+u_barcodes <- unique(df.all_barcodes$barcode_labels)
+
+if (length(u_barcodes) > 1) {
+  
+  # convert long to wide (cell type table)
+  df_for_wide_barcodes <- df.all_barcodes
+  colnames(df_for_wide_barcodes)[colnames(df_for_wide_barcodes) == "barcode_labels"] <- "predicted_labels"
+  df.all_barcodes_wide <- long2wide(df_for_wide_barcodes)
+  
+  # plot cluster compositio by barcode
+  df.cluster_annotations_barcodes <- df.all_barcodes
+  colnames(df.cluster_annotations_barcodes)[colnames(df.cluster_annotations_barcodes) == "barcode_labels"] <- "predicted_labels"
+  
+  plt.cluster_composition_barcodes <- plot.cluster_composition_alt(df.cluster_annotations_barcodes, 
+                                                                   other_threshold = 0)
+  
+  plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes + 
+    theme_miko(legend = T) + 
+    ggthemes::scale_fill_ptol("Barcode") + 
+    labs(title = "Cluster Composition", subtitle = "Stratified by Barcodes")
+} else {
+  df_for_wide_barcodes <- data.frame()
+  df.all_barcodes_wide <- data.frame()
+  df.cluster_annotations_barcodes <- data.frame()
+  plt.cluster_composition_barcodes <- c()
+  
+}
+
+if (print.inline) print(plt.cluster_composition_barcodes)
+
+```
+
 
 
 ```{r c20 - cell cycle scoring, fig.width=14, fig.height = 4}
@@ -1453,6 +1567,19 @@ try({
 
 ```
 
+
+Cluster Composition
+===================================== 
+
+```{r plt.cluster_composition_barcodes, fig.width=13, fig.height=4}
+
+try({
+  print(plt.cluster_composition_barcodes)
+  savePDF(file.name = paste0(output.path, "PDF/", "M01_cluster_composition_barplot.pdf"), plot.handle = plt.cluster_composition_barcodes, 
+          fig.width = 13, fig.height = 4, save.flag = save.pdf)  
+}, silent = T)
+
+```
 
 Summary Statistics
 ===================================== 
