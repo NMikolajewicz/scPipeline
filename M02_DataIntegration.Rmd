@@ -43,13 +43,13 @@ invisible({lapply(packages2load, library, character.only = TRUE)})
 
 save.flag <- T
 
-save.filename <- "M02_testSet_rPCA_120820"
+save.filename <- "M02_neuroDif_p41011_010920"
 
 k.filter <-  200 # lower k.filter value (e.g., 50) if there is few cells. Default = 200
 
 n.anchors <- 3000  # number of features used for data integration # if datasets are divergent, may need fewer genes to align with (e.g., 1000)
 
-integration_method <- "rPCA" # "CCA" for small datasets, "rPCA" for large datasets
+integration_method <- "CCA" # "CCA" for small datasets, "rPCA" for large datasets
 
 print.inline <- FALSE
 
@@ -59,7 +59,7 @@ n.workers <- list(
 )
 
   do.memory.limit <- T # specify whether to limit max memory (set T if local)
-  max.memory <- 100 # numeric, in terms of Gb (set to 100 for cluster)
+  max.memory <- 200 # numeric, in terms of Gb (set to 100 for cluster)
 
 
 
@@ -67,23 +67,30 @@ target.species <- "Mm" #if mixed input, specify target as 'Hs' for best performa
 target.cluster.resolution <- 1
 
 
-subset.all <- 0.1
+subset.all <- 1
 
 input.data <- list(
-  p4.GL261_01 = list(
-    file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
+  p4.neuro = list(
+    file = "R72_M01_NM2_p4_neuralDif_010920.Rdata",
     cluster.resolution = 1,
     species = "Mm",
     subsample = subset.all,
-    grouping.field = "Barcode",
-    groups = c("01_G(GL261)_FR_CST","02_C(CT2A)_FR_CST","03_H(GL261)_FR_CSTsi")),
-  p7.CT2A_03_R1_GL261_04_R1 = list(
-    file = "Module1_p9_CT2A_250620.Rdata",
+    grouping.field = NA,
+    groups = NA),
+  p10.CGR8 = list(
+    file = "R71_M01_NM2_p10_CGR8_310820.Rdata",
     cluster.resolution = 1,
     species = "Mm",
     subsample = subset.all,
-    grouping.field = "Barcode",
-    groups = c("07_PR_CT2A_R1"))
+    grouping.field = NA,
+    groups = NA),
+  p11.DIV7 = list(
+    file = "R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
+    cluster.resolution = 1,
+    species = "Mm",
+    subsample = subset.all,
+    grouping.field = NA,
+    groups = NA)
 )
 
 # save PDF
@@ -92,204 +99,6 @@ save.pdf <- T
 
 ```
 
-```{r alternative input datasets}
-
-# CT2A ###########################################
-
-# input.data <- list(
-#   p4.CT2A_02 = list(
-#     file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("02_C(CT2A)_FR_CST")),
-#   p7.CT2A_03_R1 = list(
-#     file = "Module1_p7_GBM_080720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("03_GBM_CT2A")),
-#   p8.GBM_PBSctrl_06 = list(
-#     file = "Module1_p8_GL261_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("06_GBM_PBSctrl")),
-#   p8.CT2A_01_R2 = list(
-#     file = "Module1_p8_CT2A_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("01_CT2A_R2")),
-#   p8.CT2A_02_R3 = list(
-#     file = "Module1_p8_CT2A_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("02_CT2A_R3")),
-#   p9.CT2A_07_R1 = list(
-#     file = "Module1_p9_CT2A_250620.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("07_PR_CT2A_R1"))
-# )
-
-
-# GL261 ###########################################
-
-
-# input.data <- list(
-#   p4.GL261_01 = list(
-#     file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("01_G(GL261)_FR_CST")),
-#   p4.GL261_03 = list(
-#     file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("03_H(GL261)_FR_CSTsi")),
-#   p7.GL261_04_R1 = list(
-#     file = "Module1_p7_GBM_080720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("04_GBM_GL261")),
-#   p8.GL261_03_R2 = list(
-#     file = "Module1_p8_GL261_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("03_GL261_R2")),
-#   p8.GL261_04_R3 = list(
-#     file = "Module1_p8_GL261_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("04_GL261_R3")),
-#   p8.GL261.GFP_05 = list(
-#     file = "Module1_p8_GL261_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("05_GL261GFP")),
-#   p8.GBM_PBSctrl_06 = list(
-#     file = "Module1_p8_GL261_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("06_GBM_PBSctrl"))
-# )
-
-
-
-# GBM ###########################################
-
-# input.data <- list(
-#   p4.GL261_01 = list(
-#     file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("01_G(GL261)_FR_CST")),
-#   p4.CT2A_02 = list(
-#     file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("02_C(CT2A)_FR_CST")),
-#   p4.GL261_03 = list(
-#     file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("03_H(GL261)_FR_CSTsi")),
-#   p7.CT2A_03_R1 = list(
-#     file = "Module1_p7_GBM_080720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("03_GBM_CT2A")),
-#   p7.GL261_04_R1 = list(
-#     file = "Module1_p7_GBM_080720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("04_GBM_GL261")),
-#   p8.GL261_03_R2 = list(
-#     file = "Module1_p8_GL261_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("03_GL261_R2")),
-#   p8.GL261_04_R3 = list(
-#     file = "Module1_p8_GL261_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("04_GL261_R3")),
-#   p8.GL261.GFP_05 = list(
-#     file = "Module1_p8_GL261_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("05_GL261GFP")),
-#   p8.GBM_PBSctrl_06 = list(
-#     file = "Module1_p8_GL261_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("06_GBM_PBSctrl")),
-#   p8.CT2A_01_R2 = list(
-#     file = "Module1_p8_CT2A_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("01_CT2A_R2")),
-#   p8.CT2A_02_R3 = list(
-#     file = "Module1_p8_CT2A_tumor_090720.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("02_CT2A_R3")),
-#   p9.CT2A_07_R1 = list(
-#     file = "Module1_p9_CT2A_250620.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = "Barcode",
-#     groups = c("07_PR_CT2A_R1"))
-# )
-
-
-```
 
 ```{r parameter assignment and assertion statements}
 
@@ -530,14 +339,14 @@ for (i in 1:length(so.list)){
   }
   
   gene.rep <- rownames(so.list[[set.name]])
-  
+
   which.match <- grepl(ens.prefix, gene.rep)
   
-  if (!(sum(which.match) == length(gene.rep))) {
+  if ((!(sum(which.match) == length(gene.rep))) & (checkGeneRep(gList[[set.name]], gene.rep) != "symbol")) {
     so.list[[set.name]] <- subset(so.list[[set.name]], features = gene.rep[which.match])
   }
   
-  so.list[[set.name]] <- ens2sym.so(so = so.list[[set.name]], gNames.list = gList[[set.name]])
+  so.list[[set.name]] <- ens2sym.so(object = so.list[[set.name]], gNames.list = gList[[set.name]])
   
   # gList.consolidate <- c(gList.consolidate, gList[[set.name]])
   gList.consolidate <- bind_rows(gList.consolidate, data.frame(ens = gNames[[set.name]], sym = gList[[set.name]]))
