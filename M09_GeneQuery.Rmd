@@ -51,7 +51,7 @@ which.input <- list(
   #   2: M09_type2_queries.csv; gene.sets.type2; .csv file
   #   3: cluster DEG
   #   4: top N cluster markers
-  #   5: M09_type3_queries.csv; GO/Reactome genesets
+  #   5: M09_type5_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
   query_input_format = 0,
   do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
