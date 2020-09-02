@@ -49,7 +49,7 @@ k.filter <-  200 # lower k.filter value (e.g., 50) if there is few cells. Defaul
 
 n.anchors <- 3000  # number of features used for data integration # if datasets are divergent, may need fewer genes to align with (e.g., 1000)
 
-integration_method <- "CCA" # "CCA" for small datasets, "rPCA" for large datasets
+integration_method <- "rPCA" # "CCA" for small datasets, "rPCA" for large datasets
 
 print.inline <- FALSE
 
@@ -627,7 +627,7 @@ warning("Selecting integration features...\n")
   so <- IntegrateData( 
     anchorset = so.anchors, 
     normalization.method = "SCT",
-    features.to.integrate = which.features.integrate,
+    features.to.integrate = NULL, # which.features.integrate
     verbose = T
   )
   
@@ -638,7 +638,8 @@ warning("Selecting integration features...\n")
   rm(so.list)
 }
 
-n.anchors.effect <- length(which.features.integrate)
+# n.anchors.effect <- length(which.features.integrate)
+n.anchors.effect <- n.anchors
 
 # remove baggage
 rm(so.anchors)
