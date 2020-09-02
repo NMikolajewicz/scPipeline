@@ -618,8 +618,8 @@ warning("Selecting integration features...\n")
   which.features.integrate <- which.features.integrate[which.features.integrate %in% query.panel]
 
   # last chance assertions
-  so.anchors@anchor.features <- so.anchors@anchor.features[(so.anchors@anchor.features %in% which.features.integrate)]
-  so.anchors@command@params[["anchor.features"]] <- so.anchors@anchor.features
+  # so.anchors@anchor.features <- so.anchors@anchor.features[(so.anchors@anchor.features %in% which.features.integrate)]
+  # so.anchors@command@params[["anchor.features"]] <- so.anchors@anchor.features
   
   
   # integrate data
