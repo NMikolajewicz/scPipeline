@@ -1,11 +1,21 @@
 ---
-title: "Module12_ligand_receptor_interactions"
+title: "Ligand-Receptor Interactions"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: fill
 editor_options: 
   chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = if (exists("user")){paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", format(Sys.Date(), "%d%m%y"), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
+    )
+  })
 ---
 
 ```{r setup, include=FALSE}
@@ -49,9 +59,9 @@ data.type  <- "mean count" # options: mean count, DEG
 top.N.genes <- 50 # Nth percentile expression
 
 # compare cell types
-pairwise.comparison.flag <- F
-cell_type_a <- "c12"
-cell_type_b <- "c4"
+# pairwise.comparison.flag <- F
+# cell_type_a <- "c12"
+# cell_type_b <- "c4"
 
 # downsampling
 subsample_factor <- 1
@@ -62,17 +72,6 @@ subset.df <- "no.subset"
 # top n genes for LR network
  top.N.genes <- 500
 
-# subset data
-cell_barcode.filter.flag <- F
-# cell_barcode.filter.list <- list(adult = c("MGH1","MGH66"),
-                                 # pediatric = c("BT", "MGH85"))# subset according to cell names 
-#Suva2019: 
-# adult GBM: MGH1* & MGH66
-# pedaetric GBM: BT & MGH85
-
-group_barcode.filter.flag <- F
-# group_barcode.filter.list <- list(GL261 = c("GL261"),
-                                  # CT2A = c("CT2A"))
 
 # communication type
 communication.type <- c("growth factor", "other", 'cytokine','checkpoint')
@@ -80,13 +79,8 @@ communication.type <- c("growth factor", "other", 'cytokine','checkpoint')
 
 aggregation.method <- "mean" # options: mean, median
 n.LRpairs <- 20
-```
 
-
-```{r}
-if (pairwise.comparison.flag){
-  stopifnot(exists("cell_type_a") & exists("cell_type_b"))
-}
+save.pdf <- T
 ```
 
 
@@ -108,12 +102,7 @@ df.log <- addLogEntry("Top N pairs shown", n.LRpairs, df.log, "n.LRpairs")
 if (is.character(subset.df))  df.log <- addLogEntry("Subset", subset.df, df.log, "subset.df")
 df.log <- addLogEntry("Downsample Factor", subsample_factor, df.log, "subsample_factor")
 df.log <- addLogEntry("Aggregation Method", aggregation.method, df.log, "aggregation.method")
-df.log <- addLogEntry("cell-cell comparison flag", pairwise.comparison.flag, df.log, "pairwise.comparison.flag")
 
-if (pairwise.comparison.flag){
-df.log <- addLogEntry("Cell Type A", cell_type_a, df.log, "cell_type_a")
-df.log <- addLogEntry("Cell Type B", cell_type_b, df.log, "cell_type_b")
-}
 
 ```
 
@@ -163,77 +152,6 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 
 ```
 
-
-
-```{r subset data}
-# get Seurat subset for cells of interest
-so.list_1 <- list()
-if (cell_barcode.filter.flag == TRUE){
-  for (i  in 1:length(cell_barcode.filter.list)){
-    grp.name <- names(cell_barcode.filter.list)[i]
-    pattern <- paste(cell_barcode.filter.list[[i]], collapse="|")
-    so.list_1[[grp.name]] <- SubsetData(object = so.query, cells = (grepl(pattern, colnames(so.query@assays[[current.assay]]@scale.data)))) 
-  }
-} else {so.list_1 <- NULL}
-
-
-# get Seurat subset for groups of interest
-so.list_2 <- list()
-if (group_barcode.filter.flag == TRUE){
-  for (i  in 1:length(group_barcode.filter.list)){
-    grp.name_2 <- names(group_barcode.filter.list)[i]
-    if (!is.null(so.list_1)){
-      for (j in 1:length(so.list_1)){
-        grp.name_1 <- names(so.list_1)[j]
-        grp.name <- paste(grp.name_1, "_", grp.name_2, sep = "")
-        pattern <- paste(group_barcode.filter.list[[i]], collapse="|")
-        so.list_2[[grp.name]] <- SubsetData(object = so.list_1[[j]], 
-                                            cells = (grepl(pattern, so.list_1[[j]]@meta.data[["Barcode"]])))  
-      }
-    } else {
-      grp.name <- grp.name_2
-        pattern <- paste(group_barcode.filter.list[[i]], collapse="|")
-      so.list_2[[grp.name]] <- SubsetData(object = so.query, cells = (grepl(pattern, so.query@meta.data[["Barcode"]])))  
-    }
-  }
-} else {so.list_2 <- NULL}
-
-# assign so subsets to correct list
-if (is.null(so.list_1) & is.null(so.list_2)){
-  so.list <- list(so.query)
-  names(so.list) <- input.file
-} else if (is.null(so.list_1) & !is.null(so.list_2)){
-  so.list <- so.list_2
-} else if (!is.null(so.list_1) & is.null(so.list_2)){
-  so.list <- so.list_1
-} else if (!is.null(so.list_1) & !is.null(so.list_2)){
-  so.list <- so.list_2
-}
-
-```
-
-
-```{r uMAP}
-
-plt.umap.list <- list()
-
-for (i in 1:length(so.list)){
-  grp.name <- names(so.list)[i]
-  # cluster.field <- paste(DefaultAssay(so.list[[grp.name]]), "_snn_res.", cluster.resolution, sep = "")
-  cluster.field <- "seurat_clusters"
-  
-  plt.umap.list[[grp.name]] <- DimPlot(so.list[[grp.name]], reduction = "umap", 
-                                       label = T, 
-                                       group.by = cluster.field)  + 
-    xlab("UMAP 1") + ylab("UMAP 2") + 
-    ggtitle(grp.name)
-  if (print.inline){print(plt.umap.list[[grp.name]])}
-}
-
-
-```
-
-
 ```{r  function to specify signature gene sets}
 # convert human symbols to mouse symbols
 
@@ -257,9 +175,7 @@ gene2species <- function(x, expected_species){
 prep.data <- function(so, cluster.field, gNames.list, data.slot){
   
   current.assay <- DefaultAssay(so)
-  # initiate dataframe
-  # df.mean_exp <- data.frame()
-  
+
   # get unique clusters
   u.clusters <- as.numeric(as.character(unique(so@meta.data[[cluster.field]])))
   u.clusters <- u.clusters[order(u.clusters)]
@@ -275,42 +191,19 @@ prep.data <- function(so, cluster.field, gNames.list, data.slot){
   
   # prepare data
   cur.genes <- colnames(exp.df_t)
-  # gene.rep <- checkGeneRep(cur_gene.list = gNames.list, cur_rep = cur.genes)
-  # if (gene.rep == "ensembl"){
-  #   cur.genes <-  as.vector(gNames.list[cur.genes])
-  # }
-  # stopifnot(checkGeneRep(cur_gene.list = gNames.list, cur_rep = cur.genes) == "symbol")
   
   # exp.df_t <- as.data.frame(t(exp.mat))
   rownames(exp.mat) <- gene2species(rownames(exp.mat) , expected_species = "Hs")
   colnames(exp.df_t) <- gene2species(cur.genes, expected_species = "Hs")
   exp.df_t$cell_type <- paste("c", as.vector(so@meta.data[[cluster.field]]), sep = "")
   
-  
-  
   output <- list(u.clusters, exp.mat, exp.df_t)
   return(output)
   
 }
-
-# initiate lists
-u.clusters.list <- list()
-exp.mat.list <- list()
-exp.df_t.list <- list()
-
-for (i in 1:length(so.list)){
-  grp.name <- names(so.list)[i]
-  
-  # cluster.field <- paste(DefaultAssay(so.list[[grp.name]]), "_snn_res.", cluster.resolution, sep = "")
   cluster.field <- "seurat_clusters"
-  prep.output <- prep.data(so.list[[grp.name]], cluster.field, gNames.list, which.data)
+  prep.output <- prep.data(so.query, cluster.field, gNames.list, which.data)
   
-  u.clusters.list[[grp.name]] <- prep.output[[1]]
-  exp.mat.list[[grp.name]] <- prep.output[[2]]
-  exp.df_t.list[[grp.name]] <- prep.output[[3]]
-}
-
-
 ```
 
 
@@ -344,20 +237,13 @@ analyze_LG.pairs <- function(u.clusters, exp.df_t, communication.type, high.exp_
 res.LR.list <- list()
 res.LR.list2 <- list()
 
-
-for (i in 1:length(so.list)){
-  
   # initiate lists
   res.comm.list <- list()
   res.comm.list2 <- list()
   
-  # get data name
-  grp.name <- names(so.list)[i]
-  
   # get data
-  so <- so.list[[grp.name]]
-  exp.df_t <- exp.df_t.list[[grp.name]]
-  u.clusters <- u.clusters.list[[grp.name]]
+  exp.df_t <-  prep.output[[3]]
+  u.clusters <- prep.output[[1]]
   
   # get highly expressed genes
  
@@ -402,36 +288,15 @@ for (i in 1:length(so.list)){
               cell_col=cell_col,
               link.arr.lwd= top.data$cell_from_mean_exprs,
               link.arr.width= top.data$cell_to_mean_exprs)
-      title(paste(grp.name, ": ", comm.type, sep = ""))
+      title(comm.type)
       
-      # NetView(res.comm.list[[comm.type]][1:n.LRpairs,],col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
     }
   }
   
   # store results
   res.comm.list[["pooled"]] <- res.by_comm
   res.comm.list2[["pooled"]] <- res.by_comm2
-  
-  res.LR.list[[grp.name]] <- res.comm.list
-  res.LR.list2[[grp.name]] <- res.comm.list2
-}
 
-
-# # show top N LR pairs (overall; for each communication type)
-# resA.overall<-resA.by_comm[order(resA.by_comm$cell_from_mean_exprs*resA.by_comm$cell_to_mean_exprs,decreasing=T),][1:n.LRpairs,]
-# 
-# if (print.inline){
-#   # network plot
-#   a <- NetView(resA.overall,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
-# 
-#   # LR pairs
-#   b <- LRPlot(resA.overall[1:n.LRpairs,],
-#          datatype='mean count',
-#          cell_col=cell_col,
-#          link.arr.lwd=resA.overall$cell_from_mean_exprs[1:n.LRpairs],
-#          link.arr.width=resA.overall$cell_to_mean_exprs[1:n.LRpairs])
-#   title("Top Interactions")
-# }
 
 ```
 ```{r Interaction SUMMARIES, warning = FALSE, message = FALSE}
@@ -616,7 +481,7 @@ plt.agg.LR.list[[communication.name]] <- p.merge.final
 ```
 
 
-```{r cluster differentials}
+```{r cluster differentials, warning = FALSE, message = FALSE}
 
 # get expression  matrix
 ef.mat <- as.matrix(so.query@assays[[DefaultAssay(so.query)]]@data)
@@ -656,7 +521,7 @@ rm(ef.mat); invisible({gc()})
 
 ```
 
-```{r, fig.width = 12, fig.height=4, warning = FALSE}
+```{r, fig.width = 15, fig.height=5, warning = FALSE, message = FALSE, include = FALSE}
 
 plt.umap <- DimPlot(so.query, reduction = "umap", 
                                        label = T, 
@@ -667,10 +532,12 @@ plt.umap <- DimPlot(so.query, reduction = "umap",
         axis.ticks.x=element_blank()) +
   theme(axis.title.y=element_blank(),
         axis.text.y=element_blank(),
-        axis.ticks.y=element_blank())
+        axis.ticks.y=element_blank(),
+            plot.title = element_text(hjust = 0.5),
+            plot.subtitle = element_text(hjust = 0.5))
 
 
-f.threshold <- 0.2
+f.threshold <- 0.1
 
 plt.granular.list <- list()
 plt.top.int <- list()
@@ -706,9 +573,10 @@ for (k in 1:length(which.communication)){
   
   # filter top interactions
   filter1 <- df.comm$interaction.score > 0
-  filter2 <- df.comm$source.fraction > f.threshold
-  filter3 <- df.comm$target.fraction > f.threshold
-  df.comm <- df.comm[filter1 & filter2 & filter3, ]
+  # filter2 <- df.comm$source.fraction > f.threshold
+  # filter3 <- df.comm$target.fraction > f.threshold
+  # df.comm <- df.comm[filter1 & filter2 & filter3, ]
+  df.comm <- df.comm[filter1, ]
   
   df.comm <- df.comm %>% dplyr::arrange(-interaction.score)
   
@@ -717,8 +585,8 @@ for (k in 1:length(which.communication)){
   u.lr.top <- NULL
   n.top.int <- 20
   while((u.lr.cur < 20) & ((iter.n + n.top.int) < nrow(df.comm))){
-    df.comm <- df.comm %>% dplyr::top_n(n.top.int+iter.n)
-    u.lr.top <- unique(df.comm$LR)
+    df.comm.top <- df.comm %>% dplyr::top_n(n.top.int+iter.n, interaction.score)
+    u.lr.top <- unique(df.comm.top$LR)
     u.lr.cur <- length(u.lr.top)
     if (u.lr.cur >= n.top.int){
       break
@@ -727,12 +595,12 @@ for (k in 1:length(which.communication)){
     }
   }
   
+  df.comm <- df.comm.top; rm(df.comm.top)
+  
   if (nrow(df.comm) == 0) {
     plt.granular.list[[which.communication[k]]] <- NULL
     next
   }
-  
-  
   
   u.lr.all <- unique(df.comm.all$LR)
   u.lr.filt <- unique(df.comm$LR)
@@ -745,7 +613,7 @@ for (k in 1:length(which.communication)){
   for (i in 1:u.lr.cur){
     # for (i in 1:length(u.lr.filt)){
     
-    ligand.name <- stringr::str_extract(u.lr.filt[i], "[A-Za-z0-9]*")
+    ligand.name <- sub(" .*", "", u.lr.filt[i])
     receptor.name <- stringr::str_replace(u.lr.filt[i], "[A-Za-z0-9]*\ ->\ ", "")
     
     if (which.species == "Mm"){
@@ -760,16 +628,16 @@ for (k in 1:length(which.communication)){
     plt.grain.dot <- df.comm.sub %>%
       dplyr::filter(LR %in% u.lr.filt[i]) %>%
       dplyr::group_by(LR) %>%
-      dplyr::mutate(interaction.score = interaction.score / max(interaction.score)) %>%
       ggplot(aes(x = cell_from, y = cell_to, fill = interaction.score, size = interaction.score)) + 
       geom_point() +
       geom_point(pch=21, color = "black")  +
       xlab("Source Cluster") + ylab("Recipient Cluster") + 
-      viridis::scale_fill_viridis("Interaction (log)") + 
-      facet_wrap(~LR)
+      viridis::scale_fill_viridis("Interaction.Score") + 
+      facet_wrap(~LR) + 
+      theme(plot.title = element_text(hjust = 0.5),
+            plot.subtitle = element_text(hjust = 0.5))
     
-    # print(plt.grain.dot)
-    
+    # LIGAND UMAP
     plt.lig <- scExpression.UMAP(
       so.query,
       ligand.name,
@@ -785,8 +653,11 @@ for (k in 1:length(which.communication)){
         axis.ticks.x=element_blank()) +
   theme(axis.title.y=element_blank(),
         axis.text.y=element_blank(),
-        axis.ticks.y=element_blank())
+        axis.ticks.y=element_blank(),
+            plot.title = element_text(hjust = 0.5),
+            plot.subtitle = element_text(hjust = 0.5))
     
+    # RECEPTOR UMAP
     plt.rec <- scExpression.UMAP(
       so.query,
       receptor.name,
@@ -801,24 +672,49 @@ for (k in 1:length(which.communication)){
   theme(axis.title.x=element_blank(),
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank()) +
-  theme(axis.title.y=element_blank(),
-        axis.text.y=element_blank(),
-        axis.ticks.y=element_blank())
+      theme(axis.title.y=element_blank(),
+            axis.text.y=element_blank(),
+            axis.ticks.y=element_blank(),
+            plot.title = element_text(hjust = 0.5),
+            plot.subtitle = element_text(hjust = 0.5))
     
+    # EXPRESSION DOTPLOT
+    lr.feature <- c(ligand.name,receptor.name )
+    names(lr.feature) <- c("L", "R")
+    plt.dot.exp <- DotPlot(
+      so.query,
+      assay = NULL,
+      features = lr.feature,
+      cols = c("lightgrey", "tomato"),
+      col.min = -2.5,
+      col.max = 2.5,
+      dot.min = 0,
+      dot.scale = 6,
+      scale = T,
+      scale.by = "radius") + 
+      xlab("Genes") + ylab("Cluster") + 
+        theme(axis.title.x=element_blank(),
+              legend.title = element_text(size = 5),
+              legend.text = element_text(size = 5),
+            plot.title = element_text(hjust = 0.5),
+            plot.subtitle = element_text(hjust = 0.5))
+    
+    # COMBINE LIGAND-RECEPTOR UMAPS
     plt.umap.exp <- cowplot::plot_grid(plt.lig, plt.rec, ncol = 1, align = "hv")
     
-    plt.gran <- cowplot::plot_grid(plt.umap, plt.umap.exp, plt.grain.dot, ncol = 3, align = "hv", rel_widths = c(0.7,0.5,1))
+    # COMBINE REMAINDING PLOTS
+    plt.gran <- cowplot::plot_grid(plt.umap, plt.umap.exp, plt.dot.exp, 
+                                   plt.grain.dot, ncol = 4, align = "hv", rel_widths = c(1,0.7,0.7, 1.5), labels = "AUTO")
     
-    if (print.inline) print(plt.gran)
+    if (print.inline) {
+      print(plt.gran)
+    }
     
     plt.gran.ind.list[[u.lr.filt[i]]] <- plt.gran
   }
   
   plt.granular.list[[which.communication[k]]] <- plt.gran.ind.list
-  
-  # , axis = "lrbt"
 
-  
   # top interactions
   df.comm.u <- unique(df.comm[ ,c("LR", "cell_from")])
   df.lig <- data.frame(table(df.comm.u$LR))
@@ -830,7 +726,7 @@ for (k in 1:length(which.communication)){
     coord_flip() + 
     ylab("N sources with paired target") + 
     xlab("Ligand") + 
-    labs(title = "Ligand Profile", subtitle = which.communication[k]) + 
+    labs(title = "LR Pair Activity", subtitle = which.communication[k]) + 
     theme_miko()
   
   plt.top.int[[which.communication[k]]] <- plt.lig.profile
@@ -843,280 +739,42 @@ for (k in 1:length(which.communication)){
 
 
 
-```{r}
+```{r central log}
 
+# update central log
+run.id <- NULL
+if (!exists("user")) user <- "guest"
 
-# work.in.progress <- F
-# 
-# if (work.in.progress){
-#   
-# 
-# # find and filter queries
-# query.interaction <- "tnf"
-# query.match <- grepl(toupper(query.interaction), res.by_comm$ligand) |  grepl(toupper(query.interaction), res.by_comm$receptor)
-# res.query <- res.by_comm[query.match, ]
-# 
-# res.query <- res.by_comm
-# 
-# # res.query <- res.query[res.query$cell_from_mean_exprs > 0 | res.query$cell_to_mean_exprs > 0, ]
-# 
-# res.query$pair <- paste(res.query$ligand, "-", res.query$receptor, sep = "")
-# 
-# # res.query.tally <- res.query %>%
-# #   dplyr::group_by(comm_type, pair) %>%
-# #   tally()
-# # 
-# # 
-# # res.query.ligand <- res.query %>%
-# #   dplyr::group_by(comm_type, ligand) %>%
-# #   tally()
-# # 
-# # res.query.receptor <- res.query %>%
-# #   dplyr::group_by(comm_type, receptor) %>%
-# #   tally()
-# 
-# 
-# res.query.ligand <- res.query %>%
-#   dplyr::group_by(ligand) %>%
-#   tally()
-# 
-# df.exp <- high.exp_genes
-# 
-# 
-# all.cluster.id <- paste("c", as.character(so@active.ident), sep = "")
-# df.c <- data.frame(cell_type = all.cluster.id) %>%
-#   dplyr::group_by(cell_type) %>%
-#   tally()
-# 
-# df.exp.merge <- merge(df.exp, df.c, by = "cell_type")
-# df.exp.merge$cluster.gene <- paste(df.exp.merge$cell_type, "-", df.exp.merge$gene, sep = "")
-# 
-# df.interaction <- res.by_comm
-# df.interaction$cluster.gene<- paste(df.interaction$cell_from, "-", df.interaction$ligand, sep = "")
-# df.interaction <- df.interaction[ , c("cell_from_mean_exprs", "cluster.gene", "comm_type")]
-# 
-# df.exp.merge.int <- merge(df.exp.merge, df.interaction, by = "cluster.gene")
-# 
-# df.exp.merge.int.u <- unique(df.exp.merge.int)
-# 
-# df.exp.merge.int.u$ligand.sum <- df.exp.merge.int.u$n * df.exp.merge.int.u$cell_from_mean_exprs
-# 
-# df.ligand.pool <- df.exp.merge.int.u %>%
-#   dplyr::group_by(gene) %>%
-#   dplyr::summarize(ligand.pool = sum(ligand.sum),
-#             comm = list(comm.type))
-# 
-# 
-# hist(df.ligand.pool$ligand.pool)
-# # hist(res.query$cell_from_mean_exprs)
-# # res.query <- res.query[res.query$receptor %in% query.receptor, ]
-# 
-# }
+clog.update.success <- F
+try({
+  run.id <-  updateCentralLog(Module = "M12", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
+  clog.update.success <-  T
+}, silent = F)
+if (is.null(run.id))  {
+  warning("Central log update was unsuccessful :(\n")
+  run.id <- paste("M12_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+}
 
 ```
 
+```{r setup output directories}
 
-```{r significant ligand-receptor pairs between compare groups}
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
 
-# exp.df_t$cell_type 
-
-# 
-# valid_column_names <- make.names(names=names(exp.df_t), unique=TRUE, allow_ = TRUE)
-# names(exp.df_t) <- valid_column_names
-# 
-# exp.df_t.pooled <- NULL
-# for (i in 1:length(exp.df_t.list)){
-#   grp.name <- names(so.list)[i]
-#   exp.df_t <- exp.df_t.list[[grp.name]]
-#   exp.df_t$cell_type = i # last change
-#   exp.df_t.pooled <- rbind(exp.df_t.pooled, exp.df_t)
-# }
-# 
-# 
-# 
-# u.groups <- as.vector(unique(exp.df_t.pooled$compare_group))
-# deg.pooled.list <- list()
-# 
-# 
-# for (i in u.groups){
-#   exp.df_t.pooled_comp<- exp.df_t.pooled %>% mutate(compare_group =  sample(2,nrow(exp.df_t.pooled),replace=TRUE))
-#   deg.pooled.list[[i]] <- DEG(exp.df_t.pooled_comp %>% dplyr::filter(cell_type==i), method='Wilcox')
-#   
-# }
-
-
-
-
-
-
-# deg.pooled <- DEG(exp.df_t.pooled, 
-#              method='Wilcox')
-# 
-# # randomly assign the compare group to each sample
-# # compare_grps <- sample(2,nrow(exp.df_t),replace=TRUE)
-# exp.df_t_comp<- exp.df_t %>% mutate(compare_group =  sample(2,nrow(exp.df_t),replace=TRUE))
-# exp.df_t_comp <- exp.df_t_comp[complete.cases(exp.df_t_comp), ]
-# 
-# 
-# # find DEGenes of regulatory T cells and NK cells between these 2 groups
-# sub_a <- exp.df_t_comp %>% dplyr::filter(cell_type==cell_type_a)
-# compare_grps <- sample(2,nrow(sub_a),replace=TRUE)
-# sub_a<- sub_a %>% mutate(compare_group = compare_grps)
-# sub_a <- sub_a[complete.cases(sub_a), ]
-# deg_a <- DEG(sub_a, 
-#              method='Wilcox',
-#              contrast=c(2,1))
-# 
-# 
-# sub_b <- exp.df_t_comp %>% dplyr::filter(cell_type==cell_type_b)
-# compare_grps <- sample(2,nrow(sub_b),replace=TRUE)
-# sub_b<- sub_b %>% mutate(compare_group = compare_grps)
-# sub_b <- sub_b[complete.cases(sub_b), ]
-# deg_b <- DEG(sub_b,
-#              method='Wilcox',
-#              contrast=c(2,1))
-
-# find significant ligand-receptor pairs and do the plotting
-# resB.by_comm<-NULL
-# 
-# for(comm_type in communication.type){
-#   res_cat<-FindLR(deg_a,deg_b,datatype='DEG',comm_type=comm_type)
-#   res_cat<-res_cat[order(res_cat$cell_from_logFC*res_cat$cell_to_logFC,decreasing=T),]
-#   
-#   #plot by ligand category
-#   if(nrow(res_cat)==0){
-#     next
-#   }else if(nrow(res_cat>=n.LRpairs)){
-#     LRPlot(res_cat[1:n.LRpairs,],
-#            datatype='DEG',cell_col=cell_col,
-#            link.arr.lwd=res_cat$cell_from_logFC[1:n.LRpairs],
-#            link.arr.width=res_cat$cell_to_logFC[1:n.LRpairs])
-#   }else{
-#     LRPlot(res_cat,datatype='DEG',
-#            cell_col=cell_col,
-#            link.arr.lwd=res_cat$cell_from_logFC,
-#            link.arr.width=res_cat$cell_to_logFC)
-#   }
-#   
-#   # network plot
-#   NetView(res_cat,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
-#   title(comm_type)
-#   
-#   # store results
-#   resB.by_comm<-rbind(resB.by_comm,res_cat)
-# }
-# 
-# # pool results for all communication types
-# if(is.null(resB.by_comm)){
-#   print('No significant pairs found')
-#   
-# } else if(nrow(resB.by_comm)>=n.LRpairs){
-#   # pool results
-#   resB.overall <- resB.by_comm[order(resB.by_comm$cell_from_logFC*resB.by_comm$cell_to_logFC,decreasing=T),][1:n.LRpairs,]
-#   
-#   # network plot
-#   NetView(resB.overall,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
-#   
-#   # LR plot
-#   LRPlot(resB.overall[1:n.LRpairs,],
-#          datatype='DEG',
-#          cell_col=cell_col,
-#          link.arr.lwd=resB.overall$cell_from_logFC[1:n.LRpairs],
-#          link.arr.width=resB.overall$cell_to_logFC[1:n.LRpairs])
-#   
-# } else{
-#   
-#   # network plot
-#   NetView(resB.by_comm,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
-#   
-#   # LR plot
-#   LRPlot(resB.by_comm,datatype='DEG',
-#          cell_col=cell_col,link.arr.lwd=resB.by_comm$cell_from_logFC,
-#          link.arr.width=resB.by_comm$cell_to_logFC)
-# }
+# create output directories
+dir.create(output.path)
+dir.create(paste0(output.path, "Tables/"))
+if (save.pdf) dir.create(paste0(output.path, "PDF/"))
 
 ```
-
-
-
-```{r, fig.height= 10, fig.width= 10}
-# 
-# library(iTALK)
-# 
-# 
-# 
-# ## highly expressed ligand-receptor pairs
-# 
-# # find top 50 percent highly expressed genes
-# highly_exprs_genes<-rawParse(my_data,top_genes=50,stats='mean')
-# # find the ligand-receptor pairs from highly expressed genes
-# comm_list<-c('growth factor','other','cytokine','checkpoint')
-# cell_col<-structure(c('#4a84ad','#4a1dc6','#e874bf','#b79eed', '#ff636b', '#52c63b','#9ef49a'),names=unique(my_data$cell_type))
-# par(mfrow=c(1,2))
-# res<-NULL
-# for(comm_type in comm_list){
-#   res_cat<-FindLR(highly_exprs_genes,datatype='mean count',comm_type=comm_type)
-#   res_cat<-res_cat[order(res_cat$cell_from_mean_exprs*res_cat$cell_to_mean_exprs,decreasing=T),]
-#   #plot by ligand category
-#   #overall network plot
-#   NetView(res_cat,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
-#   #top 20 ligand-receptor pairs
-#   LRPlot(res_cat[1:20,],datatype='mean count',cell_col=cell_col,link.arr.lwd=res_cat$cell_from_mean_exprs[1:20],link.arr.width=res_cat$cell_to_mean_exprs[1:20])
-#   title(comm_type)
-#   res<-rbind(res,res_cat)
-# }
-# res<-res[order(res$cell_from_mean_exprs*res$cell_to_mean_exprs,decreasing=T),][1:20,]
-# NetView(res,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
-# LRPlot(res[1:20,],datatype='mean count',cell_col=cell_col,link.arr.lwd=res$cell_from_mean_exprs[1:20],link.arr.width=res$cell_to_mean_exprs[1:20])
-# 
-# ## significant ligand-receptor pairs between compare groups
-# 
-# # randomly assign the compare group to each sample
-# my_data<-my_data %>% mutate(compare_group=sample(2,nrow(my_data),replace=TRUE))
-# # find DEGenes of regulatory T cells and NK cells between these 2 groups
-# deg_t<-DEG(my_data %>% filter(cell_type=='regulatory_t'),method='Wilcox',contrast=c(2,1))
-# deg_nk<-DEG(my_data %>% filter(cell_type=='cd56_nk'),method='Wilcox',contrast=c(2,1))
-# # find significant ligand-receptor pairs and do the plotting
-# par(mfrow=c(1,2))
-# res<-NULL
-# for(comm_type in comm_list){
-#   res_cat<-FindLR(deg_t,deg_nk,datatype='DEG',comm_type=comm_type)
-#   res_cat<-res_cat[order(res_cat$cell_from_logFC*res_cat$cell_to_logFC,decreasing=T),]
-#   #plot by ligand category
-#   if(nrow(res_cat)==0){
-#     next
-#   }else if(nrow(res_cat>=20)){
-#     LRPlot(res_cat[1:20,],datatype='DEG',cell_col=cell_col,link.arr.lwd=res_cat$cell_from_logFC[1:20],link.arr.width=res_cat$cell_to_logFC[1:20])
-#   }else{
-#     LRPlot(res_cat,datatype='DEG',cell_col=cell_col,link.arr.lwd=res_cat$cell_from_logFC,link.arr.width=res_cat$cell_to_logFC)
-#   }
-#   NetView(res_cat,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
-#   title(comm_type)
-#   res<-rbind(res,res_cat)
-# }
-# if(is.null(res)){
-#   print('No significant pairs found')
-# }else if(nrow(res)>=20){
-#   res<-res[order(res$cell_from_logFC*res$cell_to_logFC,decreasing=T),][1:20,]
-#   NetView(res,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
-#   LRPlot(res[1:20,],datatype='DEG',cell_col=cell_col,link.arr.lwd=res$cell_from_logFC[1:20],link.arr.width=res$cell_to_logFC[1:20])
-# }else{
-#   NetView(res,col=cell_col,vertex.label.cex=1,arrow.width=1,edge.max.width=5)
-#   LRPlot(res,datatype='DEG',cell_col=cell_col,link.arr.lwd=res$cell_from_logFC,link.arr.width=res$cell_to_logFC)
-# }
-# I just randomly assigned the compare group to samples which has no biological difference for showing how to use the package.
-# So there should be no significant genes to be expected. 
-
-```
-
 
 
 UMAP
 ===================================== 
 
 ```{r ph1,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
-
-
 
 plt.umap.final <- DimPlot(so.query, reduction = "umap", 
                                        label = T, 
@@ -1125,6 +783,9 @@ plt.umap.final <- DimPlot(so.query, reduction = "umap",
     labs(title = "UMAP", subtitle = "clusters") + theme_miko() 
 
 print(plt.umap.final)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M12_UMAP.pdf"), plot.handle = plt.umap.final, 
+        fig.width = 5, fig.height = 5, save.flag = save.pdf)
 
 ```
 
@@ -1156,7 +817,19 @@ out_lr <- lapply(seq_along(plt.agg.LR.list), function(i) {
 
 `r paste(knitr::knit(text = paste(out_lr, collapse = '\n')))`
 
-Top Interactions
+
+```{r lr desc save,include = FALSE}
+
+for (i in 1:length(plt.agg.LR.list)){
+  plot.name <- paste0("M12_LR_summary_", names(plt.agg.LR.list)[i] ,".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+          plot.handle =  plt.agg.LR.list[[i]], 
+          fig.width = 8, fig.height = 8, save.flag = save.pdf)
+}
+
+```
+
+Top LR Pairs
 ===================================== 
 
 Row {.tabset}
@@ -1184,79 +857,82 @@ out_lr <- lapply(seq_along(plt.top.int), function(i) {
 
 `r paste(knitr::knit(text = paste(out_lr, collapse = '\n')))`
 
+```{r top lr save,include = FALSE}
 
-
-```{r ph4,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
-
-out1 <- lapply(seq_along(res.LR.list2), function(i) {
-  
-  cur.name <- names(res.LR.list2)[i]
-  
-  a1 <- knitr::knit_expand(text = sprintf("\nLR interactions | %s", paste(cur.name)))
-  a2 <- knitr::knit_expand(text = "\n=====================================")
-  a3 <- knitr::knit_expand(text = "\nRow {.tabset}")
-  a4 <- knitr::knit_expand(text = "\n-------------------------------------\n")
-  
-  
-  out2 <- lapply(seq_along(res.LR.list2[[i]]), function(j) {
-    
-    
-    n.LRpairs <- 20 # changed 
-    
-    clust_a <- as.vector(res.LR.list2[[i]][[j]][["cell_from"]])
-    clust_b <- as.vector(res.LR.list2[[i]][[j]][["cell_to"]])
-    clust_all <- as.vector(unique(c(clust_a, clust_b)))
-    
-    # specify cell colors
-    
-    grp.name <- names(res.LR.list2)[i]
-    comm.type <- names(res.LR.list2[[i]])[j]
-    my.cols <-colorRampPalette(brewer.pal(8, paste("Set", set_color = 2, sep = "")))(length(clust_all))
-    cell_col <-my.cols
-    # cell_col<-structure(my.cols,names=unique(exp.df_t$cell_type ))
-    
-    # LR plot
-    s1 <- sprintf("LRPlot( res.LR.list2[[%d]][[%d]], 
-    datatype='mean count', 
-    link.arr.lwd= res.LR.list2[[%d]][[%d]]$cell_from_mean_exprs, 
-    link.arr.width= res.LR.list2[[%d]][[%d]]$cell_to_mean_exprs)",i, j, i, j, i, j)
-    
-    
-    # s1 <- sprintf("LRPlot( res.LR.list2[[%d]][[%d]][1:%d,], 
-    # datatype='mean count', 
-    # link.arr.lwd= res.LR.list2[[%d]][[%d]]$cell_from_mean_exprs[1:%d], 
-    # link.arr.width= res.LR.list2[[%d]][[%d]]$cell_to_mean_exprs[1:%d])",i, j,  n.LRpairs, i, j,  n.LRpairs, i, j, n.LRpairs)
-    
-    s2 <- paste(grp.name, ': ',comm.type, sep = '')
-    # s2 <- sprintf("title(paste(%s)", s2)
-    
-    
-    b1 <- knitr::knit_expand(text = sprintf("\n### %s\n", comm.type)) # tab header
-    b2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=10, fig.height=10, message=FALSE, warning=FALSE}", 
-                                            paste("chunk", i, j, sep = ""))) 
-    b3 <- knitr::knit_expand(text = sprintf("\n %s",s1)) 
-    # b4 <- knitr::knit_expand(text = sprintf("\n title(%s)", s2))
-    b5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-    
-    out2 <- paste(b1, b2, b3, b5, collapse = '\n')
-    return(out2) # collapse together all lines with newline separator
-    
-  })
-  
-  a5 <- paste(knitr::knit(text = paste(out2, collapse = '\n')))
-  
-  out1 <- paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
-  return(out1)
-  
-})
+for (i in 1:length(plt.top.int)){
+  plot.name <- paste0("M12_top_LR_pairs_", names(plt.top.int)[i] ,".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+          plot.handle =  plt.top.int[[i]], 
+          fig.width = 5, fig.height = 7, save.flag = save.pdf)
+}
 
 ```
 
-`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+LR Interactions
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r ph4,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+  out2 <- lapply(seq_along(res.comm.list2), function(j) {
+
+    clust_a <- as.vector(res.comm.list2[[j]][["cell_from"]])
+    clust_b <- as.vector(res.comm.list2[[j]][["cell_to"]])
+    clust_all <- as.vector(unique(c(clust_a, clust_b)))
+    
+    # specify cell colors
+    comm.type <- names(res.comm.list2)[j]
+    my.cols <-colorRampPalette(brewer.pal(8, paste("Set", set_color = 2, sep = "")))(length(clust_all))
+    cell_col <-my.cols
+
+    # LR plot
+    s1 <- sprintf("LRPlot( res.comm.list2[[%d]], 
+    datatype='mean count', 
+    link.arr.lwd= res.comm.list2[[%d]]$cell_from_mean_exprs, 
+    link.arr.width= res.comm.list2[[%d]]$cell_to_mean_exprs)",j, j, j)
+
+    s2 <- comm.type
+
+    b1 <- knitr::knit_expand(text = sprintf("\n### %s\n", comm.type)) # tab header
+    b2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=10, fig.height=10, message=FALSE, warning=FALSE}", 
+                                            paste("chunk", j, sep = ""))) 
+    b3 <- knitr::knit_expand(text = sprintf("\n %s",s1)) 
+    b5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+    
+    out2 <- paste(b1, b2, b3, b5, collapse = '\n')
+    return(out2) 
+    
+  })
+
+```
+
+`r paste(knitr::knit(text = paste(out2, collapse = '\n')))`
+
+```{r ph4 save,include = FALSE}
+
+try({
+  for (i in 1:length(res.comm.list2)){
+    plot.name <- paste0("M12_LR_interaction_circle_", names(res.comm.list2)[i] ,".pdf")
+    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+            plot.handle =  LRPlot( res.comm.list2[[i]], 
+                                   datatype='mean count', 
+                                   link.arr.lwd= res.comm.list2[[i]]$cell_from_mean_exprs, 
+                                   link.arr.width= res.comm.list2[[i]]$cell_to_mean_exprs), 
+            fig.width = 10, fig.height = 10, save.flag = save.pdf)
+  } 
+}, silent = T)
+
+
+```
 
 
 1| Cytokines
 ===================================== 
+
+Row {.tabset}
+-------------------------------------
 
 ```{r pp1}
 
@@ -1271,7 +947,7 @@ if (is.null(plt.cur)){
   s2 <- paste0("plt.cur[[", i, "]]")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,fig.width = 12, fig.height=4, message=FALSE, warning=FALSE}", paste("p1", i, sep = "")))
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 15, fig.height=5, message=FALSE, warning=FALSE}", paste("p1", i, sep = "")))
   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
   
@@ -1285,8 +961,26 @@ if (is.null(plt.cur)){
 
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
+```{r pp1 save,include = FALSE}
+
+try({
+  for (i in 1:length(plt.cur)){
+    plot.name <- paste0("M12_LR_dotplot_cytokines_", names(plt.cur)[i] ,".pdf")
+    plot.name <- gsub(" -> ", "-", plot.name)
+    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+            plot.handle = plt.cur[[i]], 
+            fig.width = 15, fig.height=5, save.flag = save.pdf)
+  } 
+}, silent = T)
+
+
+```
+
 2| Checkpoint
 ===================================== 
+
+Row {.tabset}
+-------------------------------------
 
 ```{r pp2}
 
@@ -1301,7 +995,7 @@ if (is.null(plt.cur)){
   s2 <- paste0("plt.cur[[", i, "]]")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,fig.width = 12, fig.height=4, message=FALSE, warning=FALSE}", paste("p2", i, sep = "")))
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 15, fig.height=5, message=FALSE, warning=FALSE}", paste("p2", i, sep = "")))
   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
   
@@ -1315,8 +1009,27 @@ if (is.null(plt.cur)){
 
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
+```{r pp2 save,include = FALSE}
+
+try({
+  for (i in 1:length(plt.cur)){
+    plot.name <- paste0("M12_LR_dotplot_checkpoint_", names(plt.cur)[i] ,".pdf")
+    plot.name <- gsub(" -> ", "-", plot.name)
+    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+            plot.handle = plt.cur[[i]], 
+            fig.width = 15, fig.height=5, save.flag = save.pdf)
+  } 
+}, silent = T)
+
+
+```
+
+
 3| Growth Factors
 ===================================== 
+
+Row {.tabset}
+-------------------------------------
 
 ```{r pp3}
 
@@ -1331,7 +1044,7 @@ if (is.null(plt.cur)){
   s2 <- paste0("plt.cur[[", i, "]]")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,fig.width = 12, fig.height=4, message=FALSE, warning=FALSE}", paste("p3", i, sep = "")))
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 15, fig.height=5, message=FALSE, warning=FALSE}", paste("p3", i, sep = "")))
   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
   
@@ -1345,8 +1058,26 @@ if (is.null(plt.cur)){
 
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
+```{r pp3 save,include = FALSE}
+
+try({
+  for (i in 1:length(plt.cur)){
+    plot.name <- paste0("M12_LR_dotplot_growthfactor_", names(plt.cur)[i] ,".pdf")
+    plot.name <- gsub(" -> ", "-", plot.name)
+    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+            plot.handle = plt.cur[[i]], 
+            fig.width = 15, fig.height=5, save.flag = save.pdf)
+  } 
+}, silent = T)
+
+
+```
+
 4| Other
 ===================================== 
+
+Row {.tabset}
+-------------------------------------
 
 ```{r pp4}
 
@@ -1361,7 +1092,7 @@ if (is.null(plt.cur)){
   s2 <- paste0("plt.cur[[", i, "]]")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,fig.width = 12, fig.height=4, message=FALSE, warning=FALSE}", paste("p4", i, sep = "")))
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 15, fig.height=5, message=FALSE, warning=FALSE}", paste("p4", i, sep = "")))
   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
   
@@ -1375,8 +1106,26 @@ if (is.null(plt.cur)){
 
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
+```{r pp4 save,include = FALSE}
+
+try({
+  for (i in 1:length(plt.cur)){
+    plot.name <- paste0("M12_LR_dotplot_other_", names(plt.cur)[i] ,".pdf")
+    plot.name <- gsub(" -> ", "-", plot.name)
+    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+            plot.handle = plt.cur[[i]], 
+            fig.width = 15, fig.height=5, save.flag = save.pdf)
+  } 
+}, silent = T)
+
+
+```
+
 5| Pooled
 ===================================== 
+
+Row {.tabset}
+-------------------------------------
 
 ```{r pp5}
 
@@ -1391,7 +1140,7 @@ if (is.null(plt.cur)){
   s2 <- paste0("plt.cur[[", i, "]]")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,fig.width = 12, fig.height=4, message=FALSE, warning=FALSE}", paste("p5", i, sep = "")))
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 15, fig.height=5, message=FALSE, warning=FALSE}", paste("p5", i, sep = "")))
   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
   
@@ -1405,49 +1154,52 @@ if (is.null(plt.cur)){
 
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
+```{r pp5 save,include = FALSE}
 
+try({
+  for (i in 1:length(plt.cur)){
+    plot.name <- paste0("M12_LR_dotplot_pooled_", names(plt.cur)[i] ,".pdf")
+    plot.name <- gsub(" -> ", "-", plot.name)
+    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+            plot.handle = plt.cur[[i]], 
+            fig.width = 15, fig.height=5, save.flag = save.pdf)
+  } 
+}, silent = T)
 
-LR Interaction Tables
-===================================== 
-
-Row {.tabset}
--------------------------------------
-
-```{r detailed table output,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
-
-out_heat <- lapply(seq_along(res.LR.list), function(i) {
-  
-  # res.LR.list[["GL261"]][["pooled"]]
-  
-  s1 <- paste("res.LR.list[[", i, "]][['pooled']]", sep = "")
-  
-  table.name <- names(res.LR.list)[i]
-  
-  s4 <- paste("datatable(", s1, ", filter = 'top', options = list(pageLength = 50))", sep = "")
-  
-  a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("detailed_tab", i, sep = "")))               # start r chunk
-  a3 <- knitr::knit_expand(text = sprintf("\n %s",s4)) 
-  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-  
-  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
-  
-})
 
 ```
 
-`r paste(knitr::knit(text = paste(out_heat, collapse = '\n')))`
+LR Table
+===================================== 
 
+```{r detailed table output,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
 
+df.comm.output <- res.comm.list[["pooled"]]
+df.comm.output$interaction.score <- signif(df.comm.output$cell_from_mean_exprs * df.comm.output$cell_to_mean_exprs, 3)
+df.comm.output <- df.comm.output %>% dplyr::filter(interaction.score > 0.1)
+
+datatable(df.comm.output, 
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip', 
+                         buttons = c('copy', 'csv', 'pdf')))
+
+write.csv(df.comm.output, file = paste0(output.path, "Tables/", "LR_table.csv"), 
+          row.names = F) 
+
+```
 
 ```{r analysis log final}
 
 # Run time
 end.time <- proc.time()
 elapsed.time <- round((end.time - start.time)[[3]], 2)
-df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
-df.log[nrow(df.log), 2] <- as.character("elapsed.time")
-df.log[nrow(df.log), 3] <- as.character(elapsed.time)
+
+df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
 
 df.log_Module_12 <- df.log
 
@@ -1484,3 +1236,26 @@ knitr::kable(df.log_Module_12)
 
 ```
 
+
+```{r save analysis log as csv}
+
+try({
+  write.csv(df.log_Module_12, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+            row.names = F)  
+}, silent = T)
+
+```
+
+```{r merge pdfs, include = FALSE}
+
+# combine pdfs into single binder
+if (save.pdf){
+  try({
+    pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+    pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+    pdf.list <- pdf.list[validUTF8(pdf.list)]
+    pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+  }, silent = T)
+}
+
+```
