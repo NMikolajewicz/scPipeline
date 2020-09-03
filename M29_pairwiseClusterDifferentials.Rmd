@@ -1,0 +1,516 @@
+---
+title: "Pairwise Cluster Differentials"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = if (exists("user")){paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", format(Sys.Date(), "%d%m%y"), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
+    )
+  })
+---
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = setdiff(ls(), c("data.path", "user")))
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+packages2load <- c("scMiko", "Seurat", "sctransform", 
+                   "plyr", "dplyr", "tidyr", "reshape2", "RColorBrewer", "ggplot2", "gridExtra", 
+                   "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", 
+                   "MAST", "future", "cluster", "doParallel", "parallel", "foreach")
+
+# load packages
+invisible(lapply(packages2load, library, character.only = TRUE))
+
+
+```
+
+
+```{r parameter specification}
+
+
+
+# Query input
+input.file <- "R72_M01_NM2_p4_neuralDif_010920.Rdata"
+# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+
+# Rapid marker finding (logical flag)
+quick_markers <- TRUE 
+
+# specify cluster resolution
+cluster.resolution <- 0.15 
+
+
+
+# print inline
+print.inline <- FALSE
+
+# 
+which.species <- "Mm"
+
+which.annotation.db <- "Bader"    # Reactome, GO, Bader
+
+# Data subsampling
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+
+# specify number of workers (for parallelization)
+# n.workers <- list(
+#   clustering = 4, # data clustering
+#   deg = 2         # DEG analysis
+# )
+
+# which markers to return
+only.pos <- T # 
+
+# DEG test
+DEG.test <- "MAST" #options: wilcox, bimod, roc, t, poisson, negbinom, LR, MAST, DESeq2
+
+# save PDF
+save.pdf <- T
+
+
+```
+
+
+
+```{r load data, warning = FALSE}
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed_Datasets/"
+
+if (!exists("data.path") & !exists("user")) {
+  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+}
+
+# load data
+warning("Importing data...")
+if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
+load(paste(data.path, dir.preprocessed, input.file, sep = ""))
+
+
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
+
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                             species = which.species, resolution= cluster.resolution, subset = NULL, 
+                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
+                             terms2drop = c("ica", "tsne", "nmf", "corr", "gsva", "deg"))
+
+# unpack results
+rm(so)
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+rm(prep.list)
+invisible({gc()})
+
+```
+
+```{r pairwise differential gene expression}
+
+u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
+
+cluster.membership <- as.numeric(as.character(so.query@meta.data[["seurat_clusters"]]))
+cell.names <- colnames(so.query)
+
+# log fold change threshold
+lfc.threshold <- 0.5
+
+# p.value threshold <- p.threshold
+p.threshold <- 0.01
+
+clust.deg.list <- list()
+
+# initiate matrix for coutning n degs
+n.deg.mat <- matrix(ncol = length(u.clust), nrow = length(u.clust))
+
+deg.res.all <- NULL
+
+for (i in 1:length(u.clust)){
+  
+  clust.i.name <- paste0("c", u.clust[i])
+  clust.deg.list[[clust.i.name]] <- list()
+  
+  for (j in 1:length(u.clust)){
+    
+    if (i == j)  {
+      n.deg.mat[i,j] <- n.deg.mat[j,i] <- 0
+      next
+    }
+    
+    clust.j.name <- paste0("c", u.clust[j])
+    which.cells.i <- cell.names[cluster.membership %in% u.clust[i]]
+    which.cells.j <- cell.names[cluster.membership %in% u.clust[j]]
+    
+    deg.res <- NULL
+    try({
+
+    if (quick_markers == TRUE){
+      deg.res <- FindMarkers(object = so.query, 
+                             ident.1 = u.clust[i], ident.2 = u.clust[j], 
+                             test.use = DEG.test,
+                             only.pos = only.pos,
+                             max.cells.per.ident = 200,
+                             logfc.threshold = lfc.threshold,
+                             min.pct = 0.25)
+      deg.res$pct.dif <- deg.res$pct.1 - deg.res$pct.2
+      deg.res <- deg.res %>% dplyr::filter(p_val_adj < p.threshold)
+
+    } else {
+      deg.res <- FindMarkers(object = so.query, 
+                             ident.1 = u.clust[i], ident.2 = u.clust[j], 
+                             test.use = DEG.test,
+                             only.pos = only.pos,
+                             logfc.threshold = 0.01,
+                             min.pct = 0.01)  
+      deg.res$pct.dif <- deg.res$pct.1 - deg.res$pct.2
+      deg.res <- deg.res %>% dplyr::filter(p_val_adj < p.threshold)
+    }
+            
+    }, silent = T)
+    
+    if (is.null(deg.res)) {
+      n.deg.mat[i,j] <-  n.deg.mat[j,i] <- 0
+      warning(paste0("Issue detected for ",  u.clust[i], "-", u.clust[j], " comparison."))
+    } else {
+      n.deg.mat[i,j] <-  n.deg.mat[j,i] <- nrow(deg.res)
+    }
+    
+    
+    pair.name <- paste0(clust.i.name, "-", clust.j.name)
+    deg.res$pair <-pair.name
+    
+    deg.res <- bind_cols(data.frame(genes = rownames(deg.res)), deg.res)
+    
+    clust.deg.list[[clust.i.name]][[clust.j.name]] <- deg.res
+    
+    deg.res.all <- bind_rows(deg.res.all, deg.res)
+    
+  }
+}
+
+which.round <- c("p_val", "avg_logFC","pct.1","pct.2","p_val_adj","pct.dif")
+deg.res.all[ , which.round]<- signif(deg.res.all[ , which.round], 3)
+
+```
+
+```{r}
+
+
+plt.umap.final <- DimPlot(so.query, reduction = "umap", 
+                                       label = T, 
+                                       group.by = "seurat_clusters")  + 
+    xlab("UMAP 1") + ylab("UMAP 2") + 
+    labs(title = "UMAP", subtitle = "clusters") + theme_miko() 
+
+# print(plt.umap.final)
+```
+
+```{r n deg sim matrix, include = FALSE}
+
+colnames(n.deg.mat) <- paste0("c", u.clust)
+rownames(n.deg.mat) <- paste0("c", u.clust)
+plt.n.deg <- ggplotify::as.ggplot(pheatmap::pheatmap(n.deg.mat, 
+                                                     main = "DEG Counts\nlow DEG ~ high similarity (yellow); high DEG ~ low similarity (blue)",
+                                                     color = rev(viridis::viridis(20)))) 
+
+```
+
+
+
+```{r cluster differentials NEW}
+
+# get expression  matrix
+ef.mat <- so.query@assays[[DefaultAssay(so.query)]]@data
+sc.meta <- so.query@meta.data[["seurat_clusters"]]
+u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
+
+# initiate empty matrices
+logfc.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust)^2)
+pct.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust)^2)
+e.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
+f.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
+
+# get cluster-level aggregate scores
+current.index <- 1
+pair.name <- c()
+for (i in 1:length(u.clust)){
+  which.cells.i <- sc.meta %in% u.clust[i]
+  
+  f1 <- rowMeans(ef.mat[, which.cells.i] > 0)
+  f.mat[ ,i] <- f1
+  
+  e1 <- log(rowMeans(expm1(x = ef.mat[, which.cells.i])) + 1)
+  e.mat[ ,i] <- e1
+  
+  for (j in 1:length(u.clust)){
+    which.cells.j <- sc.meta %in% u.clust[j]
+    
+    # log data expression
+    e2 <- log(rowMeans(expm1(x = ef.mat[, which.cells.j])) + 1)
+    logfc.mat[ ,current.index] <- e1 - e2
+    
+    # expressing fraction
+    f2 <- rowMeans(ef.mat[, which.cells.j] > 0)
+    pct.mat[ ,current.index] <- f1-f2
+    
+    current.index <- current.index + 1
+    pair.name <- c(pair.name, paste0("c", u.clust[i], "-", "c", u.clust[j]))
+  }
+  
+}
+
+# assign col and row names
+colnames(logfc.mat) <- colnames(pct.mat) <- pair.name
+colnames(e.mat) <-   colnames(f.mat) <-  paste0("c", u.clust)
+rownames(e.mat) <-  rownames(logfc.mat) <-  rownames(f.mat) <-  rownames(pct.mat) <- rownames(ef.mat)
+
+# # cast to data.frame
+# df.lfc.wide <- data.frame(gene = rownames(ef.mat), data.frame(logfc.mat)); colnames(df.lfc.wide) <- c("gene", u.clust)
+# df.pd.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(pct.mat)); colnames(df.pd.wide) <- c("gene", u.clust)
+# df.e.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(e.mat)); colnames(df.e.wide) <- c("gene", u.clust)
+# df.s.wide <- data.frame(gene = rownames(es.mat), as.data.frame(s.mat)); colnames(df.s.wide) <- c("gene", u.clust)
+# df.f.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(f.mat)); colnames(df.f.wide) <- c("gene", u.clust)
+# 
+# # wide to long
+# df.lfc.long <- pivot_longer(df.lfc.wide, colnames(df.lfc.wide)[2:ncol(df.lfc.wide)]); 
+# df.pd.long <- pivot_longer(df.pd.wide, colnames(df.pd.wide)[2:ncol(df.pd.wide)])
+# df.e.long <- pivot_longer(df.e.wide, colnames(df.e.wide)[2:ncol(df.e.wide)])
+# df.f.long <- pivot_longer(df.f.wide, colnames(df.f.wide)[2:ncol(df.f.wide)])
+# 
+# # assign col names to long dataframe
+# colnames(df.lfc.long) <- colnames(df.pd.long) <- colnames(df.e.long) <- colnames(df.f.long) <- c("gene", "cluster", "value")
+# 
+# # ensure clusters are ordered factors
+# df.lfc.long$cluster <- factor(df.lfc.long$cluster, levels = u.clust)
+# df.pd.long$cluster <- factor(df.pd.long$cluster, levels = u.clust)
+# df.e.long$cluster <- factor(df.e.long$cluster, levels = u.clust)
+# df.f.long$cluster <- factor(df.f.long$cluster, levels = u.clust)
+# 
+# # clear baggage
+# rm(es.mat); invisible({gc()})
+
+```
+
+
+```{r cluster-specific markers, fig.width=10, fig.height=7}
+
+no.expression.definition <- 0.05
+high.exp.definition <- 0.3
+
+sel.mat.1 <- f.mat < no.expression.definition
+sel.mat.2 <- f.mat > high.exp.definition
+
+filter.1 <- apply(sel.mat.1, 1, function(x) sum(x) == (ncol(f.mat)-1))
+filter.2 <- apply(sel.mat.2, 1, function(x) sum(x) == 1)
+filter.3 <- filter.1 & filter.2
+
+selective.markers <- rownames(f.mat)[filter.3]
+
+filter.2.sub <- sel.mat.2[rownames(sel.mat.2) %in% selective.markers, ]
+
+plt.dot <- DotPlot(object = so.query, features = selective.markers, group.by = "seurat_clusters", scale = F) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  labs(title = "Selectively Expressed Markers", subtitle = paste0("Null expression threshold: ", no.expression.definition, "\nExpression threshold: ", high.exp.definition))
+
+```
+
+```{r get pathays, warning = FALSE}
+
+# all.genes <-df2enrich$genes
+all.genes <- rownames(logfc.mat)
+
+# get symbol to entrez mapping
+my.symbol <- as.vector(all.genes)
+my.entrez <- sym2entrez(my.symbol, my.species = which.species )
+my.entrez <- my.entrez[complete.cases(my.entrez), ]
+
+match.ind <- match(all.genes, my.entrez$SYMBOL)
+all.genes.entrez <- as.character(my.entrez$ENTREZID[match.ind]) 
+
+pathways.subset <- getAnnotationPathways(all.genes.entrez, db = which.annotation.db, ontology = "BP", species = which.species)
+
+```
+
+
+```{r gsea enrichment, warning = FALSE}
+
+library(fgsea)
+
+# get pathways relevant to current gene set
+gse.pathway.combined <- NULL
+gse.pathway.list <- list()
+
+# single.path.of.interest <- NULL
+
+plt.enrichment <- list()
+
+# specify analysis parameters
+if (which.species == "Hs") {
+  org <- "human"
+  db <- org.Hs.eg.db::org.Hs.eg.db
+} else if (which.species == "Mm"){
+  org <- "mouse"
+  db <- org.Mm.eg.db::org.Mm.eg.db
+}
+
+n.workers <- list(gsea =  6)
+
+# start cluster
+if (n.workers$gsea > ncol(logfc.mat)) n.workers$gsea <- ncol(logfc.mat)
+cl <- parallel::makeCluster(n.workers$gsea)
+doParallel::registerDoParallel(cl)
+
+score.results <- foreach(i = 1:ncol(logfc.mat), .packages = c("fgsea", "plyr"))  %dopar% {
+  
+  # for (i in 1:length(enrich.groups)){
+  
+  # gene.list <- (df2enrich[, enrich.groups[i]])
+  gene.list <- logfc.mat[ ,i]
+  names(gene.list) <- rownames(logfc.mat)
+  match.ind <- match(names(gene.list), my.entrez$SYMBOL)
+  names(gene.list) <- as.character(my.entrez$ENTREZID[match.ind])
+  gene.list = sort(gene.list, decreasing = TRUE)
+  
+  # clean list
+  df.ent <- data.frame(names = names(gene.list), values = as.vector(gene.list))
+  df.ent <- df.ent[complete.cases(df.ent), ]
+  df.ent <- df.ent[!is.infinite(df.ent$values), ]
+  gene.list.clean <- df.ent$values
+  names(gene.list.clean) <- df.ent$names
+  
+  
+  suppressMessages({gse.pathway <- fgsea(pathways.subset, gene.list.clean, nperm=1000, maxSize=500) })
+  
+  if (nrow(gse.pathway) == 0) {
+    return(list(out1 = NULL,
+                out2 = NULL))
+  } else {
+    
+    gse.pathway$query <- colnames(logfc.mat)[i]
+    # gse.pathway.combined <- bind_rows(gse.pathway.combined, gse.pathway)
+    
+    # if(which.results$gsea.threshold == 1){
+      gse.pathway.filtered <- gse.pathway[gse.pathway$padj < 0.1, ]
+    # } else if (which.results$gsea.threshold == 2){
+      # gse.pathway.filtered <- gse.pathway[((gse.pathway$pval < 0.01) & (abs(gse.pathway$NES) > 1)), ]
+    # } else if (which.results$gsea.threshold == 3){
+    #   gse.pathway.filtered <- gse.pathway %>% top_n(3, NES)
+    # }
+    
+    if (nrow(gse.pathway.filtered) == 0) {
+      
+          return(list(out1 = NULL,
+                out2 = NULL))
+      
+    } else {
+      
+    
+    
+    # make human readable (map entrez to symbol)
+    gse.pathway.filtered.orig <- gse.pathway.filtered
+    gse.pathway.filtered$set <- lapply(gse.pathway.filtered$leadingEdge, 
+                                       mapvalues,from = my.entrez$ENTREZID, to = my.entrez$SYMBOL)
+    gse.pathway.filtered$set <- lapply(gse.pathway.filtered$set, paste,collapse = ", ")
+    gse.pathway.filtered$query <-colnames(logfc.mat)[i]
+    
+    
+    # sig figs for numerics
+    gse.pathway.filtered$ES <- signif(gse.pathway.filtered$ES, 3)
+    gse.pathway.filtered$NES <- signif(gse.pathway.filtered$NES, 3)
+    gse.pathway.filtered$pval <- signif(gse.pathway.filtered$pval, 3)
+    gse.pathway.filtered$padj <- signif(gse.pathway.filtered$padj, 3)
+    
+    # filter and rearrange columns
+    gse.pathway.cur <- gse.pathway.filtered[ ,c("query", "pathway", "size", "ES", "NES", "pval", "padj", "set")]
+    
+        return(list(out1 = gse.pathway.cur,
+                out2 = gse.pathway))
+    
+    }
+
+
+  }
+  
+} 
+
+# stop workers
+parallel::stopCluster(cl)
+
+# stopifnot(length(enrich.groups) == length(score.results))
+
+for (i in 1: ncol(logfc.mat)){
+  pair.name <- colnames(logfc.mat)[i]
+  gse.pathway.list[[pair.name]] <- score.results[[i]]$out1
+}
+
+```
+
+UMAP
+===================================== 
+
+```{r plt.umap_by_c}
+print(plt.umap.final)
+# savePDF(file.name = paste0(output.path, "PDF/", "M29_umap_cluster.pdf"), plot.handle = plt.umap_by_cluster, 
+        # fig.width = 5, fig.height = 5, save.flag = save.pdf)
+```
+
+
+Dot
+===================================== 
+
+```{r plt.dot}
+print(plt.dot)
+
+```
+
+
+N DEG
+===================================== 
+
+```{r plt.n.deg, fig.height=8, fig.width=10}
+print(plt.n.deg)
+
+```
+
+DEG table
+===================================== 
+
+```{r deg.res.all}
+
+datatable(deg.res.all, 
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip', 
+                         buttons = c('copy', 'csv', 'pdf')))
+
+```
+
+GSEA table
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r gsea.res.all}
+
+ out_enrich_table <- flex.multiTabTables(gse.pathway.list, "gse.pathway.list")
+
+```
+
+`r paste(knitr::knit(text = paste(out_enrich_table, collapse = '\n')))`
