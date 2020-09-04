@@ -839,9 +839,7 @@ if (print.inline){
 
 ```{r hierarchial deg, fig.width = 12, fig.height = 8}
 
-
-
-# prep cluster data
+# prep cluster data ############################################################
 meta.cols <- names(so.query@meta.data)
 #
 meta.clust.entries <- paste0(assay.pattern, cluster_resolution)
@@ -853,16 +851,19 @@ df.meta$umap.y <- so.query@reductions[["umap"]]@cell.embeddings[ ,2]
 
 so.query@meta.data[[paste0(assay.pattern, 0)]] <- 0
 
-# plot cluster trees
-plt.clusttree <- clustree(so.query, prefix = assay.pattern, layout = "tree")
-
+# plot cluster trees ###########################################################
+plt.clusttree <- NULL
+try({
+  plt.clusttree <- clustree(so.query, prefix = assay.pattern, layout = "tree")
+}, silent = T)
 if (print.inline) print(plt.clusttree)
 
-plt.umap.tree <- clustree_overlay(df.meta, prefix =  assay.pattern, 
+plt.umap.tree <- NULL
+try({
+  plt.umap.tree <- clustree_overlay(df.meta, prefix =  assay.pattern, 
                                   x_value = "umap.x", y_value = "umap.y", ) + 
   xlab("UMAP 1") + ylab("UMAP 2") + labs(title = "UMAP with cluster-splits") + theme_miko(legend = T)
-
-# fig.width = 12, fig.height = 8
+}, silent = T)
 if (print.inline) print(plt.umap.tree)
 ```
 
@@ -907,11 +908,12 @@ plt.clusttree.markers <- list()
 if (!is.na(cluster.tree.markers)){
   for (i in 1:length(cluster.tree.markers)){
     
+    plt.clusttree.markers[[cluster.tree.markers[i]]] <- NULL
     try({
-    plt.clusttree.markers[[cluster.tree.markers[i]]] <- clustree(so.query, prefix =  assay.pattern, 
-                                                                 node_colour = cluster.tree.markers[i], node_colour_aggr = "mean") + 
-      labs(title = cluster.tree.markers[i]) + viridis::scale_color_viridis(cluster.tree.markers[i], option = "B", begin = 0.3)
-    if (print.inline) print( plt.clusttree.markers[[cluster.tree.markers[i]]])
+      plt.clusttree.markers[[cluster.tree.markers[i]]] <- clustree(so.query, prefix =  assay.pattern, 
+                                                                   node_colour = cluster.tree.markers[i], node_colour_aggr = "mean") + 
+        labs(title = cluster.tree.markers[i]) + viridis::scale_color_viridis(cluster.tree.markers[i], option = "B", begin = 0.3)
+      if (print.inline) print( plt.clusttree.markers[[cluster.tree.markers[i]]])
     }, silent = T)
   }
 }
