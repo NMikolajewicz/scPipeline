@@ -33,7 +33,8 @@ start.time <- proc.time()
 packages2load <- c("Seurat", "GSVA", "scMiko",
                    "plyr", "dplyr", "tidyr", "reshape2", "preprocessCore", "stringr", "RColorBrewer", "ggplot2", "gridExtra", 
                    "DT", "flexdashboard", "ggpmisc", "ggExtra", "grid", "ggrepel", "future", 
-                   "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "tm", "homologene", "plotly", "parallel", "doParallel", "foreach", "quantreg")
+                   "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "tm", "homologene", "parallel", "doParallel", "foreach", "quantreg")
+# "AnnotationDbi", 
 
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE))
@@ -55,13 +56,13 @@ input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm",   "VastDB", "cycling.seurat")
 
 # specify cluster resolution
-cluster.resolution <- 0.2 # OPTIONAL; range 0 to inf (default = 1)
+cluster.resolution <- 0.5 # OPTIONAL; range 0 to inf (default = 1)
 
 so.input.species <- "Mm" # eREQUIRED; Hs, Mm
 
 
 # Data subsampling
-subsample_factor <- 0.5 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 min.geneset.size <- 3 # recommended: 2 (for TF classification, set to 1)
 
 # print inline
@@ -70,7 +71,7 @@ print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 # specify number of workers for parallelization
 n.workers <- list(
   scoring = 6,
-  deg = 1
+  deg = 4
 )
 
 
@@ -94,9 +95,7 @@ names(csv_input) <- as.vector(query.references$names)
 ```
 
 
-
-
-```{r load data, warning = FALSE}
+```{r load data, warning = TRUE}
 
 # Specify data directories
 dir.preprocessed <- "Preprocessed_Datasets/"
@@ -112,9 +111,9 @@ warning("Importing data...")
 if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
 load(paste(data.path, dir.preprocessed, input.file, sep = ""));
 
-if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 
-t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg")
+t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "integration.anchors")
 
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
@@ -297,10 +296,11 @@ if (length(u_barcodes) > 1) {
   
   plt.cluster_composition_barcodes <- plot.cluster_composition_alt(df.cluster_annotations_barcodes, 
                                                                    other_threshold = 0)
-  
-  plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes + 
+  if (length(u_barcodes) < 13){
+     plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes + ggthemes::scale_fill_ptol("Barcode") 
+  }
+  plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes  + 
     theme_miko(legend = T) + 
-    ggthemes::scale_fill_ptol("Barcode") + 
     labs(title = "Cluster Composition", subtitle = "Stratified by Barcodes")
 } else {
   df_for_wide_barcodes <- data.frame()
@@ -335,11 +335,7 @@ colnames(gs.long) <- c("set", "genes")
   } else if (gs.species == "Mm"){
     gs.long$genes <- firstup(gs.long$genes)
   }
-  
-  
-  
 
-  
   # keep only genes that are availale in seurat object
   gs.long <- gs.long[gs.long$genes %in% gs.available.genes, ]
   
@@ -456,14 +452,21 @@ f.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
 for (i in 1:length(u.clust)){
   which.cells <- sc.meta %in% u.clust[i]
   
+  n.cells.current <- sum(which.cells)
+  if (n.cells.current == 0) stop(paste0("Cluster ",  u.clust[i], " has no cells associated with it."))
+  
   # log data expression
-  e1 <- log(rowMeans(expm1(x = ef.mat[, which.cells])) + 1)
+  if (n.cells.current == 1){
+  e1 <-  log(expm1(x = ef.mat[, which.cells])+ 1)
+  } else { e1 <- log(rowMeans(expm1(x = ef.mat[, which.cells])) + 1)}
   e.mat[ ,i] <- e1
   
   # scaled data
   try({
-  s1 <- rowMeans(es.mat[, which.cells])
-  s.mat[ ,i] <- s1
+    if (n.cells.current == 1){
+      s1 <- (es.mat[, which.cells]) 
+    } else { s1 <- rowMeans(es.mat[, which.cells])}
+    s.mat[ ,i] <- s1
   }, silent = T)
   
   # logfc
@@ -471,7 +474,9 @@ for (i in 1:length(u.clust)){
   logfc.mat[ ,i] <- e1 - e2
   
   # expressing fraction
-  f1 <- rowMeans(ef.mat[, which.cells] > 0)
+  if (n.cells.current == 1){
+    f1 <- 1*(ef.mat[, which.cells] > 0)
+  } else {f1 <- rowMeans(ef.mat[, which.cells] > 0) }
   f.mat[ ,i] <- f1
   
   # pct difference
@@ -523,14 +528,17 @@ invisible({gc()})
 
 plt.heat.scaled <- NULL
 plt.heat.data <- NULL
+plt.heat.all <- NULL
 try({
   # get var features
   var.features <- so.query@assays[[DefaultAssay(so.query)]]@var.features
   
   # scaled expression plots
-  df.s4plt <- as.matrix(df.s.wide %>% select(-c("gene")))
+    df.s4plt <- as.matrix(df.e.wide %>% dplyr::select(-c("gene")))
   df.s4plt <- df.s4plt[rownames(df.s4plt) %in% var.features, ]
   
+  df.s4plt <- t(apply(df.s4plt, 1, function(x) (x-mean(x))/sd(x)))
+
   scale.lim <- 2 
   df.s4plt[df.s4plt > scale.lim] <- scale.lim
   df.s4plt[df.s4plt < (-1*scale.lim)] <- (-1*scale.lim)
@@ -552,7 +560,7 @@ try({
 
 try({
   # normalized expression plots
-  df.e4plt <- as.matrix(df.e.wide %>% select(-c("gene")))
+  df.e4plt <- as.matrix(df.e.wide %>% dplyr::select(-c("gene")))
   df.e4plt <- df.e4plt[rownames(df.e4plt) %in% var.features, ]
   
   plt.heat.data <- pheatmap::pheatmap(df.e4plt,
@@ -1863,6 +1871,7 @@ if (show.gene.exp){
     })
     
   }, error = function(e) {
+    print(e)
     out.sig <- NULL
     return(out.sig)
   })
