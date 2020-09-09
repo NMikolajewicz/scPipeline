@@ -23,6 +23,7 @@ knit: (function(inputFile, encoding) {
 
 # clear global enviroment
 rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
 
 # initiate timer
 start.time <- proc.time()
@@ -47,8 +48,9 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # Query input
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
+input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
 
 # Rapid marker finding (logical flag)
 quick_markers <- TRUE 
@@ -76,12 +78,12 @@ cluster.tree.markers <- NA
 which.species <- "Mm"
 
 # Data subsampling
-subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 0.5 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify number of workers (for parallelization)
 n.workers <- list(
   clustering = 4, # data clustering
-  deg = 2         # DEG analysis
+  deg = 4         # DEG analysis
 )
 
 # which markers to return
@@ -116,6 +118,7 @@ df.log <- addLogEntry("PDF saved", save.pdf, df.log, "save.pdf")
 
 ```
 
+
 ```{r load data, warning = FALSE}
 
 # Specify data directories
@@ -131,16 +134,17 @@ if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdat
 load(paste(data.path, dir.preprocessed, input.file, sep = ""))
 
 
-if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
                              species = which.species, resolution= NULL, subset = NULL, 
                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
-                             terms2drop = c("ica", "tsne", "nmf", "corr", "gsva", "deg"))
+                             terms2drop = c("ica", "tsne", "nmf", "corr", "gsva", "deg"), rmv.pattern = "so", 
+                         scale.reprocessed = T, neighbors.reprocessed = T)
 
 # unpack results
-rm(so)
+if (exists("so")) try({rm(so)}, silent = T)
 so.query <- prep.list$so
 current.assay <- prep.list$assay
 n.cells <- prep.list$n.cell
@@ -174,8 +178,16 @@ current.assay <- DefaultAssay(so.query)
 assay.pattern <- paste0(current.assay, "_snn_res.")
 
 # start cluster
+if (n.workers$clustering > length(cluster_resolution)) n.workers$clustering <-length(cluster_resolution)
 cl <- parallel::makeCluster(n.workers$clustering)
 doParallel::registerDoParallel(cl)
+
+# ensure neighbors computed
+if (length(so.query@graphs) == 0){
+  pca.prop <- propVarPCA(so.query)
+  target.pc <- max(pca.prop$pc.id[pca.prop$pc.cum_sum<0.9])+1
+  so.query <- FindNeighbors(so.query, verbose = F, reduction = "pca", dims = 1:target.pc)
+}
 
 # iterate through each input file
 cluster.membership <- foreach(i = 1:length(cluster_resolution), .packages = c("Seurat"))  %dopar% {
@@ -189,13 +201,20 @@ parallel::stopCluster(cl)
 
 # retrieve data
 for (i in 1:length(cluster_resolution)) {
+  
+  # get cluster name
   current.cluster <- paste0(assay.pattern, cluster_resolution[i])
   so.query@meta.data[[current.cluster]] <- cluster.membership[[i]]
   cluster.name[i] <- paste(DefaultAssay(so.query),"_snn_res.", cluster_resolution[i], sep = "")
-  plt.umap_by_cluster[[i]] <- DimPlot(so.query, reduction = "umap", group.by = cluster.name[i], label = TRUE)  + 
-    ggtitle(label = paste("Resolution: ", cluster_resolution[i], sep = "")) + 
-    xlab("UMAP 1") + 
-    ylab("UMAP 2")
+
+  # enforce correct cluster order
+  ordered.clusters <- getOrderedGroups(so.query, which.group = cluster.name[i], is.number = T)
+  so.query@meta.data[[cluster.name[i]]] <- factor(so.query@meta.data[[cluster.name[i]]], levels = ordered.clusters)
+  
+  # generate plot
+  plt.umap_by_cluster[[i]] <- cluster.UMAP( so.query, group.by = cluster.name[i],
+  x.label = "UMAP 1", y.label = "UMAP 2", plot.name = "UMAP", include.labels = T, reduction = "umap") + theme_miko(legend = T) + 
+  labs(title = "UMAP", subtitle = paste("Resolution: ", cluster_resolution[i], sep = ""))
   
   if (print.inline){
     print(plt.umap_by_cluster[[i]])
@@ -205,17 +224,43 @@ for (i in 1:length(cluster_resolution)) {
 # clean baggage
 rm(cluster.membership)
 
-# generate barcode-stratified UMAP
-plt.umap_by_barcode <- DimPlot(so.query, reduction = "umap", group.by = "Barcode")  + ggtitle(label = "UMAP") + xlab("UMAP 1") + ylab("UMAP 2")
-plt.umap_by_cluster[[length(plt.umap_by_cluster)+1]] <- plt.umap_by_barcode
 
-if (print.inline){
-  print(plt.umap_by_barcode)
+# generate additional UMAPs....
+auxillary.groups <- c()
+if ("Barcode" %in% names(so.query@meta.data)){
+  plt.umap_by_barcode <- cluster.UMAP( so.query, group.by = "Barcode",
+  x.label = "UMAP 1", y.label = "UMAP 2", plot.name = "UMAP", include.labels = F, reduction = "umap") + theme_miko(legend = T) + 
+  labs(title = "UMAP", subtitle = "Barcodes")
+plt.umap_by_cluster[[length(plt.umap_by_cluster)+1]] <- plt.umap_by_barcode
+auxillary.groups <- c(auxillary.groups, "Barcodes")
+}
+
+if ("group" %in% names(so.query@meta.data)){
+  plt.umap_by_group <- cluster.UMAP( so.query, group.by = "group",
+  x.label = "UMAP 1", y.label = "UMAP 2", plot.name = "UMAP", include.labels = F, reduction = "umap") + theme_miko(legend = T) + 
+  labs(title = "UMAP", subtitle = "group")
+plt.umap_by_cluster[[length(plt.umap_by_cluster)+1]] <- plt.umap_by_group
+auxillary.groups <- c(auxillary.groups, "group")
+}
+
+if ("dataset" %in% names(so.query@meta.data)){
+  plt.umap_by_dataset <- cluster.UMAP( so.query, group.by = "dataset",
+  x.label = "UMAP 1", y.label = "UMAP 2", plot.name = "UMAP", include.labels = F, reduction = "umap") + theme_miko(legend = T) + 
+  labs(title = "UMAP", subtitle = "dataset")
+plt.umap_by_cluster[[length(plt.umap_by_cluster)+1]] <- plt.umap_by_dataset
+auxillary.groups <- c(auxillary.groups, "dataset")
+}
+
+if ("subset_group" %in% names(so.query@meta.data)){
+  plt.umap_by_subset <- cluster.UMAP( so.query, group.by = "subset_group",
+  x.label = "UMAP 1", y.label = "UMAP 2", plot.name = "UMAP", include.labels = F, reduction = "umap") + theme_miko(legend = T) + 
+  labs(title = "UMAP", subtitle = "subset_group")
+plt.umap_by_cluster[[length(plt.umap_by_cluster)+1]] <- plt.umap_by_subset
+auxillary.groups <- c(auxillary.groups, "subset_group")
 }
 
 DefaultAssay(so.query) <- assay.holder
-
-cr_names <- c(cluster_resolution, "barcodes")
+cr_names <- c(cluster_resolution, auxillary.groups)
 ```
 
 
@@ -996,7 +1041,6 @@ for (i in 1:length(cr_names)){
 ```
 
 Cluster Tree
-
 ===================================== 
 
 Row {.tabset}
