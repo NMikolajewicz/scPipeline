@@ -22,6 +22,7 @@ knit: (function(inputFile, encoding) {
 
 # clear global enviroment
 rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
 
 # initiate timer
 start.time <- proc.time()
@@ -42,13 +43,13 @@ lapply(packages2load, library, character.only = TRUE)
 # mean for ligand, median for receptor (rationale is that ligands do not depend on cell type, receptors do)
 
 # query input
-input.file <- "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata"
+input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-# input.file <- "Module1_pilot4_GL261_CT2A.Rdata"
+# input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 # input.file <- "Module1_Suva2019.Rdata"
 
 which.species <- "Mm"
-cluster.resolution = 0.15
+cluster.resolution = 0.5
 
 print.inline <- F
 
@@ -127,15 +128,18 @@ load(paste(data.path, dir.preprocessed, input.file, sep = ""));
 
 if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
 
+# which terms2drop
+t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "scale")
+
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
                              species = which.species, resolution= cluster.resolution, subset.data = subset.df, 
                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
-                             terms2drop = c("ica", "tsne", "nmf", "corr", "gsva", "deg", "counts"))
+                             terms2drop = t2d, rmv.pattern = "so", keep.default.assay.only = T)
 
 
 # unpack results
-rm(so)
+if (exists("so")) try({rm(so)}, silent = T)
 so.query <- prep.list$so
 current.assay <- prep.list$assay
 n.cells <- prep.list$n.cell
@@ -167,6 +171,94 @@ gene2species <- function(x, expected_species){
 }
 ```
 
+```{r}
+
+sparse2dense <- function(mat.sparse, block.size = 10000, transpose = F, verbose.error = F){
+  
+  mat.dense <- tryCatch({
+    mat.dense <- as.matrix(mat.sparse)
+    if (transpose) mat.dense <- t(mat.dense)
+  }, error = function(e){
+    if (verbose.error) print(e)
+    mat.dense <- NULL
+    n.blocks <- round(ncol(mat.sparse) / block.size)+1
+    for (i in 1:(n.blocks)){
+      start.range <- ((i-1)*block.size)+1
+      end.range <- i*block.size
+      if (start.range > ncol(mat.sparse)) next
+      if (end.range > ncol(mat.sparse)) end.range <- ncol(mat.sparse)
+      if (transpose){
+        mat.dense <- rbind(mat.dense, t(as.matrix(mat.sparse[, start.range:end.range])))
+      } else {
+        mat.dense <- cbind(mat.dense, as.matrix(mat.sparse[, start.range:end.range]))
+      }
+    }
+    if (transpose){
+      colnames(mat.dense) <- rownames(mat.sparse)
+      rownames(mat.dense) <- colnames(mat.sparse) 
+    } else {
+      colnames(mat.dense) <- colnames(mat.sparse)
+      rownames(mat.dense) <- rownames(mat.sparse)     
+    }
+    
+    return(mat.dense)
+  })
+  
+  if (transpose){
+    colnames(mat.dense) <- rownames(mat.sparse)
+    rownames(mat.dense) <- colnames(mat.sparse) 
+  } else {
+    colnames(mat.dense) <- colnames(mat.sparse)
+    rownames(mat.dense) <- rownames(mat.sparse)     
+  }
+  rm(mat.sparse); invisible({gc()})
+  
+  return(mat.dense)
+}
+
+sparse2df <- function(mat.sparse, block.size = 10000, transpose = F, verbose.error = F){
+  
+  df <- tryCatch({
+    df <- as.data.frame(mat.sparse)
+    if (transpose) df <- t(df)
+  }, error = function(e){
+    if (verbose.error) print(e)
+    df <- NULL
+    n.blocks <- round(ncol(mat.sparse) / block.size)+1
+    for (i in 1:(n.blocks)){
+      start.range <- ((i-1)*block.size)+1
+      end.range <- i*block.size
+      if (start.range > ncol(mat.sparse)) next
+      if (end.range > ncol(mat.sparse)) end.range <- ncol(mat.sparse)
+      if (transpose){
+        df <- bind_rows(df,as.data.frame(t(as.matrix(mat.sparse[, start.range:end.range]))))
+      } else {
+        df <- bind_cols(df,as.data.frame(mat.sparse[, start.range:end.range]))
+      }
+    }
+    if (transpose){
+      colnames(df) <- rownames(mat.sparse)
+      rownames(df) <- colnames(mat.sparse) 
+    } else {
+      colnames(df) <- colnames(mat.sparse)
+      rownames(df) <- rownames(mat.sparse)     
+    }
+    return(df)
+  })
+  
+  if (transpose){
+    colnames(df) <- rownames(mat.sparse)
+    rownames(df) <- colnames(mat.sparse) 
+  } else {
+    colnames(df) <- colnames(mat.sparse)
+    rownames(df) <- rownames(mat.sparse)     
+  }
+  rm(mat.sparse); invisible({gc()})
+  
+  return(df)
+  
+}
+```
 
 
 ```{r define prep data function}
@@ -182,22 +274,49 @@ prep.data <- function(so, cluster.field, gNames.list, data.slot){
   
   # get normalizated expression matrix
   if (data.slot == "data"){
-    exp.mat <- as.matrix(so@assays[[current.assay]]@data)
+    exp.mat <- (so@assays[[current.assay]]@data)
   } else if (data.slot == "scale"){
     exp.mat <- so@assays[[current.assay]]@scale.data 
   }
   
-  exp.df_t <- as.data.frame(t(exp.mat))
+  # RESUME HERE
+  # Construct matrix in chunks
+
+  
+  exp.df_t <- tryCatch({
+    exp.df_t <- t(as.data.frame(exp.mat))
+  }, error = function(e){
+    # print(e)
+    exp.df_t <- NULL
+    chunk.size <- 10000
+    n.blocks <- round(ncol(exp.mat) / chunk.size)+1
+    for (i in 1:(n.blocks)){
+      start.range <- ((i-1)*chunk.size)+1
+      end.range <- i*chunk.size
+      if (start.range > ncol(exp.mat)) next
+      if (end.range > ncol(exp.mat)) end.range <- ncol(exp.mat)
+     exp.df_t <- bind_rows(exp.df_t,as.data.frame(t(as.matrix(exp.mat[, start.range:end.range]))))
+    }
+    return(exp.df_t)
+  })
+  
+  colnames(exp.df_t) <- rownames(exp.mat)
+  rownames(exp.df_t) <- colnames(exp.mat)
+  
+    rm(exp.mat)
+  invisible({gc()})
+  
+    # exp.df_t <- t(exp.df_t)
   
   # prepare data
   cur.genes <- colnames(exp.df_t)
   
   # exp.df_t <- as.data.frame(t(exp.mat))
-  rownames(exp.mat) <- gene2species(rownames(exp.mat) , expected_species = "Hs")
+  # rownames(exp.mat) <- gene2species(rownames(exp.mat) , expected_species = "Hs")
   colnames(exp.df_t) <- gene2species(cur.genes, expected_species = "Hs")
   exp.df_t$cell_type <- paste("c", as.vector(so@meta.data[[cluster.field]]), sep = "")
-  
-  output <- list(u.clusters, exp.mat, exp.df_t)
+
+  output <- list(u.clusters, NULL, exp.df_t)
   return(output)
   
 }
@@ -244,6 +363,8 @@ res.LR.list2 <- list()
   # get data
   exp.df_t <-  prep.output[[3]]
   u.clusters <- prep.output[[1]]
+  rm(prep.output)
+  invisible({gc()})
   
   # get highly expressed genes
  
@@ -304,10 +425,10 @@ res.LR.list2 <- list()
 u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
 
 
-# options: #cytokine, checkpoint, growth factor, pooled, other
+# options: #cytokine, checkpoint, growth factor, pooled, other , "pooled")
 
 dot.res.list <- list()
-which.communication <- c("cytokine", "checkpoint", "growth factor", "other", "pooled")
+which.communication <- c("cytokine", "checkpoint", "growth factor", "other")
 
 for (k in 1:length(which.communication)){
 
@@ -328,7 +449,7 @@ for (i in 1:length(u.clust)){
   # expression threshold
   int.min <- 0
   int.max <- max(df.comm$interaction.score)
-  int.by <- (int.max - int.min)/50
+  int.by <- (int.max - int.min)/30
   exp.thresh <- seq(int.min,int.max, int.by)
   
   df.rollingThresh <- NULL
@@ -341,7 +462,7 @@ for (i in 1:length(u.clust)){
     
     
     df.tally <- data.frame(table(df.comm.sub2$cell_to))
-    df.intscore <- df.comm.sub2 %>% group_by(cell_to) %>% summarize(int.score = mean(interaction.score))
+    df.intscore <- df.comm.sub2 %>% dplyr::group_by(cell_to) %>% dplyr::summarize(int.score = mean(interaction.score))
     colnames(df.intscore) <- c("Var1", "int.score")
     
     if (nrow(df.tally) == 0){
@@ -478,13 +599,14 @@ plt.agg.LR.list[[communication.name]] <- p.merge.final
 
 }
 
+# plt.agg.LR.list
 ```
 
 
 ```{r cluster differentials, warning = FALSE, message = FALSE}
 
 # get expression  matrix
-ef.mat <- as.matrix(so.query@assays[[DefaultAssay(so.query)]]@data)
+ef.mat <- (so.query@assays[[DefaultAssay(so.query)]]@data)
 sc.meta <- so.query@meta.data[["seurat_clusters"]]
 u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
 
@@ -495,10 +617,20 @@ f.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
 for (i in 1:length(u.clust)){
   which.cells <- sc.meta %in% u.clust[i]
   
+  n.cells.current <- sum(which.cells)
+  
+  gene.detected <- as.matrix(ef.mat[, which.cells] > 0)
   # expressing fraction
-  f1 <- rowMeans(ef.mat[, which.cells] > 0)
+  if (n.cells.current == 1){
+    f1 <- 1*(gene.detected)
+  } else {
+    f1 <- rowMeans(gene.detected)
+  }
+  
   f.mat[ ,i] <- f1
 }
+
+rm(f1); invisible({gc()})
 
 # assign col and row names
 colnames(f.mat) <-   u.clust
@@ -805,7 +937,7 @@ out_lr <- lapply(seq_along(plt.agg.LR.list), function(i) {
   s2 <- paste0("plt.agg.LR.list[[", i, "]]")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,fig.width=8, fig.height=8, message=FALSE, warning=FALSE}", paste("lr_sum", i, sep = "")))
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,fig.width=10, fig.height=10, message=FALSE, warning=FALSE}", paste("lr_sum", i, sep = "")))
   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
   
@@ -824,7 +956,7 @@ for (i in 1:length(plt.agg.LR.list)){
   plot.name <- paste0("M12_LR_summary_", names(plt.agg.LR.list)[i] ,".pdf")
   savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
           plot.handle =  plt.agg.LR.list[[i]], 
-          fig.width = 8, fig.height = 8, save.flag = save.pdf)
+          fig.width = 10, fig.height = 10, save.flag = save.pdf)
 }
 
 ```
@@ -876,7 +1008,8 @@ Row {.tabset}
 
 ```{r ph4,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
 
-  out2 <- lapply(seq_along(res.comm.list2), function(j) {
+out2 <- tryCatch({
+    out2 <- lapply(seq_along(res.comm.list2), function(j) {
 
     clust_a <- as.vector(res.comm.list2[[j]][["cell_from"]])
     clust_b <- as.vector(res.comm.list2[[j]][["cell_to"]])
@@ -905,10 +1038,17 @@ Row {.tabset}
     return(out2) 
     
   })
+}, error= function(e){
+  print(e)
+  out2 <- NULL
+  return(out2)
+})
+
+
 
 ```
 
-`r paste(knitr::knit(text = paste(out2, collapse = '\n')))`
+`r try({paste(knitr::knit(text = paste(out2, collapse = '\n')))}, silent = T)`
 
 ```{r ph4 save,include = FALSE}
 
@@ -947,7 +1087,7 @@ if (is.null(plt.cur)){
   s2 <- paste0("plt.cur[[", i, "]]")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 15, fig.height=5, message=FALSE, warning=FALSE}", paste("p1", i, sep = "")))
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 18, fig.height=7, message=FALSE, warning=FALSE}", paste("p1", i, sep = "")))
   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
   
@@ -969,7 +1109,7 @@ try({
     plot.name <- gsub(" -> ", "-", plot.name)
     savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
             plot.handle = plt.cur[[i]], 
-            fig.width = 15, fig.height=5, save.flag = save.pdf)
+            fig.width = 18, fig.height=7, save.flag = save.pdf)
   } 
 }, silent = T)
 
@@ -995,7 +1135,7 @@ if (is.null(plt.cur)){
   s2 <- paste0("plt.cur[[", i, "]]")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 15, fig.height=5, message=FALSE, warning=FALSE}", paste("p2", i, sep = "")))
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 18, fig.height=7, message=FALSE, warning=FALSE}", paste("p2", i, sep = "")))
   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
   
@@ -1017,7 +1157,7 @@ try({
     plot.name <- gsub(" -> ", "-", plot.name)
     savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
             plot.handle = plt.cur[[i]], 
-            fig.width = 15, fig.height=5, save.flag = save.pdf)
+            fig.width = 18, fig.height=7, save.flag = save.pdf)
   } 
 }, silent = T)
 
@@ -1044,7 +1184,7 @@ if (is.null(plt.cur)){
   s2 <- paste0("plt.cur[[", i, "]]")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 15, fig.height=5, message=FALSE, warning=FALSE}", paste("p3", i, sep = "")))
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 18, fig.height=7, message=FALSE, warning=FALSE}", paste("p3", i, sep = "")))
   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
   
@@ -1066,7 +1206,7 @@ try({
     plot.name <- gsub(" -> ", "-", plot.name)
     savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
             plot.handle = plt.cur[[i]], 
-            fig.width = 15, fig.height=5, save.flag = save.pdf)
+            fig.width = 18, fig.height=7, save.flag = save.pdf)
   } 
 }, silent = T)
 
@@ -1092,7 +1232,7 @@ if (is.null(plt.cur)){
   s2 <- paste0("plt.cur[[", i, "]]")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 15, fig.height=5, message=FALSE, warning=FALSE}", paste("p4", i, sep = "")))
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 18, fig.height=7, message=FALSE, warning=FALSE}", paste("p4", i, sep = "")))
   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
   
@@ -1114,79 +1254,35 @@ try({
     plot.name <- gsub(" -> ", "-", plot.name)
     savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
             plot.handle = plt.cur[[i]], 
-            fig.width = 15, fig.height=5, save.flag = save.pdf)
+            fig.width = 18, fig.height=7, save.flag = save.pdf)
   } 
 }, silent = T)
 
 
 ```
 
-5| Pooled
-===================================== 
-
-Row {.tabset}
--------------------------------------
-
-```{r pp5}
-
- plt.cur <-  plt.granular.list[["pooled"]] 
-if (is.null(plt.cur)){
-  out <- NULL
-} else {
-  
-    out <- lapply(seq_along(plt.cur), function(i) {
-  
-  s1 <- names(plt.cur)[i]
-  s2 <- paste0("plt.cur[[", i, "]]")
-  
-  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 15, fig.height=5, message=FALSE, warning=FALSE}", paste("p5", i, sep = "")))
-  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
-  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-  
-  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
-  
-})
-  
-}
-
-```
-
-`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
-
-```{r pp5 save,include = FALSE}
-
-try({
-  for (i in 1:length(plt.cur)){
-    plot.name <- paste0("M12_LR_dotplot_pooled_", names(plt.cur)[i] ,".pdf")
-    plot.name <- gsub(" -> ", "-", plot.name)
-    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
-            plot.handle = plt.cur[[i]], 
-            fig.width = 15, fig.height=5, save.flag = save.pdf)
-  } 
-}, silent = T)
-
-
-```
 
 LR Table
 ===================================== 
 
 ```{r detailed table output,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
 
-df.comm.output <- res.comm.list[["pooled"]]
-df.comm.output$interaction.score <- signif(df.comm.output$cell_from_mean_exprs * df.comm.output$cell_to_mean_exprs, 3)
-df.comm.output <- df.comm.output %>% dplyr::filter(interaction.score > 0.1)
+try({
+  df.comm.output <- res.comm.list[["pooled"]]
+  df.comm.output$interaction.score <- signif(df.comm.output$cell_from_mean_exprs * df.comm.output$cell_to_mean_exprs, 3)
+  df.comm.output <- df.comm.output %>% dplyr::filter(interaction.score > 0.1)
+  
+  datatable(df.comm.output, 
+            filter = 'top',
+            extensions = 'Buttons',
+            options = list(pageLength = 50,
+                           dom = 'Bfrtip', 
+                           buttons = c('copy', 'csv', 'pdf')))
+  
+  write.csv(df.comm.output, file = paste0(output.path, "Tables/", "LR_table.csv"), 
+            row.names = F) 
+}, silent = T)
 
-datatable(df.comm.output, 
-          filter = 'top',
-          extensions = 'Buttons',
-          options = list(pageLength = 50,
-                         dom = 'Bfrtip', 
-                         buttons = c('copy', 'csv', 'pdf')))
-
-write.csv(df.comm.output, file = paste0(output.path, "Tables/", "LR_table.csv"), 
-          row.names = F) 
 
 ```
 
