@@ -1,9 +1,21 @@
 ---
-title: "Module28_GBMSubtypeSpectra"
+title: "GBM Subtyping"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
   flexdashboard::flex_dashboard:
-    orientation: columns
+    orientation: rows
     vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = if (exists("user")){paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", format(Sys.Date(), "%d%m%y"), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
+    )
+  })
 ---
 
 
@@ -11,60 +23,89 @@ output:
 ```{r setup, include=FALSE}
 
 # clear global enviroment
-rm(list = ls())
+rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
 
 # initiate timer
 start.time <- proc.time()
 
 # load packages
-library(scMiko)
-modulePackages(module.number = 1)
-gc()
+packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", 
+                   "DT", "flexdashboard", "ggpmisc", "future", "foreach", "doParallel",
+                   "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "ggplot2", "reactome.db",
+                   "schex", "RColorBrewer", "cowplot")
+
+# load packages
+invisible(lapply(packages2load, library, character.only = TRUE))
+
+
+
+
 
 ```
 
 
 ```{r parameter specifications}
 
-# Specify data directories
-dir.preprocessed <- "Preprocessed Datasets/"
 
-# Query input
 # input.file <- "Module1_p9_GBM_PR_nololim_260620.Rdata"
 # input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
-input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+# input.file <- "M01_NM2_R1_test_300720.Rdata"
+input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 
 # cluster resolution
-cluster.resolution <- 1
+cluster.resolution <- 0.5
 
 # print inline
 print.inline <- F
 
 # Data subsampling
-subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 0.2 # OPTIONAL; range 0 to 1 (default = 1)
+
+which.subset <- "p4567891011_tumorOnly_res0_5"
 
 # species
-which.species <- "Hs"
+which.species <- "Mm"
+
+save.pdf <- F
 
 ```
 
 
-```{r load data, message=FALSE, warning=FALSE}
 
-# load query dataset
-warning("Importing dataset...")
-load(paste(dir.preprocessed, input.file, sep = ""))
-so <- prepSeurat(so)
-so.query <- so; so.input <- so.query; rm(so)
+```{r load data, warning = FALSE}
 
-current.assay <- DefaultAssay(so.query)
+# Specify data directories
+dir.preprocessed <- "Preprocessed_Datasets/"
 
-# subsample (for dev purposes)
-n.subset <- round(subsample_factor *ncol(so.input))
-cell.ind <- sample(x = seq(1, ncol(so.input)), size = n.subset, replace = FALSE, prob = NULL)
-so.query <- SubsetData(so.query , cells = cell.ind)
+if (!exists("data.path") & !exists("user")) {
+  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+}
 
-rm(so.input)
+# load data
+warning("Importing data...")
+if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
+load(paste(data.path, dir.preprocessed, input.file, sep = ""))
+
+
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
+
+if (!(exists("which.subset"))) which.subset <- "no.subset"
+
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                             species = which.species, resolution= cluster.resolution, subset = which.subset, 
+                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
+                             terms2drop = c("ica", "tsne", "nmf", "gsva", "deg"), rmv.pattern = "so", 
+                         scale.reprocessed = F, neighbors.reprocessed = F, keep.default.assay.only = T)
+
+# unpack results
+if (exists("so")) try({rm(so)}, silent = T)
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+rm(prep.list)
+invisible({gc()})
 
 ```
 
@@ -72,7 +113,7 @@ rm(so.input)
 ```{r analysis log}
 
 # Module
-df.log <- initiateLog("28, SGBM Subtype Spectra")
+df.log <- initiateLog("28, GBM Subtype Spectra")
 df.log <- addLogEntry("Query File (.Rdata)", (input.file), df.log, "input.file")
 df.log <- addLogEntry("Default Assay", (current.assay), df.log, "current.assay")
 df.log <- addLogEntry("Cluster Resolution", (cluster.resolution), df.log, "cluster.resolution")
@@ -89,43 +130,8 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 ```
 
 
-```{r prep gene list}
 
-# prep gene list
-gNames.list <- prepGeneList( so.query, objects())
-
-# ensure gene list is available
-stopifnot(exists("gNames.list"))
-```
-
-
-```{r convert to symbol}
-
-gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-
-if (gene.rep == "ensembl"){
-  warning("converting ENSEMBL to SYMBOL...")
-  so.query <- ens2sym.so(so = so.query, gNames.list = gNames.list, convert.RNA = TRUE)
-  gene.rep <-  checkGeneRep(gNames.list, as.vector(rownames(so.query@assays[[current.assay]]@scale.data)))
-}
-
-
-```
-
-
-
-```{r get clusters, fig.width=10, fig.height=4}
-
-# compute clusters
-warning("Computing clusters...")
-so.query <- FindClusters(object = so.query, 
-                         resolution = cluster.resolution, 
-                         verbose = 0, algorithm = 1, modularity.fxn = 1)
-
-
-# prep query parameters with assertions
-cur.cluster.field <- paste(DefaultAssay(so.query), "_snn_res.", cluster.resolution, sep = "")
-stopifnot(cur.cluster.field %in% names(so.query@meta.data))
+```{r generate umaps, fig.width=10, fig.height=4}
 
 # get umap
 plt.umap_by_cluster <- cluster.UMAP(
@@ -152,15 +158,13 @@ plt.umap_by_barcode <- cluster.UMAP(
 
 plt.umap.overview <-   cowplot::plot_grid(plt.umap_by_cluster, plt.umap_by_barcode)
 
-if (print.inline){
-  # fig.width=10, fig.height=4
-  plt.umap.overview
-}
+if (print.inline) plt.umap.overview
+
 
 ```
 
 
-```{r get GBM meta module genes}
+```{r get GBM meta module genes, include = FALSE}
 
 # get GBM genes
 gbm.genes <- data.frame(geneSets[["GBM_Hs_Neftel2019"]])
@@ -173,7 +177,7 @@ for (i in 1:ncol(gbm.genes)){
   if (which.species == "Hs"){
     gbm.genes[ ,i] <- toupper(gbm.genes[,i])
   } else if (which.species == "Mm"){
-    gbm.genes[ ,i] <- tolower(gbm.genes[,i])
+    gbm.genes[ ,i] <- firstup(gbm.genes[,i])
   }
   
   # get module name
@@ -186,11 +190,14 @@ for (i in 1:ncol(gbm.genes)){
 # compute jaccard similarity
 j.mat <- jaccardSimilarityMatrix(gbm.genes, assert.unique = T)
 
+ plt.jac.sim.mod <-  ggplotify::as.ggplot(pheatmap::pheatmap(j.mat, 
+                   main = "GBM Meta-Module Similarities",
+                   color  = viridis::inferno(20)))
+
+
 # plot heatmap
 if (print.inline){
-  pheatmap::pheatmap(j.mat, 
-                   main = "GBM Meta-Module Similarities",
-                   color  = viridis::inferno(20))
+print(plt.jac.sim.mod)
 }
 
 
@@ -235,7 +242,7 @@ module.scores <- cbind(module.scores, pooled.scores)
 
 ```
 
-```{r plot module scores, fig.width=7, fig.height=7}
+```{r plot module scores, fig.width=15, fig.height=7}
 
 # heatmap
 if (print.inline){
@@ -277,8 +284,7 @@ for (i in 1:length(gbm.list)){
 }
 
 if (print.inline){
-  # , fig.width=7, fig.height=7
-  cowplot::plot_grid(plotlist = plt.umap.list, ncol = 3)
+  cowplot::plot_grid(plotlist = plt.umap.list, ncol = 4)
 }
 
 
@@ -299,7 +305,7 @@ cellCycleScores <- function(so, which.species = "Hs", override.existing.scores =
   
   if (do.scoring){
     
-    warning("Scoring cell cycle...")
+    warning("Scoring cell cycle...\n")
     
     # get cell cycle genes
     s.genes <- cc.genes$s.genes
@@ -318,7 +324,7 @@ cellCycleScores <- function(so, which.species = "Hs", override.existing.scores =
     so <- CellCycleScoring(so, s.features = s.genes, g2m.features = g2m.genes, set.ident = F)
     
   } else {
-    warning("Cell cycle not scored...")
+    warning("Cell cycle scores found in existing seurat object...\n")
   }
   
   
@@ -432,8 +438,6 @@ plt.metascores <- df.state %>%
   geom_vline(xintercept=0, color = color.pal, size=1.5) + 
   geom_point(size = 0.9, alpha = 1.0)  + 
   geom_label(data = df.labels, aes(x = x, y = y, label = label), fill = color.pal, color="white") 
-# facet_wrap(~barcode)
-# , color = PRclass
 
 ```
 
@@ -476,8 +480,6 @@ plt.cluster.bar <- df.state %>%
   labs(title = "GBM Subtype Characteristics",
        subtitle = "Cluster by GBM Subtype") +
   ggthemes::scale_fill_ptol()
-
-# plt.barcode.bar <- 
 
 plt.barcode.bar <- df.state %>%
   group_by(GBMstate, barcode) %>%
@@ -531,36 +533,75 @@ plt.metastate.combo2 <- cowplot::plot_grid(plt.umap_by_cluster + theme_miko(lege
 plt.metastate.combo2 <- cowplot::plot_grid(plt.metastate.combo2, plt.cluster.bar, ncol = 1)
 
 
-
-
 ```
 
 
-```{r}
+```{r explore additional queries}
 
 e.mat <- getExpressionMatrix(so.query, which.data = "data")
 which.genes <- c("EGFR", "PDGFRA", "CDK4", "NF1")
+
+if (which.species == "Mm"){
+  which.genes <- firstup(which.genes)
+}
 e.mat.sub <- t(e.mat[rownames(e.mat) %in% which.genes, ])
 
 
 df.state <- bind_cols(df.state, data.frame(e.mat.sub))
 
-df.state.long <- pivot_longer(df.state, cols = which.genes)
-
-
-plt.expression <- df.state.long %>%
-  group_by(GBMstate) %>%
-  ggplot(aes(x = GBMstate, y = value, fill = GBMstate)) +
-  geom_boxplot() +
-  theme_miko()+ 
-  ggthemes::scale_fill_ptol() + 
-  facet_wrap(~name) + 
-  xlab("GBM Subtype") + ylab("Expression") + 
-  labs(title= "Markers of Interest", subtitle = "GBM subtype-stratified expression")
+which.available <- which.genes[which.genes %in% colnames(df.state)]
+if (length(which.available) > 0){
+  df.state.long <- pivot_longer(df.state, cols = which.available)
+  
+  plt.expression <- df.state.long %>%
+    group_by(GBMstate) %>%
+    ggplot(aes(x = GBMstate, y = value, fill = GBMstate)) +
+    geom_boxplot() +
+    theme_miko()+ 
+    ggthemes::scale_fill_ptol() + 
+    facet_wrap(~name) + 
+    xlab("GBM Subtype") + ylab("Expression") + 
+    labs(title= "Markers of Interest", subtitle = "GBM subtype-stratified expression")
+} else {
+  plt.expression <- NULL
+}
 
 if (print.inline){
   print(plt.expression)
 }
+
+```
+
+
+```{r central log}
+
+# update central log
+run.id <- NULL
+if (!exists("user")) user <- "guest"
+
+clog.update.success <- F
+try({
+  run.id <-  updateCentralLog(Module = "M28", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
+  clog.update.success <-  T
+}, silent = F)
+if (is.null(run.id))  {
+  warning("Central log update was unsuccessful :(\n")
+  run.id <- paste("M28_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+}
+
+```
+
+
+```{r setup output directories}
+
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+
+# create output directories
+dir.create(output.path)
+dir.create(paste0(output.path, "Tables/"))
+if (save.pdf) dir.create(paste0(output.path, "PDF/"))
 
 ```
 
@@ -574,7 +615,8 @@ if (print.inline){
 
   print(plt.umap.overview)
 
-
+savePDF(file.name = paste0(output.path, "PDF/", "M28_umap_cluster.pdf"), plot.handle = plt.umap.overview, 
+        fig.width = 12, fig.height = 5, save.flag = save.pdf)
 
 ```
 
@@ -588,15 +630,22 @@ Row {.tabset}
 
 ```{r, fig.width=9, fig.height=4}
 
-plt.metastate.combo1
+print(plt.metastate.combo1)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M28_subtype_classification.pdf"), plot.handle = plt.metastate.combo1, 
+        fig.width = 9, fig.height = 4, save.flag = save.pdf)
 
 ```
 
 ### Modular Activity
 
-```{r,  fig.width=7, fig.height=7}
+```{r,  fig.width=15, fig.height=7}
 
-  cowplot::plot_grid(plotlist = plt.umap.list, ncol = 3)
+plt.mod.activity <- cowplot::plot_grid(plotlist = plt.umap.list, ncol = 4)
+print(plt.mod.activity)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M28_subtype_modular_activity_umap.pdf"), plot.handle = plt.mod.activity, 
+        fig.width =15, fig.height = 7, save.flag = save.pdf)
   
 ```
 
@@ -604,9 +653,9 @@ plt.metastate.combo1
 
 ```{r js map}
 
-  pheatmap::pheatmap(j.mat, 
-                   main = "GBM Meta-Module Similarities",
-                   color  = viridis::inferno(20))
+print(plt.jac.sim.mod)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M28_genelist_jaccardsimilarity_heatmap.pdf"), plot.handle = plt.jac.sim.mod, fig.width =7, fig.height = 7, save.flag = save.pdf)
 ```
 
 3) Stratified Analyses
@@ -619,7 +668,9 @@ Row {.tabset}
 
 ```{r, fig.width=9, fig.height=4}
 
-plt.cc.combo
+print(plt.cc.combo)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M28_cellcycle_by_subtype.pdf"), plot.handle = plt.cc.combo, fig.width =9, fig.height = 4, save.flag = save.pdf)
 
 ```
 
@@ -627,7 +678,9 @@ plt.cc.combo
 
 ```{r, fig.width=9, fig.height=7}
 
-plt.metastate.combo2
+print(plt.metastate.combo2)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M28_subtype_by_cluster.pdf"), plot.handle = plt.cc.combo, fig.width =9, fig.height = 7, save.flag = save.pdf)
 
 ```
 
@@ -635,7 +688,10 @@ plt.metastate.combo2
 
 ```{r, fig.width=11, fig.height=4}
 
-plt.bc.combo
+
+print(plt.bc.combo)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M28_subtype_by_barcode.pdf"), plot.handle = plt.bc.combo, fig.width =11, fig.height = 4, save.flag = save.pdf)
 
 ```
 
@@ -644,9 +700,14 @@ plt.bc.combo
 
 ### Markers of Interest
 
-```{r}
+```{r markers of interest plots}
 
-plt.expression
+print(plt.expression)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M28_subtype_markers.pdf"), 
+        plot.handle = plt.expression, save.flag = save.pdf)
+
+
 
 ```
 
@@ -655,6 +716,9 @@ plt.expression
 # Run time
 end.time <- proc.time()
 elapsed.time <- round((end.time - start.time)[[3]], 2)
+
+df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
 df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
 
 df.log_Module_28 <- df.log
@@ -677,4 +741,27 @@ Log (Module 28)
 knitr::kable(df.log_Module_28)
 ```
 
+```{r save analysis log as csv}
 
+try({
+  write.csv(df.log_Module_28, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+    row.names = F)  
+}, silent = T)
+
+```
+
+
+```{r merge pdfs, include = FALSE}
+
+# combine pdfs into single binder
+if (save.pdf){
+  try({
+    pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+    pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+    
+    pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+  }, silent = T)
+}
+
+
+```
