@@ -49,7 +49,7 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # Query input
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
+input.file <- "R98_M27_NM2_M02_p467891011_Mm_allGBM_tumorImmune_140920.Rdata"
 
 # specify reference genesets
 # "MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat",, , "neural.dif.HH"
@@ -95,7 +95,7 @@ names(csv_input) <- as.vector(query.references$names)
 ```
 
 
-```{r load data, warning = TRUE}
+```{r load data, warning = FALSE}
 
 # Specify data directories
 dir.preprocessed <- "Preprocessed_Datasets/"
@@ -437,7 +437,7 @@ rcnames.2d <- function (score.mat, exp.mat, sig){
 
 # get expression  matrix
 ef.mat <- so.query@assays[[DefaultAssay(so.query)]]@data
-try({es.mat <- so.query@assays[[DefaultAssay(so.query)]]@scale.data}, silent = T)
+# try({es.mat <- so.query@assays[[DefaultAssay(so.query)]]@scale.data}, silent = T)
 sc.meta <- so.query@meta.data[["seurat_clusters"]]
 u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
 
@@ -445,7 +445,7 @@ u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number
 logfc.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
 pct.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
 e.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
-try({s.mat <- matrix(nrow = nrow(es.mat), ncol = length(u.clust))}, silent = T)
+# try({s.mat <- matrix(nrow = nrow(es.mat), ncol = length(u.clust))}, silent = T)
 f.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
 
 # get cluster-level aggregate scores
@@ -462,12 +462,12 @@ for (i in 1:length(u.clust)){
   e.mat[ ,i] <- e1
   
   # scaled data
-  try({
-    if (n.cells.current == 1){
-      s1 <- (es.mat[, which.cells]) 
-    } else { s1 <- rowMeans(es.mat[, which.cells])}
-    s.mat[ ,i] <- s1
-  }, silent = T)
+  # try({
+  #   if (n.cells.current == 1){
+  #     s1 <- (es.mat[, which.cells]) 
+  #   } else { s1 <- rowMeans(es.mat[, which.cells])}
+  #   s.mat[ ,i] <- s1
+  # }, silent = T)
   
   # logfc
   e2 <- log(rowMeans(expm1(x = ef.mat[, !which.cells])) + 1)
@@ -486,20 +486,21 @@ for (i in 1:length(u.clust)){
 }
 
 # assign col and row names
-colnames(e.mat) <- colnames(s.mat) <- colnames(logfc.mat) <-  colnames(f.mat) <-  colnames(pct.mat) <- u.clust
+colnames(e.mat) <- colnames(logfc.mat) <-  colnames(f.mat) <-  colnames(pct.mat) <- u.clust
 rownames(e.mat) <-  rownames(logfc.mat) <-  rownames(f.mat) <-  rownames(pct.mat) <- rownames(ef.mat)
 
-try({
-  rownames(s.mat) <-  rownames(es.mat)
-  colnames(s.mat) <- u.clust
-}, silent = T)
+# try({
+#   # colnames(s.mat) <- 
+#   rownames(s.mat) <-  rownames(es.mat)
+#   colnames(s.mat) <- u.clust
+# }, silent = T)
 
 
 # cast to data.frame
 df.lfc.wide <- data.frame(gene = rownames(ef.mat), data.frame(logfc.mat)); colnames(df.lfc.wide) <- c("gene", u.clust)
 df.pd.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(pct.mat)); colnames(df.pd.wide) <- c("gene", u.clust)
 df.e.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(e.mat)); colnames(df.e.wide) <- c("gene", u.clust)
-try({df.s.wide <- data.frame(gene = rownames(es.mat), as.data.frame(s.mat)); colnames(df.s.wide) <- c("gene", u.clust)}, silent = T)
+# try({df.s.wide <- data.frame(gene = rownames(es.mat), as.data.frame(s.mat)); colnames(df.s.wide) <- c("gene", u.clust)}, silent = T)
 df.f.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(f.mat)); colnames(df.f.wide) <- c("gene", u.clust)
 
 # wide to long
@@ -518,7 +519,7 @@ df.e.long$cluster <- factor(df.e.long$cluster, levels = u.clust)
 df.f.long$cluster <- factor(df.f.long$cluster, levels = u.clust)
 
 # clear baggage
-try({rm(es.mat)}, silent = T)
+# try({rm(es.mat)}, silent = T)
 invisible({gc()})
 
 ```
