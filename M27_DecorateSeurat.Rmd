@@ -46,6 +46,7 @@ knit: (function(inputFile, encoding) {
 
 # clear global enviroment
 rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
 
 # initiate timer
 start.time <- proc.time()
@@ -69,7 +70,9 @@ invisible(lapply(packages2load, library, character.only = TRUE, quietly = TRUE))
 # Query input
 # input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+# input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
+# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R44_M27_NM2_p4789_allGBM_tumorSubpop1_150820.Rdata"
 # input.file <- "R32_M02_NM2_M02_testSet_rPCA_120820.Rdata"
 
@@ -78,10 +81,11 @@ input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 override.input <- F # if true, output.file is ignored and input.file is overwritten
 
 # output file (required only if override input = F)
-output.file <- "p4789_allGBM_tumorSubpop_iter1_190820.Rdata" # note that run id, module number and user name will automatically be appended as prefix. 
+# output.file <- "M02_cor_p467891011_Mm_GBM_080920.Rdata" # note that run id, module number and user name will automatically be appended as prefix.
+output.file <- "M02_p467891011_Mm_allGBM_ImmuneOnly_150920.Rdata"
 
 # cluster resolution
-cluster.resolution <- 0.45
+cluster.resolution <- 0.5
 
 # print inline
 print.inline <- F
@@ -94,9 +98,8 @@ which.species <- "Mm"
 
 # specify subseting 
 # which.subset <- "p4789_immune_cr0_45"
-which.subset <- "p4789_tumorImmuneSubpop1_cr0_45"
-# which.subset <- "no.subset"
-
+which.subset <- "p4567891011_immune_res0_5"
+# p4567891011_brainTissue
 
 # save pdf
 save.pdf <- T
@@ -109,7 +112,7 @@ decoration.list <- list(
   NMF = F,
   rho.matrix = F,
   cell.cycle.scoring = T,
-  DEG = F,
+  DEG = T,
   GSVA = F
 )
 
@@ -124,7 +127,7 @@ parameter.list <- list(
 ```
 
 
-```{r load data, message=FALSE, warning=TRUE}
+```{r load data, message=FALSE, warning=FALSE}
 
 dir.preprocessed <- "Preprocessed_Datasets/"
 
@@ -155,10 +158,12 @@ if ("integrated" %in% names(so@assays)){
 invisible({gc()})
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
                              species = which.species, resolution= cluster.resolution, subset.data = which.subset, 
-                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv", terms2drop = which.terms)
+                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv", 
+                         terms2drop = which.terms, coerce.assay.used.to.default = F, rmv.pattern = "so", 
+                         scale.reprocessed = T)
 
 # unpack results
-rm(so)
+if (exists("so")) try({rm(so)}, silent = T)
 so.query <- prep.list$so
 current.assay <- prep.list$assay
 n.cells <- prep.list$n.cell
@@ -256,22 +261,22 @@ if (decoration.list$PCA){
 ```{r get clusters}
 
 # compute clusters
-if (!(decoration.list$PCA)){
-  
-  # get cluster assay
-  assay.names <- names(so.query@assays)
-  assay.holder <- DefaultAssay(so.query)
-  if ("integrated" %in% assay.names){
-    DefaultAssay(so.query) <- "integrated"
-  } 
-  
-  warning("Computing clusters...\n")
-  so.query <- FindClusters(object = so.query, 
-                           resolution = cluster.resolution, 
-                           verbose = 0, algorithm = 1, modularity.fxn = 1)
-  
-  DefaultAssay(so.query) <- assay.holder
-} 
+# if (!(decoration.list$PCA)){
+#   
+#   # get cluster assay
+#   assay.names <- names(so.query@assays)
+#   assay.holder <- DefaultAssay(so.query)
+#   if ("integrated" %in% assay.names){
+#     DefaultAssay(so.query) <- "integrated"
+#   } 
+#   
+#   warning("Computing clusters...\n")
+#   so.query <- FindClusters(object = so.query, 
+#                            resolution = cluster.resolution, 
+#                            verbose = 0, algorithm = 1, modularity.fxn = 1)
+#   
+#   DefaultAssay(so.query) <- assay.holder
+# } 
 
 
 
