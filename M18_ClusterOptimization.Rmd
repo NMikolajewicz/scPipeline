@@ -78,7 +78,7 @@ cluster.tree.markers <- NA
 which.species <- "Mm"
 
 # Data subsampling
-subsample_factor <- 0.5 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify number of workers (for parallelization)
 n.workers <- list(
@@ -315,6 +315,7 @@ cur_idents <- Idents(so.query)
 so.markers <- so.query
 
 # start cluster
+if (n.workers$deg > length(cluster.name)) n.workers$deg <- length(cluster.name)
 cl <- parallel::makeCluster(n.workers$deg)
 doParallel::registerDoParallel(cl)
 
