@@ -22,6 +22,7 @@ knit: (function(inputFile, encoding) {
 
 # clear global enviroment                          
 rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
 
 # initiate timer
 start.time <- proc.time()
@@ -98,10 +99,10 @@ if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
                              species = which.species, resolution= cluster.resolution, subset.data = subgroup, 
-                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv")
+                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv", rmv.pattern = "so")
 
 # unpack results
-rm(so); 
+if (exists("so")) try({rm(so)}, silent = T)
 so.query <- prep.list$so
 current.assay <- prep.list$assay
 n.cells <- prep.list$n.cell
