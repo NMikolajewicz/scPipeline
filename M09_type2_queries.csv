@@ -14,3 +14,5 @@ wgcna.first,wgcna_firstpass_300320.csv,Gene_Sets/,,T
 immune.TF,VALID_TRRUSTv2_Mm_regulation_immuneSubset_090420.csv,Reference_Datasets/,,T
 p7.mesoMarker,p7_mesoMarkers_250620.csv,Gene_Sets/,,F
 p7.mesoMarker.HH,HHtestMeso_200716.csv,Gene_Sets/,,F
+neftel.genes,VALID_GBM_meta_module_genes_SYMBOL.csv,Reference_Datasets/,,F
+neftel.modules,VALID_GBM_meta_module_genes_SYMBOL.csv,Reference_Datasets/,,T
