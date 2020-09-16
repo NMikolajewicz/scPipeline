@@ -43,7 +43,7 @@ lapply(packages2load, library, character.only = TRUE)
 # mean for ligand, median for receptor (rationale is that ligands do not depend on cell type, receptors do)
 
 # query input
-input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
+input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 # input.file <- "Module1_Suva2019.Rdata"
@@ -65,7 +65,7 @@ top.N.genes <- 50 # Nth percentile expression
 # cell_type_b <- "c4"
 
 # downsampling
-subsample_factor <- 1
+subsample_factor <- 0.2
 
 # subset
 subset.df <- "no.subset"
@@ -173,91 +173,91 @@ gene2species <- function(x, expected_species){
 
 ```{r}
 
-sparse2dense <- function(mat.sparse, block.size = 10000, transpose = F, verbose.error = F){
-  
-  mat.dense <- tryCatch({
-    mat.dense <- as.matrix(mat.sparse)
-    if (transpose) mat.dense <- t(mat.dense)
-  }, error = function(e){
-    if (verbose.error) print(e)
-    mat.dense <- NULL
-    n.blocks <- round(ncol(mat.sparse) / block.size)+1
-    for (i in 1:(n.blocks)){
-      start.range <- ((i-1)*block.size)+1
-      end.range <- i*block.size
-      if (start.range > ncol(mat.sparse)) next
-      if (end.range > ncol(mat.sparse)) end.range <- ncol(mat.sparse)
-      if (transpose){
-        mat.dense <- rbind(mat.dense, t(as.matrix(mat.sparse[, start.range:end.range])))
-      } else {
-        mat.dense <- cbind(mat.dense, as.matrix(mat.sparse[, start.range:end.range]))
-      }
-    }
-    if (transpose){
-      colnames(mat.dense) <- rownames(mat.sparse)
-      rownames(mat.dense) <- colnames(mat.sparse) 
-    } else {
-      colnames(mat.dense) <- colnames(mat.sparse)
-      rownames(mat.dense) <- rownames(mat.sparse)     
-    }
-    
-    return(mat.dense)
-  })
-  
-  if (transpose){
-    colnames(mat.dense) <- rownames(mat.sparse)
-    rownames(mat.dense) <- colnames(mat.sparse) 
-  } else {
-    colnames(mat.dense) <- colnames(mat.sparse)
-    rownames(mat.dense) <- rownames(mat.sparse)     
-  }
-  rm(mat.sparse); invisible({gc()})
-  
-  return(mat.dense)
-}
-
-sparse2df <- function(mat.sparse, block.size = 10000, transpose = F, verbose.error = F){
-  
-  df <- tryCatch({
-    df <- as.data.frame(mat.sparse)
-    if (transpose) df <- t(df)
-  }, error = function(e){
-    if (verbose.error) print(e)
-    df <- NULL
-    n.blocks <- round(ncol(mat.sparse) / block.size)+1
-    for (i in 1:(n.blocks)){
-      start.range <- ((i-1)*block.size)+1
-      end.range <- i*block.size
-      if (start.range > ncol(mat.sparse)) next
-      if (end.range > ncol(mat.sparse)) end.range <- ncol(mat.sparse)
-      if (transpose){
-        df <- bind_rows(df,as.data.frame(t(as.matrix(mat.sparse[, start.range:end.range]))))
-      } else {
-        df <- bind_cols(df,as.data.frame(mat.sparse[, start.range:end.range]))
-      }
-    }
-    if (transpose){
-      colnames(df) <- rownames(mat.sparse)
-      rownames(df) <- colnames(mat.sparse) 
-    } else {
-      colnames(df) <- colnames(mat.sparse)
-      rownames(df) <- rownames(mat.sparse)     
-    }
-    return(df)
-  })
-  
-  if (transpose){
-    colnames(df) <- rownames(mat.sparse)
-    rownames(df) <- colnames(mat.sparse) 
-  } else {
-    colnames(df) <- colnames(mat.sparse)
-    rownames(df) <- rownames(mat.sparse)     
-  }
-  rm(mat.sparse); invisible({gc()})
-  
-  return(df)
-  
-}
+# sparse2dense <- function(mat.sparse, block.size = 10000, transpose = F, verbose.error = F){
+#   
+#   mat.dense <- tryCatch({
+#     mat.dense <- as.matrix(mat.sparse)
+#     if (transpose) mat.dense <- t(mat.dense)
+#   }, error = function(e){
+#     if (verbose.error) print(e)
+#     mat.dense <- NULL
+#     n.blocks <- round(ncol(mat.sparse) / block.size)+1
+#     for (i in 1:(n.blocks)){
+#       start.range <- ((i-1)*block.size)+1
+#       end.range <- i*block.size
+#       if (start.range > ncol(mat.sparse)) next
+#       if (end.range > ncol(mat.sparse)) end.range <- ncol(mat.sparse)
+#       if (transpose){
+#         mat.dense <- rbind(mat.dense, t(as.matrix(mat.sparse[, start.range:end.range])))
+#       } else {
+#         mat.dense <- cbind(mat.dense, as.matrix(mat.sparse[, start.range:end.range]))
+#       }
+#     }
+#     if (transpose){
+#       colnames(mat.dense) <- rownames(mat.sparse)
+#       rownames(mat.dense) <- colnames(mat.sparse) 
+#     } else {
+#       colnames(mat.dense) <- colnames(mat.sparse)
+#       rownames(mat.dense) <- rownames(mat.sparse)     
+#     }
+#     
+#     return(mat.dense)
+#   })
+#   
+#   if (transpose){
+#     colnames(mat.dense) <- rownames(mat.sparse)
+#     rownames(mat.dense) <- colnames(mat.sparse) 
+#   } else {
+#     colnames(mat.dense) <- colnames(mat.sparse)
+#     rownames(mat.dense) <- rownames(mat.sparse)     
+#   }
+#   rm(mat.sparse); invisible({gc()})
+#   
+#   return(mat.dense)
+# }
+# 
+# sparse2df <- function(mat.sparse, block.size = 10000, transpose = F, verbose.error = F){
+#   
+#   df <- tryCatch({
+#     df <- as.data.frame(mat.sparse)
+#     if (transpose) df <- t(df)
+#   }, error = function(e){
+#     if (verbose.error) print(e)
+#     df <- NULL
+#     n.blocks <- round(ncol(mat.sparse) / block.size)+1
+#     for (i in 1:(n.blocks)){
+#       start.range <- ((i-1)*block.size)+1
+#       end.range <- i*block.size
+#       if (start.range > ncol(mat.sparse)) next
+#       if (end.range > ncol(mat.sparse)) end.range <- ncol(mat.sparse)
+#       if (transpose){
+#         df <- bind_rows(df,as.data.frame(t(as.matrix(mat.sparse[, start.range:end.range]))))
+#       } else {
+#         df <- bind_cols(df,as.data.frame(mat.sparse[, start.range:end.range]))
+#       }
+#     }
+#     if (transpose){
+#       colnames(df) <- rownames(mat.sparse)
+#       rownames(df) <- colnames(mat.sparse) 
+#     } else {
+#       colnames(df) <- colnames(mat.sparse)
+#       rownames(df) <- rownames(mat.sparse)     
+#     }
+#     return(df)
+#   })
+#   
+#   if (transpose){
+#     colnames(df) <- rownames(mat.sparse)
+#     rownames(df) <- colnames(mat.sparse) 
+#   } else {
+#     colnames(df) <- colnames(mat.sparse)
+#     rownames(df) <- rownames(mat.sparse)     
+#   }
+#   rm(mat.sparse); invisible({gc()})
+#   
+#   return(df)
+#   
+# }
 ```
 
 
@@ -282,23 +282,23 @@ prep.data <- function(so, cluster.field, gNames.list, data.slot){
   # RESUME HERE
   # Construct matrix in chunks
 
-  
-  exp.df_t <- tryCatch({
-    exp.df_t <- t(as.data.frame(exp.mat))
-  }, error = function(e){
-    # print(e)
-    exp.df_t <- NULL
-    chunk.size <- 10000
-    n.blocks <- round(ncol(exp.mat) / chunk.size)+1
-    for (i in 1:(n.blocks)){
-      start.range <- ((i-1)*chunk.size)+1
-      end.range <- i*chunk.size
-      if (start.range > ncol(exp.mat)) next
-      if (end.range > ncol(exp.mat)) end.range <- ncol(exp.mat)
-     exp.df_t <- bind_rows(exp.df_t,as.data.frame(t(as.matrix(exp.mat[, start.range:end.range]))))
-    }
-    return(exp.df_t)
-  })
+  exp.df_t <- sparse2df(exp.mat, transpose =  T)
+  # exp.df_t <- tryCatch({
+  #   exp.df_t <- t(as.data.frame(exp.mat))
+  # }, error = function(e){
+  #   # print(e)
+  #   exp.df_t <- NULL
+  #   chunk.size <- 10000
+  #   n.blocks <- round(ncol(exp.mat) / chunk.size)+1
+  #   for (i in 1:(n.blocks)){
+  #     start.range <- ((i-1)*chunk.size)+1
+  #     end.range <- i*chunk.size
+  #     if (start.range > ncol(exp.mat)) next
+  #     if (end.range > ncol(exp.mat)) end.range <- ncol(exp.mat)
+  #    exp.df_t <- bind_rows(exp.df_t,as.data.frame(t(as.matrix(exp.mat[, start.range:end.range]))))
+  #   }
+  #   return(exp.df_t)
+  # })
   
   colnames(exp.df_t) <- rownames(exp.mat)
   rownames(exp.df_t) <- colnames(exp.mat)
