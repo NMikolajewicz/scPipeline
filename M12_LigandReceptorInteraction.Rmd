@@ -114,7 +114,6 @@ df.log <- addLogEntry("Aggregation Method", aggregation.method, df.log, "aggrega
 
 # Specify data directories
 dir.preprocessed <- "Preprocessed_Datasets/"
-dir.reference <- "Reference_Datasets/"
 
 if (!exists("data.path") & !exists("user")) {
   stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
@@ -126,7 +125,7 @@ warning("Importing data...")
 if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
 load(paste(data.path, dir.preprocessed, input.file, sep = ""));
 
-if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 
 # which terms2drop
 t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "scale")
