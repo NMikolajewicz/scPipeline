@@ -14,8 +14,9 @@ See  [scPipeline Wiki](https://github.com/NMikolajewicz/scPipeline/wiki) for ins
 | M12  | Ligand Receptor Network | Up | Preprocessed_Datasets | - | Yes | High |
 | M13  | Trajectory Inference | Up | Preprocessed_Datasets | - | No | Moderate |
 | M18  | Cluster Optimization | Up | Preprocessed_Datasets | - | Yes | High |
-| M24  | Gene Modules | Up | Preprocessed_Datasets | - | Yes | Moderate |
+| M24  | Gene Modules | Up | Preprocessed_Datasets | - | Yes | Low |
 | M27  | Decorate Seurat | Up | Preprocessed_Datasets | Preprocessed_Datasets | Yes | High |
+| M28  | GBM Analysis | Up | Preprocessed_Datasets | - | Yes | Moderate |
 
 
 ## Module Status (Offline/Retire/TODO)
@@ -33,5 +34,4 @@ See  [scPipeline Wiki](https://github.com/NMikolajewicz/scPipeline/wiki) for ins
 | M23  | Wt vs. KO Bulk RNA | Down | Preprocessed_Datasets | - | No | Low |
 | M25  | Activity Spectrum | Up | Preprocessed_Datasets | - | No | Low |
 | M26  | Targetted Genesets | Up | Preprocessed_Datasets | - | No | High |
-| M28  | GBM Analysis | Up | Preprocessed_Datasets | - | No | Moderate |
 | M29  | Pairwise Cluster Differentials | Down | Preprocessed_Datasets | - | No | Moderate |
