@@ -39,12 +39,9 @@ lapply(packages2load, library, character.only = TRUE)
 
 ```{r specify parameters}
 
-# TODO
-# mean for ligand, median for receptor (rationale is that ligands do not depend on cell type, receptors do)
-
 # query input
-input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
-# input.file <- "M01_NM2_R1_test_300720.Rdata"
+# input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
+input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 # input.file <- "Module1_Suva2019.Rdata"
 
@@ -59,13 +56,9 @@ data.type  <- "mean count" # options: mean count, DEG
 
 top.N.genes <- 50 # Nth percentile expression
 
-# compare cell types
-# pairwise.comparison.flag <- F
-# cell_type_a <- "c12"
-# cell_type_b <- "c4"
 
 # downsampling
-subsample_factor <- 0.2
+subsample_factor <- 0.5
 
 # subset
 which.subset <- "no.subset"
@@ -90,9 +83,6 @@ save.pdf <- T
 
 # Module
 df.log <- initiateLog("12, Ligand-Receptor Interactions")
-
-
-
 df.log <- addLogEntry("Input File (.Rdata)", input.file, df.log, "input.file")
 df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
 df.log <- addLogEntry("Species", which.species, df.log, "which.species")
@@ -157,8 +147,8 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 ```
 
 ```{r  function to specify signature gene sets}
-# convert human symbols to mouse symbols
 
+# helper function to convert human symbols to mouse symbols
 gene2species <- function(x, expected_species){
   if (expected_species == "Hs"){
     x <- toupper(x)
@@ -171,101 +161,13 @@ gene2species <- function(x, expected_species){
 }
 ```
 
-```{r}
-
-# sparse2dense <- function(mat.sparse, block.size = 10000, transpose = F, verbose.error = F){
-#   
-#   mat.dense <- tryCatch({
-#     mat.dense <- as.matrix(mat.sparse)
-#     if (transpose) mat.dense <- t(mat.dense)
-#   }, error = function(e){
-#     if (verbose.error) print(e)
-#     mat.dense <- NULL
-#     n.blocks <- round(ncol(mat.sparse) / block.size)+1
-#     for (i in 1:(n.blocks)){
-#       start.range <- ((i-1)*block.size)+1
-#       end.range <- i*block.size
-#       if (start.range > ncol(mat.sparse)) next
-#       if (end.range > ncol(mat.sparse)) end.range <- ncol(mat.sparse)
-#       if (transpose){
-#         mat.dense <- rbind(mat.dense, t(as.matrix(mat.sparse[, start.range:end.range])))
-#       } else {
-#         mat.dense <- cbind(mat.dense, as.matrix(mat.sparse[, start.range:end.range]))
-#       }
-#     }
-#     if (transpose){
-#       colnames(mat.dense) <- rownames(mat.sparse)
-#       rownames(mat.dense) <- colnames(mat.sparse) 
-#     } else {
-#       colnames(mat.dense) <- colnames(mat.sparse)
-#       rownames(mat.dense) <- rownames(mat.sparse)     
-#     }
-#     
-#     return(mat.dense)
-#   })
-#   
-#   if (transpose){
-#     colnames(mat.dense) <- rownames(mat.sparse)
-#     rownames(mat.dense) <- colnames(mat.sparse) 
-#   } else {
-#     colnames(mat.dense) <- colnames(mat.sparse)
-#     rownames(mat.dense) <- rownames(mat.sparse)     
-#   }
-#   rm(mat.sparse); invisible({gc()})
-#   
-#   return(mat.dense)
-# }
-# 
-# sparse2df <- function(mat.sparse, block.size = 10000, transpose = F, verbose.error = F){
-#   
-#   df <- tryCatch({
-#     df <- as.data.frame(mat.sparse)
-#     if (transpose) df <- t(df)
-#   }, error = function(e){
-#     if (verbose.error) print(e)
-#     df <- NULL
-#     n.blocks <- round(ncol(mat.sparse) / block.size)+1
-#     for (i in 1:(n.blocks)){
-#       start.range <- ((i-1)*block.size)+1
-#       end.range <- i*block.size
-#       if (start.range > ncol(mat.sparse)) next
-#       if (end.range > ncol(mat.sparse)) end.range <- ncol(mat.sparse)
-#       if (transpose){
-#         df <- bind_rows(df,as.data.frame(t(as.matrix(mat.sparse[, start.range:end.range]))))
-#       } else {
-#         df <- bind_cols(df,as.data.frame(mat.sparse[, start.range:end.range]))
-#       }
-#     }
-#     if (transpose){
-#       colnames(df) <- rownames(mat.sparse)
-#       rownames(df) <- colnames(mat.sparse) 
-#     } else {
-#       colnames(df) <- colnames(mat.sparse)
-#       rownames(df) <- rownames(mat.sparse)     
-#     }
-#     return(df)
-#   })
-#   
-#   if (transpose){
-#     colnames(df) <- rownames(mat.sparse)
-#     rownames(df) <- colnames(mat.sparse) 
-#   } else {
-#     colnames(df) <- colnames(mat.sparse)
-#     rownames(df) <- rownames(mat.sparse)     
-#   }
-#   rm(mat.sparse); invisible({gc()})
-#   
-#   return(df)
-#   
-# }
-```
-
 
 ```{r define prep data function}
 
-
+# helper function to prep data
 prep.data <- function(so, cluster.field, gNames.list, data.slot){
   
+  # get current assay
   current.assay <- DefaultAssay(so)
 
   # get unique clusters
@@ -279,57 +181,36 @@ prep.data <- function(so, cluster.field, gNames.list, data.slot){
     exp.mat <- so@assays[[current.assay]]@scale.data 
   }
   
-  # RESUME HERE
-  # Construct matrix in chunks
-
+  # cast matrix to data.frame
   exp.df_t <- sparse2df(exp.mat, transpose =  T)
-  # exp.df_t <- tryCatch({
-  #   exp.df_t <- t(as.data.frame(exp.mat))
-  # }, error = function(e){
-  #   # print(e)
-  #   exp.df_t <- NULL
-  #   chunk.size <- 10000
-  #   n.blocks <- round(ncol(exp.mat) / chunk.size)+1
-  #   for (i in 1:(n.blocks)){
-  #     start.range <- ((i-1)*chunk.size)+1
-  #     end.range <- i*chunk.size
-  #     if (start.range > ncol(exp.mat)) next
-  #     if (end.range > ncol(exp.mat)) end.range <- ncol(exp.mat)
-  #    exp.df_t <- bind_rows(exp.df_t,as.data.frame(t(as.matrix(exp.mat[, start.range:end.range]))))
-  #   }
-  #   return(exp.df_t)
-  # })
-  
   colnames(exp.df_t) <- rownames(exp.mat)
   rownames(exp.df_t) <- colnames(exp.mat)
-  
-    rm(exp.mat)
-  invisible({gc()})
-  
-    # exp.df_t <- t(exp.df_t)
+  rm(exp.mat); invisible({gc()})
   
   # prepare data
   cur.genes <- colnames(exp.df_t)
-  
-  # exp.df_t <- as.data.frame(t(exp.mat))
-  # rownames(exp.mat) <- gene2species(rownames(exp.mat) , expected_species = "Hs")
   colnames(exp.df_t) <- gene2species(cur.genes, expected_species = "Hs")
   exp.df_t$cell_type <- paste("c", as.vector(so@meta.data[[cluster.field]]), sep = "")
 
+  # return output
   output <- list(u.clusters, NULL, exp.df_t)
   return(output)
   
 }
-  cluster.field <- "seurat_clusters"
-  prep.output <- prep.data(so.query, cluster.field, gNames.list, which.data)
-  
+
+# specify where cluster ids are stored
+cluster.field <- "seurat_clusters"
+
+# prep data
+prep.output <- prep.data(so.query, cluster.field, gNames.list, which.data)
+
 ```
 
 
 ```{r analysis function}
 
+# helper function for analyzing LR pairs
 analyze_LG.pairs <- function(u.clusters, exp.df_t, communication.type, high.exp_genes = NULL, aggregation.method = "mean", top.N.genes = 50, n.LRpairs = 20){
-
   
   # get top nth percentile 
   if (is.null(high.exp_genes)){
@@ -341,8 +222,6 @@ analyze_LG.pairs <- function(u.clusters, exp.df_t, communication.type, high.exp_
   # sort by product of ligand*receptor expression
   res_cat<-res_cat[order(res_cat$cell_from_mean_exprs*res_cat$cell_to_mean_exprs,decreasing=T),]
   
-  
-  # output <- list(high.exp_genes, res_cat)
   return(res_cat)
 }
 
@@ -351,6 +230,8 @@ analyze_LG.pairs <- function(u.clusters, exp.df_t, communication.type, high.exp_
 
 
 ```{r ligand-receptor pairs from highly expressed genes, fig.height= 10, fig.width= 10}
+
+# Identify LR pairs ############################################################
 
 # initiate lists
 res.LR.list <- list()
@@ -367,7 +248,6 @@ res.LR.list2 <- list()
   invisible({gc()})
   
   # get highly expressed genes
- 
   high.exp_genes <-rawParse(exp.df_t,top_genes=top.N.genes,stats=aggregation.method)
   
   # inititate data.frames
@@ -385,11 +265,9 @@ res.LR.list2 <- list()
                                                    top.N.genes = top.N.genes, 
                                                    n.LRpairs = n.LRpairs)
     
-    
+    # round values to nearest sig.fig.
     res.comm.list[[comm.type]]$cell_from_mean_exprs <- signif(res.comm.list[[comm.type]]$cell_from_mean_exprs, 3)
     res.comm.list[[comm.type]]$cell_to_mean_exprs <- signif(res.comm.list[[comm.type]]$cell_to_mean_exprs, 3)
-    
-    # a <- res.comm.list[[comm.type]]
     res.by_comm<-rbind(res.by_comm,res.comm.list[[comm.type]])
     
     # subset data to include top n.LRpairs
@@ -420,51 +298,65 @@ res.LR.list2 <- list()
 
 
 ```
+
 ```{r Interaction SUMMARIES, warning = FALSE, message = FALSE}
 
+# consolidate interaction scores ###############################################
+
+# get cluster ids (ordered)
 u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
 
-
-# options: #cytokine, checkpoint, growth factor, pooled, other , "pooled")
-
-dot.res.list <- list()
+# specify which communication types to consolidate
 which.communication <- c("cytokine", "checkpoint", "growth factor", "other")
 
-for (k in 1:length(which.communication)){
+dot.res.list <- list()
+for (k in 1:length(which.communication)){ # for each communication type...
 
-which.threshold <- 0
-
+# get LR interactions for current communcation type...
 df.comm <- res.comm.list[[which.communication[k]]]
+
+# compute interaction score
 df.comm$interaction.score <- df.comm$cell_from_mean_exprs * df.comm$cell_to_mean_exprs
 
+# initiate data frame (results will be stored here)
 df.rollingThreshAll <- NULL
 df.rollingThreshAll.IS <- NULL
 
 
-for (i in 1:length(u.clust)){
+for (i in 1:length(u.clust)){ # for each cluster...
 
+  # get cluster names
   cluster.name <- paste0("c", u.clust[i])
+  
+  # filter LR interactions for current cluster
   df.comm.sub <- df.comm[df.comm$cell_from %in% cluster.name, ]
   
-  # expression threshold
+  # set expression thresholds
   int.min <- 0
   int.max <- max(df.comm$interaction.score)
   int.by <- (int.max - int.min)/30
   exp.thresh <- seq(int.min,int.max, int.by)
   
+  # initiate data.frame objects to store results
   df.rollingThresh <- NULL
   df.rollingThreshIntScore <- NULL
   for (j in 1:length(exp.thresh)){
     df.tally <- NULL
+    
+    # specicy interaction-score filter
     filter1 <- df.comm.sub$interaction.score > exp.thresh[j]
-    # filter2 <- df.comm.sub$cell_to_mean_exprs > exp.thresh[j]
+    
+    # filter data by interaction score
     df.comm.sub2 <- df.comm.sub[filter1, ]
     
-    
+    # tally number of recipient clusters
     df.tally <- data.frame(table(df.comm.sub2$cell_to))
+    
+    # get average interactio score for recipient clusters
     df.intscore <- df.comm.sub2 %>% dplyr::group_by(cell_to) %>% dplyr::summarize(int.score = mean(interaction.score))
     colnames(df.intscore) <- c("Var1", "int.score")
     
+    # store results 
     if (nrow(df.tally) == 0){
       df.tally <- data.frame(Var1 = paste0("c", u.clust), Freq = 0)
        df.intscore <- data.frame(Var1 = paste0("c", u.clust), int.score = 0)
@@ -487,45 +379,29 @@ for (i in 1:length(u.clust)){
   
   df.rollingThreshAll <- bind_rows(df.rollingThreshAll, df.rollingThresh)
   df.rollingThreshAll.IS <- bind_rows(df.rollingThreshAll.IS, df.rollingThreshIntScore)
-  
-  # df.rollingThresh <- df.rollingThresh %>% group_by(Var1) %>% arrange(threshold)
-  
- # plt.rollingThresh <- df.rollingThresh %>%
- #    ggplot(aes(x= threshold, y = log1p(Freq), color = (Var1))) + 
- #    geom_point() + 
- #    geom_path(aes(group = Var1)) +
- #    theme_miko(legend = T) + 
- #   labs(title = paste0("Source Cluster: ", u.clust[i]), subtitle = which.communication)+
- #   scale_color_discrete("Destination\nCluster") + 
- #   xlab("Interaction Score") + ylab("N Interactions (log2)")
- 
- # if(print.inline) print(plt.rollingThresh)
-  
 }
 
 
 # VERSION 1: NUMBER OF INTERACTIONS
-df.rollingThreshAllSum <- df.rollingThreshAll %>% group_by(Var1, Source) %>% summarize(Freq.sum = log1p(sum(Freq)))
-
+df.rollingThreshAllSum <- df.rollingThreshAll %>% 
+  group_by(Var1, Source) %>% 
+  summarize(Freq.sum = log1p(sum(Freq)))
 df.rta.wide <- pivot_wider(df.rollingThreshAllSum, names_from = "Source", values_from = "Freq.sum")
 rownames(df.rta.wide) <- df.rta.wide$Var1
 df.rta.wide <- df.rta.wide %>% ungroup() %>% dplyr::select(-c("Var1"))
-
 mat.rta.wide <- data.matrix(df.rta.wide)
-# pheatmap::pheatmap(mat.rta.wide, cluster_rows = T, cluster_cols = T, main = paste0(which.communication[k], " N interactions\nx=Source, y=Destination"), color = viridis::viridis(20))
+
 
 # VERSION 2: INERACTION SCORES
-df.rollingThreshAllISscore <- df.rollingThreshAll.IS %>% group_by(Var1, Source) %>% summarize(IS.sum = log1p(sum(int.score)))
-
+df.rollingThreshAllISscore <- df.rollingThreshAll.IS %>% 
+  group_by(Var1, Source) %>% 
+  summarize(IS.sum = log1p(sum(int.score)))
 df.rta.is.wide <- pivot_wider(df.rollingThreshAllISscore, names_from = "Source", values_from = "IS.sum")
 rownames(df.rta.is.wide) <- df.rta.is.wide$Var1
 df.rta.is.wide <- df.rta.is.wide %>% ungroup() %>% dplyr::select(-c("Var1"))
-
 mat.rta.is.wide <- data.matrix(df.rta.is.wide)
-# pheatmap::pheatmap(mat.rta.is.wide, cluster_rows = T, cluster_cols = T, main = paste0(which.communication[k], " Interaction Score\nx=Source, y=Destination"), color = viridis::viridis(20))
 
 # store results
-
 dot.res.list[[which.communication[k]]] <- list(
   freq = df.rollingThreshAll,
   interaction = df.rollingThreshAll.IS
@@ -537,69 +413,84 @@ dot.res.list[[which.communication[k]]] <- list(
 
 ```{r LR dotplot, fig.width=8, fig.height=8, warning = FALSE, message = FALSE}
 
+# Aggregate LR interaction ######################################################
+# here we generate plots that summarize the LR interaction volumne between pairwise clusters. 
 
 plt.agg.LR.list <- list()
 
-for (i in 1:length(dot.res.list)){
+
+for (i in 1:length(dot.res.list)){ # for each interaction type...
   
-communication.name <- names(dot.res.list)[i]
-df.rollMerge <- merge(dot.res.list[[communication.name]][["freq"]], dot.res.list[[communication.name]][["interaction"]])
-
-df.rollMerge$int.score <- log1p(df.rollMerge$int.score)
-
-df.rollMerge.sum <- df.rollMerge %>%
-  group_by(Var1, Source) %>%
-  summarize(freq.mean = mean(Freq),
-            is.mean = mean(int.score))
-
-df.rollMerge.sum$Var1 <- factor(df.rollMerge.sum$Var1, levels = paste0("c", u.clusters))
-df.rollMerge.sum$Source <- factor(df.rollMerge.sum$Source, levels = paste0("c", u.clusters))
-
-p <- df.rollMerge.sum %>%
-  ggplot(aes(x = Var1, y = Source, size = freq.mean, fill = is.mean )) +
-  geom_point(pch=21, color = "black")  +
-  xlab("Recipient") + ylab("Source") + theme(legend.position="bottom") + 
-  viridis::scale_fill_viridis("Interaction (log)") + coord_flip()
-
-p.legend <- cowplot::get_legend(p)
-
-p <- p+ theme(legend.position="none")
-
-p1 <- df.rollMerge.sum %>%
-  group_by(Var1) %>%
-  summarize(is.sum = mean(is.mean, na.rm = T),
-            is.se = sd(is.mean, na.rm = T)/ sqrt(length(is.mean))) %>%
-  ggplot(aes(x = Var1, y = is.sum)) +
-  geom_bar(stat = "identity") + xlab("") + ylab("Score") +
-  geom_errorbar(aes(ymin=is.sum-is.se, ymax=is.sum+is.se), width=.2,
-                 position=position_dodge(.9)) + 
-  coord_flip() + 
-  geom_hline(aes(yintercept = mean(is.sum)), linetype = "dashed")
-
-p2 <- df.rollMerge.sum %>%
-  group_by(Source) %>%
-  summarize(is.sum = mean(is.mean, na.rm = T),
-            is.se = sd(is.mean, na.rm = T) / sqrt(length(is.mean))) %>%
-  ggplot(aes(x = Source, y = is.sum)) +
-  geom_bar(stat = "identity") + 
+  # get communication name
+  communication.name <- names(dot.res.list)[i]
+  
+  # merge datasets
+  df.rollMerge <- merge(dot.res.list[[communication.name]][["freq"]], dot.res.list[[communication.name]][["interaction"]])
+  
+  # log transform interaction scores
+  df.rollMerge$int.score <- log1p(df.rollMerge$int.score)
+  
+  # get frequency and interaction score summaries
+  df.rollMerge.sum <- df.rollMerge %>%
+    group_by(Var1, Source) %>%
+    summarize(freq.mean = mean(Freq),
+              is.mean = mean(int.score))
+  
+  # cast cluster membership as factors
+  df.rollMerge.sum$Var1 <- factor(df.rollMerge.sum$Var1, levels = paste0("c", u.clusters))
+  df.rollMerge.sum$Source <- factor(df.rollMerge.sum$Source, levels = paste0("c", u.clusters))
+  
+  # generate dot plot for LR interactions
+  p <- df.rollMerge.sum %>%
+    ggplot(aes(x = Var1, y = Source, size = freq.mean, fill = is.mean )) +
+    geom_point(pch=21, color = "black")  +
+    xlab("Recipient") + ylab("Source") + theme(legend.position="bottom") + 
+    viridis::scale_fill_viridis("Interaction (log)") + coord_flip()
+  
+  # get legend object
+  p.legend <- cowplot::get_legend(p)
+  
+  # clear legend from plot
+  p <- p+ theme(legend.position="none")
+  
+  # generate marginal barplots (average LR interactions)
+  p1 <- df.rollMerge.sum %>%
+    group_by(Var1) %>%
+    summarize(is.sum = mean(is.mean, na.rm = T),
+              is.se = sd(is.mean, na.rm = T)/ sqrt(length(is.mean))) %>%
+    ggplot(aes(x = Var1, y = is.sum)) +
+    geom_bar(stat = "identity") + xlab("") + ylab("Score") +
     geom_errorbar(aes(ymin=is.sum-is.se, ymax=is.sum+is.se), width=.2,
-                 position=position_dodge(.9)) + 
-  xlab("") + ylab("Score") + 
-  geom_hline(aes(yintercept = mean(is.sum)), linetype = "dashed")
-
-p.merge <- cowplot::plot_grid(p2, NULL, p, p1 ,rel_widths = c(3,1), rel_heights = c(1,3), align = c("hv"))
-
-p.title <- ggplot() + labs(title = communication.name, subtitle = "marginal plots show mean interaction +/- se")
-p.merge.final <- cowplot::plot_grid(p.title, p.merge, p.legend, ncol = 1, rel_heights = c(0.5,5,1))
-
-
-if (print.inline) print(p.merge.final)
-
-plt.agg.LR.list[[communication.name]] <- p.merge.final
-
+                  position=position_dodge(.9)) + 
+    coord_flip() + 
+    geom_hline(aes(yintercept = mean(is.sum)), linetype = "dashed")
+  
+  p2 <- df.rollMerge.sum %>%
+    group_by(Source) %>%
+    summarize(is.sum = mean(is.mean, na.rm = T),
+              is.se = sd(is.mean, na.rm = T) / sqrt(length(is.mean))) %>%
+    ggplot(aes(x = Source, y = is.sum)) +
+    geom_bar(stat = "identity") + 
+    geom_errorbar(aes(ymin=is.sum-is.se, ymax=is.sum+is.se), width=.2,
+                  position=position_dodge(.9)) + 
+    xlab("") + ylab("Score") + 
+    geom_hline(aes(yintercept = mean(is.sum)), linetype = "dashed")
+  
+  # combine plots 
+  p.merge <- cowplot::plot_grid(p2, NULL, p, p1 ,rel_widths = c(3,1), rel_heights = c(1,3), align = c("hv"))
+  
+  # add titles to plots
+  p.title <- ggplot() + labs(title = communication.name, subtitle = "marginal plots show mean interaction +/- se")
+  p.merge.final <- cowplot::plot_grid(p.title, p.merge, p.legend, ncol = 1, rel_heights = c(0.5,5,1))
+  
+  # print plot (if print.inline TRUE)
+  if (print.inline) print(p.merge.final)
+  
+  # store plot
+  plt.agg.LR.list[[communication.name]] <- p.merge.final
+  
 }
 
-# plt.agg.LR.list
 ```
 
 
@@ -655,6 +546,7 @@ rm(ef.mat); invisible({gc()})
 
 ```{r, fig.width = 15, fig.height=5, warning = FALSE, message = FALSE, include = FALSE}
 
+# get cluster-labeled UMAP plot
 plt.umap <- DimPlot(so.query, reduction = "umap", 
                                        label = T, 
                                        group.by = "seurat_clusters")  + 
@@ -667,9 +559,6 @@ plt.umap <- DimPlot(so.query, reduction = "umap",
         axis.ticks.y=element_blank(),
             plot.title = element_text(hjust = 0.5),
             plot.subtitle = element_text(hjust = 0.5))
-
-
-f.threshold <- 0.1
 
 plt.granular.list <- list()
 plt.top.int <- list()
@@ -706,6 +595,7 @@ for (k in 1:length(which.communication)){
   # filter top interactions
   filter1 <- df.comm$interaction.score > 0
   df.comm <- df.comm[filter1, ]
+  if (nrow(df.comm) == 0) next
   
   df.comm <- df.comm %>% dplyr::arrange(-interaction.score)
   
@@ -724,6 +614,7 @@ for (k in 1:length(which.communication)){
     }
   }
   
+  if (is.null(df.comm.top) || (nrow(df.comm.top) == 0)) next
   df.comm <- df.comm.top; rm(df.comm.top)
   
   if (nrow(df.comm) == 0) {
@@ -740,8 +631,7 @@ for (k in 1:length(which.communication)){
   plt.gran.ind.list <- list()
   
   for (i in 1:u.lr.cur){
-    # for (i in 1:length(u.lr.filt)){
-    
+
     ligand.name <- sub(" .*", "", u.lr.filt[i])
     receptor.name <- stringr::str_replace(u.lr.filt[i], "[A-Za-z0-9]*\ ->\ ", "")
     
@@ -797,7 +687,6 @@ for (k in 1:length(which.communication)){
       theme_miko(legend = T) +
       viridis::scale_color_viridis(option = "A") + 
       labs(title = receptor.name, subtitle = "Receptor (Recipient)")  + 
-      # theme_minimal() +
   theme(axis.title.x=element_blank(),
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank()) +
@@ -863,6 +752,7 @@ for (k in 1:length(which.communication)){
   if (print.inline) print(plt.lig.profile)
 }
 
+plt.gran
 
 ```
 
