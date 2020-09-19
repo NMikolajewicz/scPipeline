@@ -705,16 +705,13 @@ for (k in 1:length(which.communication)){
   
   # filter top interactions
   filter1 <- df.comm$interaction.score > 0
-  # filter2 <- df.comm$source.fraction > f.threshold
-  # filter3 <- df.comm$target.fraction > f.threshold
-  # df.comm <- df.comm[filter1 & filter2 & filter3, ]
   df.comm <- df.comm[filter1, ]
   
   df.comm <- df.comm %>% dplyr::arrange(-interaction.score)
   
   u.lr.cur <- 0
   iter.n <- 0
-  u.lr.top <- NULL
+  u.lr.top <- NULL; df.comm.top <- NULL
   n.top.int <- 20
   while((u.lr.cur < 20) & ((iter.n + n.top.int) < nrow(df.comm))){
     df.comm.top <- df.comm %>% dplyr::top_n(n.top.int+iter.n, interaction.score)
