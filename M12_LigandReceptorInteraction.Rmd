@@ -68,7 +68,7 @@ top.N.genes <- 50 # Nth percentile expression
 subsample_factor <- 0.2
 
 # subset
-subset.df <- "no.subset"
+which.subset <- "no.subset"
 
 # top n genes for LR network
  top.N.genes <- 500
@@ -100,7 +100,7 @@ df.log <- addLogEntry("Data Type", data.type, df.log, "data.type")
 df.log <- addLogEntry("Data Slot", which.data, df.log, "which.data")
 df.log <- addLogEntry("Communication Type", communication.type, df.log, "communication.type")
 df.log <- addLogEntry("Top N pairs shown", n.LRpairs, df.log, "n.LRpairs")
-if (is.character(subset.df))  df.log <- addLogEntry("Subset", subset.df, df.log, "subset.df")
+if (is.character(which.subset))  df.log <- addLogEntry("Subset", which.subset, df.log, "which.subset")
 df.log <- addLogEntry("Downsample Factor", subsample_factor, df.log, "subsample_factor")
 df.log <- addLogEntry("Aggregation Method", aggregation.method, df.log, "aggregation.method")
 
@@ -126,13 +126,14 @@ if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdat
 load(paste(data.path, dir.preprocessed, input.file, sep = ""));
 
 if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
+if (!(exists("which.subset"))) which.subset <- "no.subset"
 
 # which terms2drop
 t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "scale")
 
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
-                             species = which.species, resolution= cluster.resolution, subset.data = subset.df, 
+                             species = which.species, resolution= cluster.resolution, subset.data = which.subset, 
                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
                              terms2drop = t2d, rmv.pattern = "so", keep.default.assay.only = T)
 
