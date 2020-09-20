@@ -51,7 +51,8 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # input.file <- "Module1_p9_GBM_PR_nololim_260620.Rdata"
 # input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
+# input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
+input.file <- "M01_NM2_R1_test_300720.Rdata"
 
 # cluster resolution
 cluster.resolution <- 0.5
@@ -60,9 +61,16 @@ cluster.resolution <- 0.5
 print.inline <- F
 
 # Data subsampling
-subsample_factor <- 0.2 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
-which.subset <- "p4567891011_tumorOnly_res0_5"
+which.subset <- NULL
+# which.subset <- data.frame(field = "Barcode", subgroups = c("invitro"))
+
+
+# barcode recoding
+# named list, with new barcodes in names and old barcode patterns in entries
+barcode.recode <- "gbm_2"
+barcode.recode <- NULL
 
 # species
 which.species <- "Mm"
@@ -70,8 +78,6 @@ which.species <- "Mm"
 save.pdf <- F
 
 ```
-
-
 
 ```{r load data, warning = FALSE}
 
@@ -91,11 +97,12 @@ load(paste(data.path, dir.preprocessed, input.file, sep = ""))
 if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 
 if (!(exists("which.subset"))) which.subset <- "no.subset"
+if (!(exists("barcode.recode"))) which.subset <- NULL
 
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
-                             species = which.species, resolution= cluster.resolution, subset = which.subset, 
-                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
+                             species = which.species, resolution= cluster.resolution, subset.data = which.subset, 
+                         barcode.recode = barcode.recode, subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
                              terms2drop = c("ica", "tsne", "nmf", "gsva", "deg"), rmv.pattern = "so", 
                          scale.reprocessed = F, neighbors.reprocessed = F, keep.default.assay.only = T)
 
@@ -108,6 +115,7 @@ rm(prep.list)
 invisible({gc()})
 
 ```
+
 
 
 ```{r analysis log}
