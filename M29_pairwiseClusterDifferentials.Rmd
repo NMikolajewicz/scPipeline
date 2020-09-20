@@ -31,7 +31,7 @@ start.time <- proc.time()
 packages2load <- c("scMiko", "Seurat", "sctransform", 
                    "plyr", "dplyr", "tidyr", "reshape2", "RColorBrewer", "ggplot2", "gridExtra", 
                    "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", 
-                   "MAST", "future", "cluster", "doParallel", "parallel", "foreach")
+                   "MAST", "future", "cluster", "doParallel", "parallel", "foreach", "GSVA")
 
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE))
@@ -45,16 +45,18 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 
 # Query input
-input.file <- "R72_M01_NM2_p4_neuralDif_010920.Rdata"
+# input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+input.file <- "M01_NM2_R1_test_300720.Rdata"
+# input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
 
 # Rapid marker finding (logical flag)
 quick_markers <- TRUE 
 
 # specify cluster resolution
-cluster.resolution <- 0.15 
+cluster.resolution <- 0.5
 
-
+do.schex <- T
 
 # print inline
 print.inline <- FALSE
@@ -62,19 +64,23 @@ print.inline <- FALSE
 # 
 which.species <- "Mm"
 
-which.annotation.db <- "Bader"    # Reactome, GO, Bader
+which.annotation.db <- "GO"    # Reactome, GO, Bader
+
+# specify whether DEG is performed (optional)
+run.deg <- T
 
 # Data subsampling
 subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
+
+
 # specify number of workers (for parallelization)
-# n.workers <- list(
-#   clustering = 4, # data clustering
-#   deg = 2         # DEG analysis
-# )
+n.workers <- list(
+  gsea =  14 # GSEA analysis
+  )
 
 # which markers to return
-only.pos <- T # 
+only.pos <- F# 
 
 # DEG test
 DEG.test <- "MAST" #options: wilcox, bimod, roc, t, poisson, negbinom, LR, MAST, DESeq2
@@ -108,7 +114,7 @@ if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
                              species = which.species, resolution= cluster.resolution, subset = NULL, 
                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
-                             terms2drop = c("ica", "tsne", "nmf", "corr", "gsva", "deg"))
+                             terms2drop = c("ica", "tsne", "nmf", "corr", "gsva", "deg"), rmv.pattern = "so")
 
 # unpack results
 rm(so)
@@ -120,6 +126,33 @@ invisible({gc()})
 
 ```
 
+```{r analysis log}
+
+# Module
+df.log <- initiateLog("29, Pairwise Cluster Differentials")
+df.log <- addLogEntry("Query File (.Rdata)", (input.file), df.log, "input.file")
+df.log <- addLogEntry("Default Assay", (current.assay), df.log, "current.assay")
+df.log <- addLogEntry("Cluster Resolution", (cluster.resolution), df.log, "cluster.resolution")
+df.log <- addLogEntry("Subsample Factor", (subsample_factor), df.log, "subsample_factor")
+df.log <- addLogEntry("Quick DEG analysis", (quick_markers), df.log, "quick_markers")
+df.log <- addLogEntry("schex binning", (do.schex), df.log, "do.schex")
+df.log <- addLogEntry("Species", (which.species), df.log, "which.species")
+df.log <- addLogEntry("Enrichment DB", (which.annotation.db), df.log, "which.annotation.db")
+df.log <- addLogEntry("DEG performed", (run.deg), df.log, "run.deg")
+df.log <- addLogEntry("N workers (GSEA)", (n.workers$gsea), df.log, "gsea")
+df.log <- addLogEntry("Only positive DEGs", (only.pos), df.log, "only.pos")
+df.log <- addLogEntry("DEG test", (DEG.test), df.log, "DEG.test")
+
+```
+
+
+```{r}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
 ```{r pairwise differential gene expression}
 
 u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
@@ -128,7 +161,7 @@ cluster.membership <- as.numeric(as.character(so.query@meta.data[["seurat_cluste
 cell.names <- colnames(so.query)
 
 # log fold change threshold
-lfc.threshold <- 0.5
+lfc.threshold <- 1
 
 # p.value threshold <- p.threshold
 p.threshold <- 0.01
@@ -139,6 +172,10 @@ clust.deg.list <- list()
 n.deg.mat <- matrix(ncol = length(u.clust), nrow = length(u.clust))
 
 deg.res.all <- NULL
+
+
+
+if (run.deg){
 
 for (i in 1:length(u.clust)){
   
@@ -191,20 +228,24 @@ for (i in 1:length(u.clust)){
     }
     
     
+    try({
     pair.name <- paste0(clust.i.name, "-", clust.j.name)
     deg.res$pair <-pair.name
     
     deg.res <- bind_cols(data.frame(genes = rownames(deg.res)), deg.res)
-    
     clust.deg.list[[clust.i.name]][[clust.j.name]] <- deg.res
     
-    deg.res.all <- bind_rows(deg.res.all, deg.res)
+    deg.res.all <- bind_rows(deg.res.all, deg.res)      
+    }, silent = T)
+
     
   }
 }
 
 which.round <- c("p_val", "avg_logFC","pct.1","pct.2","p_val_adj","pct.dif")
 deg.res.all[ , which.round]<- signif(deg.res.all[ , which.round], 3)
+
+}
 
 ```
 
@@ -217,16 +258,23 @@ plt.umap.final <- DimPlot(so.query, reduction = "umap",
     xlab("UMAP 1") + ylab("UMAP 2") + 
     labs(title = "UMAP", subtitle = "clusters") + theme_miko() 
 
-# print(plt.umap.final)
+if (print.inline) print(plt.umap.final)
 ```
 
 ```{r n deg sim matrix, include = FALSE}
 
+if (run.deg){
 colnames(n.deg.mat) <- paste0("c", u.clust)
 rownames(n.deg.mat) <- paste0("c", u.clust)
 plt.n.deg <- ggplotify::as.ggplot(pheatmap::pheatmap(n.deg.mat, 
                                                      main = "DEG Counts\nlow DEG ~ high similarity (yellow); high DEG ~ low similarity (blue)",
                                                      color = rev(viridis::viridis(20)))) 
+
+if (print.inline) print(plt.n.deg)
+
+} else {
+  plt.n.deg <- NULL
+}
 
 ```
 
@@ -264,45 +312,15 @@ for (i in 1:length(u.clust)){
     e2 <- log(rowMeans(expm1(x = ef.mat[, which.cells.j])) + 1)
     logfc.mat[ ,current.index] <- e1 - e2
     
-    # expressing fraction
-    f2 <- rowMeans(ef.mat[, which.cells.j] > 0)
-    pct.mat[ ,current.index] <- f1-f2
-    
     current.index <- current.index + 1
     pair.name <- c(pair.name, paste0("c", u.clust[i], "-", "c", u.clust[j]))
   }
   
 }
 
-# assign col and row names
-colnames(logfc.mat) <- colnames(pct.mat) <- pair.name
+colnames(logfc.mat) <- pair.name
 colnames(e.mat) <-   colnames(f.mat) <-  paste0("c", u.clust)
-rownames(e.mat) <-  rownames(logfc.mat) <-  rownames(f.mat) <-  rownames(pct.mat) <- rownames(ef.mat)
-
-# # cast to data.frame
-# df.lfc.wide <- data.frame(gene = rownames(ef.mat), data.frame(logfc.mat)); colnames(df.lfc.wide) <- c("gene", u.clust)
-# df.pd.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(pct.mat)); colnames(df.pd.wide) <- c("gene", u.clust)
-# df.e.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(e.mat)); colnames(df.e.wide) <- c("gene", u.clust)
-# df.s.wide <- data.frame(gene = rownames(es.mat), as.data.frame(s.mat)); colnames(df.s.wide) <- c("gene", u.clust)
-# df.f.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(f.mat)); colnames(df.f.wide) <- c("gene", u.clust)
-# 
-# # wide to long
-# df.lfc.long <- pivot_longer(df.lfc.wide, colnames(df.lfc.wide)[2:ncol(df.lfc.wide)]); 
-# df.pd.long <- pivot_longer(df.pd.wide, colnames(df.pd.wide)[2:ncol(df.pd.wide)])
-# df.e.long <- pivot_longer(df.e.wide, colnames(df.e.wide)[2:ncol(df.e.wide)])
-# df.f.long <- pivot_longer(df.f.wide, colnames(df.f.wide)[2:ncol(df.f.wide)])
-# 
-# # assign col names to long dataframe
-# colnames(df.lfc.long) <- colnames(df.pd.long) <- colnames(df.e.long) <- colnames(df.f.long) <- c("gene", "cluster", "value")
-# 
-# # ensure clusters are ordered factors
-# df.lfc.long$cluster <- factor(df.lfc.long$cluster, levels = u.clust)
-# df.pd.long$cluster <- factor(df.pd.long$cluster, levels = u.clust)
-# df.e.long$cluster <- factor(df.e.long$cluster, levels = u.clust)
-# df.f.long$cluster <- factor(df.f.long$cluster, levels = u.clust)
-# 
-# # clear baggage
-# rm(es.mat); invisible({gc()})
+rownames(e.mat) <-  rownames(logfc.mat) <-  rownames(f.mat) <- rownames(ef.mat)
 
 ```
 
@@ -326,6 +344,9 @@ filter.2.sub <- sel.mat.2[rownames(sel.mat.2) %in% selective.markers, ]
 plt.dot <- DotPlot(object = so.query, features = selective.markers, group.by = "seurat_clusters", scale = F) + 
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
   labs(title = "Selectively Expressed Markers", subtitle = paste0("Null expression threshold: ", no.expression.definition, "\nExpression threshold: ", high.exp.definition))
+
+
+if (print.inline) print(plt.dot)
 
 ```
 
@@ -368,7 +389,7 @@ if (which.species == "Hs") {
   db <- org.Mm.eg.db::org.Mm.eg.db
 }
 
-n.workers <- list(gsea =  6)
+
 
 # start cluster
 if (n.workers$gsea > ncol(logfc.mat)) n.workers$gsea <- ncol(logfc.mat)
@@ -402,15 +423,7 @@ score.results <- foreach(i = 1:ncol(logfc.mat), .packages = c("fgsea", "plyr")) 
   } else {
     
     gse.pathway$query <- colnames(logfc.mat)[i]
-    # gse.pathway.combined <- bind_rows(gse.pathway.combined, gse.pathway)
-    
-    # if(which.results$gsea.threshold == 1){
-      gse.pathway.filtered <- gse.pathway[gse.pathway$padj < 0.1, ]
-    # } else if (which.results$gsea.threshold == 2){
-      # gse.pathway.filtered <- gse.pathway[((gse.pathway$pval < 0.01) & (abs(gse.pathway$NES) > 1)), ]
-    # } else if (which.results$gsea.threshold == 3){
-    #   gse.pathway.filtered <- gse.pathway %>% top_n(3, NES)
-    # }
+      gse.pathway.filtered <- gse.pathway[((gse.pathway$pval < 0.01) & (abs(gse.pathway$NES) > 1.5)), ]
     
     if (nrow(gse.pathway.filtered) == 0) {
       
@@ -418,8 +431,6 @@ score.results <- foreach(i = 1:ncol(logfc.mat), .packages = c("fgsea", "plyr")) 
                 out2 = NULL))
       
     } else {
-      
-    
     
     # make human readable (map entrez to symbol)
     gse.pathway.filtered.orig <- gse.pathway.filtered
@@ -442,16 +453,12 @@ score.results <- foreach(i = 1:ncol(logfc.mat), .packages = c("fgsea", "plyr")) 
                 out2 = gse.pathway))
     
     }
-
-
   }
   
 } 
 
 # stop workers
 parallel::stopCluster(cl)
-
-# stopifnot(length(enrich.groups) == length(score.results))
 
 for (i in 1: ncol(logfc.mat)){
   pair.name <- colnames(logfc.mat)[i]
@@ -460,21 +467,283 @@ for (i in 1: ncol(logfc.mat)){
 
 ```
 
+
+```{r plot enrichment patterns, include = FALSE, fig.width=8, fig.height=8}
+
+library(ggnewscale)
+
+
+# combine enrichments
+gsea.path.all <- NULL
+for (i in 1:length(gse.pathway.list)){
+  gsea.path.all <- bind_rows(gsea.path.all, gse.pathway.list[[i]])
+}
+
+# parse out cluster IDs
+clust.list <- strsplit(gsea.path.all$query, "-")
+clust.1 <- unlist(lapply(clust.list, function(x) x[[1]]))
+clust.2 <- unlist(lapply(clust.list, function(x) x[[2]]))
+gsea.path.all$cluster.1 <- as.integer(gsub("c", "",clust.1))
+gsea.path.all$cluster.2 <- as.integer(gsub("c", "",clust.2))
+
+# tally GSEA counts
+gsea.tally <- data.frame(table(gsea.path.all$pathway))
+plt.gsea.tally <- gsea.tally %>%
+  ggplot(aes(x = Freq)) + 
+  geom_histogram() + 
+  theme_miko()
+if (print.inline) print(plt.gsea.tally) 
+
+
+# align trajectories with cluster centers
+which.center <- "mean"
+df.umap <- data.frame(so.query@reductions[["umap"]]@cell.embeddings)
+df.umap$cluster <- so.query@meta.data[["seurat_clusters"]]
+colnames(df.umap) <- c("x","y", "cluster")
+df.umap.centers <- getClusterCenters(df.umap, which.center)
+
+# get entrez to symbol mappings
+e2s <-  my.entrez$SYMBOL
+names(e2s) <-  my.entrez$ENTREZID
+
+
+# get top enrichments
+gsea.path.all$logp <- -1*log10(gsea.path.all$pval)
+gsea.path.all$score <- sqrt((abs(gsea.path.all$NES)^2) + (abs(gsea.path.all$logp)^2))
+
+top.gsea <- gsea.path.all %>%
+  group_by(cluster.1, cluster.2) %>%
+  top_n(1, score)
+
+gsea.tally.solo <- unique(as.character(gsea.tally$Var1[gsea.tally$Freq < 3]))
+top.solo.gsea <- gsea.path.all %>%
+  dplyr::filter(pathway %in% gsea.tally.solo) %>%
+  group_by(cluster.1, cluster.2) %>%
+  top_n(1, score)
+
+top.gsea.all <- bind_rows(top.gsea, top.solo.gsea)
+
+gene.list <- top.gsea.all$set
+top.gsea.all <- top.gsea.all[which(unlist(lapply(gene.list, function(x) length(unlist(strsplit(x, ",")))))>5), ]
+
+
+top.gsea.u <- unique(c(top.gsea$pathway, top.solo.gsea$pathway))
+
+# GSVA enrichment
+paths.sig <- pathways.subset[which(names(pathways.subset) %in% top.gsea.u)]
+for (j in 1:length(paths.sig)){
+  paths.sig[[j]] <- e2s[paths.sig[[j]]]
+  paths.sig[[j]] <- paths.sig[[j]][!is.na(paths.sig[[j]])]
+}
+
+  # gsva enrichment
+  gsva.enrich.all <- gsva(e.mat, paths.sig)
+  colnames(gsva.enrich.all) <-  as.character(gsub("c", "",colnames(gsva.enrich.all)))
+  
+  if (do.schex){
+    so.query <- schex::make_hexbin(so.query, nbins = 40, 
+                                   dimension_reduction = "UMAP")
+    plt.hex <- schex::plot_hexbin_meta(so.query, col = "seurat_clusters", action = "majority", na.rm = T) +
+      theme_miko(legend = T)
+    plt.hex.v2 <- plt.hex
+    plt.hex.v2[["plot_env"]][["drhex"]] <- NULL
+    plt.hex.v2 <- plt.hex.v2 + labs(fill = "Cluster")
+  }
+
+gsea.cluster.plot.list <- list()
+df.pos.all <- NULL
+for (j in 1:length(top.gsea.u)){
+
+  # get current pathway
+  cur.pathway <- top.gsea.u[j]
+  gsea.path.current <- gsea.path.all[gsea.path.all$pathway %in% cur.pathway, ]
+
+  # get gsva enrichment
+  gsva.enrich <- t(as.matrix(gsva.enrich.all[rownames(gsva.enrich.all) %in% cur.pathway, ]))
+  rownames(gsva.enrich) <- cur.pathway
+  colnames(gsva.enrich) <- colnames(gsva.enrich.all)
+
+  # get positions and edges
+  df.edges <- NULL
+  df.positions <- NULL
+  
+  show.sig.only <- F
+  for (i in 1:nrow(gsea.path.current)){
+    
+    source.cluster <- which(df.umap.centers$cluster %in% gsea.path.current$cluster.1[i])
+    destination.cluster <- which(df.umap.centers$cluster %in% gsea.path.current$cluster.2[i])
+    df.edges <- bind_rows(df.edges, 
+                          data.frame(x1 = df.umap.centers$x.center[source.cluster],
+                                     y1 = df.umap.centers$y.center[source.cluster],
+                                     x2 = df.umap.centers$x.center[destination.cluster],
+                                     y2 = df.umap.centers$y.center[destination.cluster],
+                                     NES = gsea.path.current$NES[i],
+                                     p = gsea.path.current$pval[i]))  
+    
+    if (show.sig.only){
+      
+      df.positions <- bind_rows(df.positions, 
+                                data.frame(x = df.umap.centers$x.center[source.cluster], 
+                                           y = df.umap.centers$y.center[source.cluster],
+                                           gsva = gsva.enrich[ ,colnames(gsva.enrich) %in%
+                                                                 df.umap.centers$cluster[source.cluster]]),
+                                data.frame(x = df.umap.centers$x.center[destination.cluster], 
+                                           y = df.umap.centers$y.center[destination.cluster],
+                                           gsva = gsva.enrich[ ,colnames(gsva.enrich) %in%
+                                                                 df.umap.centers$cluster[destination.cluster]]))
+    }
+  }
+  
+  if (!show.sig.only){
+    for (i in 1:nrow(df.umap.centers)){
+      current.cluster <- df.umap.centers$cluster[i]
+      df.positions <- bind_rows(df.positions, 
+                                data.frame(cluster = current.cluster,
+                                           x = df.umap.centers$x.center[i], 
+                                           y = df.umap.centers$y.center[i],
+                                           gsva = gsva.enrich[ ,colnames(gsva.enrich) %in% current.cluster]))
+    }
+  }
+  
+  df.edges$logp <- -1*log10(df.edges$p)
+  df.positions <- unique(df.positions)
+  
+  df.pos.all <- bind_rows(df.pos.all, bind_cols(data.frame(path = cur.pathway), df.positions))
+  
+  
+  if (do.schex){
+    
+    
+
+    
+    gsea.cluster.plot <-  plt.hex.v2 + theme_miko(legend = F)  + 
+      new_scale_color() +
+      geom_segment(
+      data = df.edges,
+      aes(x = x1, y = y1, xend = x2, yend = y2,  color = logp),
+      size = if (length(unique(df.edges$logp)) == 1) 1 else rescaleValues(df.edges$logp, 0.05, 0.25)*4,
+      show.legend = FALSE, inherit.aes = FALSE
+      ) + 
+      scale_colour_gradient(low = "grey", high = "black") +
+       new_scale_fill() +
+      geom_point(data = df.positions, aes(x, y, fill = gsva ),size = 6, alpha = 1 , pch=21, inherit.aes = FALSE) +
+      labs(x = "UMAP 1", y = "UMAP 2", title = cur.pathway, subtitle = "Segments: NES (significant)\nDot: GSVA scores") + 
+      theme_bw() +
+      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+      scale_fill_gradient2(low = scales::muted("blue"), mid = "white", high = scales::muted("red"))
+    
+  } else {
+
+  gsea.cluster.plot <-  ggplot() +   
+    geom_point(data = df.umap, 
+               aes(x, y, color = cluster),
+               size = 1) +
+     new_scale_color() +
+    geom_segment(
+      data = df.edges,
+      aes(x = x1, y = y1, xend = x2, yend = y2,  color = logp),
+      size = if (length(unique(df.edges$logp)) == 1) 1 else rescaleValues(df.edges$logp, 0.05, 0.25)*4,
+      show.legend = FALSE
+    ) +
+    scale_colour_gradient(low = "grey", high = "black") + 
+    geom_point(data = df.positions, aes(x, y, fill = gsva),size = 6, alpha = 1 , pch=21) +
+    labs(x = "UMAP 1", y = "UMAP 2", title = cur.pathway, subtitle = "Segments: NES (significant)\nDot: GSVA scores") +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+      scale_fill_gradient2(low = scales::muted("blue"), mid = "white", high = scales::muted("red")) 
+  
+  }
+
+  if (print.inline) print(gsea.cluster.plot)
+  
+  gsea.cluster.plot.list[[cur.pathway]] <- gsea.cluster.plot
+  
+}
+
+names(gsea.cluster.plot.list) <- make.unique(stringr::str_trunc(names(gsea.cluster.plot.list), 20)) 
+
+
+# gsea.cluster.plot.list
+```
+
+```{r, fig.width = 14, fig.height = 10, include = FALSE}
+
+# wrangle gsva data
+df.path <- df.pos.all[ ,c("path", "cluster", "gsva")]
+df.path.wide <- as.data.frame(pivot_wider(df.path, values_from = "gsva", names_from = "cluster"))
+rownames(df.path.wide) <- df.path.wide$path
+df.path.wide <- df.path.wide %>% dplyr::select(-c("path"))
+rownames(df.path.wide) <- make.unique(stringr::str_trunc(rownames(df.path.wide), 20)) 
+
+# get pathway profile similarities
+path.cor <- cor(t(df.path.wide))
+plt.path.sim <- ggplotify::as.ggplot(pheatmap::pheatmap(path.cor, show_colnames = F, 
+                                                        main = "Pathway GSVA Similarities"))
+
+if (print.inline) print(plt.path.sim)
+
+# get cluster vs. pathway similarities
+plt.path.gsva <- ggplotify::as.ggplot(pheatmap::pheatmap(df.path.wide, show_colnames = T, 
+                                                         main = "Cluster x Pathway GSVA Scores"))
+
+if (print.inline) print(plt.path.gsva)
+
+
+#reorder umap plots
+gsea.cluster.plot.list <- gsea.cluster.plot.list[plt.path.sim[["plot_env"]][["plot"]][["tree_row"]][["order"]]]
+
+# gsea.cluster.plot.list
+# gsea.cluster.plot.list
+```
+```{r central log}
+
+# update central log
+run.id <- NULL
+if (!exists("user")) user <- "guest"
+
+clog.update.success <- F
+try({
+  run.id <-  updateCentralLog(Module = "M29", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
+  clog.update.success <-  T
+}, silent = F)
+if (is.null(run.id))  {
+  warning("Central log update was unsuccessful :(\n")
+  run.id <- paste("M29_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+}
+
+```
+
+
+```{r setup output directories}
+
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+
+# create output directories
+dir.create(output.path)
+dir.create(paste0(output.path, "Tables/"))
+if (save.pdf) dir.create(paste0(output.path, "PDF/"))
+
+```
+
 UMAP
 ===================================== 
 
 ```{r plt.umap_by_c}
 print(plt.umap.final)
-# savePDF(file.name = paste0(output.path, "PDF/", "M29_umap_cluster.pdf"), plot.handle = plt.umap_by_cluster, 
-        # fig.width = 5, fig.height = 5, save.flag = save.pdf)
+savePDF(file.name = paste0(output.path, "PDF/", "M29_umap_cluster.pdf"), plot.handle = plt.umap.final,
+        fig.width = 5, fig.height = 5, save.flag = save.pdf)
 ```
 
 
-Dot
-===================================== 
+
 
 ```{r plt.dot}
-print(plt.dot)
+
+# Dot
+# ===================================== 
+# print(plt.dot)
 
 ```
 
@@ -483,21 +752,126 @@ N DEG
 ===================================== 
 
 ```{r plt.n.deg, fig.height=8, fig.width=10}
-print(plt.n.deg)
+
+if (run.deg) {
+  print(plt.n.deg)
+  savePDF(file.name = paste0(output.path, "PDF/", "M29_n_deg_heatmap.pdf"), plot.handle = plt.n.deg,
+        fig.width = 10, fig.height = 8, save.flag = save.pdf)
+}
 
 ```
 
-DEG table
+Pathway Clusters
 ===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Pathway Similarity
+
+```{r pathway similarity plot, fig.width = 14, fig.height = 10}
+
+print(plt.path.sim)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M29_pathway_similarity_heatmap.pdf"), plot.handle = plt.path.sim,
+        fig.width = 14, fig.height = 10, save.flag = save.pdf)
+
+```
+
+### GSVA Scores
+
+```{r pathway gsva plot, fig.width = 14, fig.height = 10}
+
+print(plt.path.gsva)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M29_cluster_x_gsva_heatmap.pdf"), plot.handle = plt.path.gsva,
+        fig.width = 14, fig.height = 10, save.flag = save.pdf)
+
+```
+
+### GSEA Tally
+
+```{r pathway gsva tally}
+
+plt.gsea.tally <- plt.gsea.tally + 
+  xlab("Pathway Significant N Times")+ 
+  ylab("Count") + labs(title = "N Pathway Differentials")
+
+print(plt.gsea.tally)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M29_gsea_tally.pdf"), plot.handle = plt.gsea.tally,
+        fig.width = 7, fig.height = 5, save.flag = save.pdf)
+
+```
+
+
+Pathway Patterns
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+```{r plot pathway patterns}
+
+out <- lapply(seq_along(gsea.cluster.plot.list), function(i) {
+  
+  s1 <- names(gsea.cluster.plot.list)[i]
+  s2 <- paste0("gsea.cluster.plot.list[[", i, "]]")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 8, fig.height=8, message=FALSE, warning=FALSE}", 
+                                          paste("pathpat", i, sep = "")))
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+```{r save path patterns,include = FALSE}
+
+try({
+  for (i in 1:length(gsea.cluster.plot.list)){
+    plot.name <- paste0("M12_UMAP_pathDiff_", names(gsea.cluster.plot.list)[i] ,".pdf")
+
+    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+            plot.handle = gsea.cluster.plot.list[[i]], 
+            fig.width = 8, fig.height=8, save.flag = save.pdf)
+  } 
+}, silent = T)
+
+
+```
+
+
+DEG table
+=====================================
 
 ```{r deg.res.all}
 
-datatable(deg.res.all, 
-          filter = 'top',
-          extensions = 'Buttons',
-          options = list(pageLength = 50,
-                         dom = 'Bfrtip', 
-                         buttons = c('copy', 'csv', 'pdf')))
+if (run.deg) {
+  
+  rownames(deg.res.all) <- NULL
+  datatable(deg.res.all,
+            filter = 'top',
+            extensions = 'Buttons',
+            options = list(pageLength = 50,
+                           dom = 'Bfrtip',
+                           buttons = c('copy', 'csv', 'pdf')))   
+}
+
+```
+
+```{r save DEG table}
+
+try({
+  write.csv(deg.res.all, file = paste0(output.path, "Tables/", "pairwise_cluster_DEGs.csv"), 
+    row.names = F)  
+}, silent = T)
 
 ```
 
@@ -514,3 +888,58 @@ Row {.tabset}
 ```
 
 `r paste(knitr::knit(text = paste(out_enrich_table, collapse = '\n')))`
+
+```{r finalize log}
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+
+df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
+df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+
+df.log_Module_29 <- df.log
+
+```
+
+```{r ph10,  echo = FALSE, eval = TRUE}
+
+try({
+  out1 <- flex.multiTabLogs(module.logs)
+}, silent = T)
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+Log (Module 29)
+===================================== 
+
+```{r table.log_current}
+knitr::kable(df.log_Module_29)
+```
+
+```{r save analysis log as csv}
+
+try({
+  write.csv(df.log_Module_29, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+    row.names = F)  
+}, silent = T)
+
+```
+
+
+```{r merge pdfs, include = FALSE}
+
+# combine pdfs into single binder
+if (save.pdf){
+  try({
+    pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+    pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+    
+    pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+  }, silent = T)
+}
+
+
+```
