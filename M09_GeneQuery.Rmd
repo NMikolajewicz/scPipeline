@@ -67,20 +67,21 @@ which.input <- list(
   #   4: top N cluster markers
   #   5: M09_type5_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
-  query_input_format = 2,
+  query_input_format = 0,
   do.module = F, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
-  which.gene.set = "neftel.genes" # character (e.g., sex.specific)
+  which.gene.set = c("Cd70", "Cd27", "Ptp4a2", "Robo1", "Cd163", "Cd3", "Cd73", "Cd133", "Gpnmb") # character (e.g., sex.specific)
 )
 # which.gene.set = c("Gpnmb", "Cd68",  "Bnc2", "Ptgs2", "Unc5b", "Twist2", "Efs", "Plxnb3", "Gjb3", "Lancl3", "Gas1", "Pdpn", "Stc2")
+# GL261.CT2A.specific
 
 
 #############################
 
 # ANALYSIS SPECIFICATION
 which.results <- data.frame(
-  umap.top.n = 20,       # plot top n markers (by DEG analysis). NA if all. 
+  umap.top.n = NA,       # plot top n markers (by DEG analysis). NA if all. 
   cor.top.n = 70,
   gsea.top.n = 20,
   gsea.threshold = 2 ,     # 1: padj < 0.1; 2: p<0.01 & |NES| > 1; 3: top 3 pathways (sorted by NES)
@@ -96,7 +97,7 @@ which.results <- data.frame(
 correlation.settings <- list(
   which.data = "scale",                     # which data used as input for correlations; options: 'data' or 'scale'
   check.existing = T,                        # check if correlation matrix was precomputed (M27)
-  recompute.existing.if.query.missing = F    # if pre-computed corr matrix exists, but query is missing, recompute?
+  recompute.existing.if.query.missing = F   # if pre-computed corr matrix exists, but query is missing, recompute?
 )
 
 ############################
@@ -111,8 +112,9 @@ subgroup <- "no.subset"
 
 which.species <- "Mm" # Option: Mm or Hs
 
-input.file <- "R98_M27_NM2_M02_p467891011_Mm_allGBM_tumorImmune_140920.Rdata"
-# input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
+# input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
+# input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 
 # print figures inline
@@ -120,14 +122,14 @@ print.inline <- F
 
 # n workers
 n.workers <- list(
-  gsea = 8
+  gsea = 4
 )
 
 # save PDF
 save.pdf <- T
 
 # downsample factor
-subsample_factor <- 0.25
+subsample_factor <- 1
 
 
 ```
@@ -250,7 +252,7 @@ if (!(exists("subset.df"))) subset.df <- "no.subset"
 
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
-                             species = which.species, resolution= cluster.resolution, subset = subset.df, 
+                             species = which.species, resolution= cluster.resolution, subset.data = subset.df, 
                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
                              terms2drop = c("ica", "tsne", "nmf", "gsva", "deg"), rmv.pattern = "so", 
                          scale.reprocessed = T, neighbors.reprocessed = F, keep.default.assay.only = T)
