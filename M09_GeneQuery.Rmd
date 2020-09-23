@@ -71,11 +71,11 @@ which.input <- list(
   do.module = F, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
-  which.gene.set = c("Cd70", "Cd27", "Ptp4a2", "Robo1", "Cd163", "Cd3", "Cd73", "Cd133", "Gpnmb") # character (e.g., sex.specific)
+  which.gene.set = c("Meg3", "Meg8") # character (e.g., sex.specific)
 )
 # which.gene.set = c("Gpnmb", "Cd68",  "Bnc2", "Ptgs2", "Unc5b", "Twist2", "Efs", "Plxnb3", "Gjb3", "Lancl3", "Gas1", "Pdpn", "Stc2")
 # GL261.CT2A.specific
-
+# "PRXD4", "LCP1"
 
 #############################
 
@@ -97,14 +97,14 @@ which.results <- data.frame(
 correlation.settings <- list(
   which.data = "scale",                     # which data used as input for correlations; options: 'data' or 'scale'
   check.existing = T,                        # check if correlation matrix was precomputed (M27)
-  recompute.existing.if.query.missing = F   # if pre-computed corr matrix exists, but query is missing, recompute?
+  recompute.existing.if.query.missing = T   # if pre-computed corr matrix exists, but query is missing, recompute?
 )
 
 ############################
 # Miscillaneus settings
 
 # cluster resolution
-cluster.resolution <- 0.5
+cluster.resolution <- 1
 # cluster.resolution <- 0.2
 
 # specify subgroup provided in M00_subgroups.csv; subgroup <- "no.subgroup" to include all data
@@ -112,10 +112,12 @@ subgroup <- "no.subset"
 
 which.species <- "Mm" # Option: Mm or Hs
 
-# input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
-input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
+# input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
+# input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
 # input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
+input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 
 # print figures inline
 print.inline <- F
@@ -736,6 +738,8 @@ if (!is.na(which.results$umap.top.n)){
 ```
 
 
+
+
 ```{r single cell expression, fig.width=10, fig.height=4, include = FALSE, warning = FALSE}
 
 
@@ -743,6 +747,7 @@ if (!is.na(which.results$umap.top.n)){
 try({ rm(exp.mat); rm(exp.mat.2); rm(exp.mat.complete) }, silent = T)
 
 e.mat <- exp.mat.complete <- so.query@assays[[DefaultAssay(so.query)]]@data
+e.mat.log <- log1p(e.mat)
 
 f.mat.clust <- avgGroupExpression(
   so.query,
@@ -750,6 +755,7 @@ f.mat.clust <- avgGroupExpression(
   which.center = "mean",
   which.group = "seurat_clusters"
 )
+try({rownames(f.mat.clust) <- rownames(e.mat.log)}, silent = T)
 
 f.mat.bc <- avgGroupExpression(
   so.query,
@@ -757,24 +763,23 @@ f.mat.bc <- avgGroupExpression(
   which.center = "fraction",
   which.group = "Barcode"
 )
-
+try({rownames(f.mat.bc) <- rownames(e.mat.log)}, silent = T)
 
 # plot clustered violin plot
 plt.sgExp.all <- list()
 for (i in 1:length(available_markers)){
   
-  plt.sgExp.clust <- expression.Plot(so = so.query, e.mat = e.mat, f.mat = f.mat.clust, 
-                                         which.gene = available_markers[i], which.group = "seurat_clusters", which.data = "data") + 
-    ylab(paste0(available_markers[i], " Expression")) + xlab("Cluster ID") + 
-    labs(title = "Violin Plots", subtitle = "Clusters")  +  theme_miko(legend = F)
+  plt.sgExp.clust <- expression.Plot(so = so.query, e.mat = e.mat.log, f.mat = f.mat.clust, 
+                                         which.gene = available_markers[i], which.group = "seurat_clusters", 
+                                         which.data = "data", x.label = "Cluster") + 
+    labs(title = "Violin Plots", subtitle = "Clusters")  
   
   is.success <- F
   try({
-    plt.sgExp.barcode <- expression.Plot(so = so.query, e.mat = e.mat, f.mat = f.mat.bc, 
-                                             which.gene = available_markers[i], which.group = "Barcode", which.data = "data") +  
-      ylab(paste0(available_markers[i], " Expression"))  + xlab("Sample ID") + 
-      labs(title = "", subtitle = "Samples")   +  theme_miko(legend = F) + 
-      theme(axis.text.x = element_text(angle = 25, hjust = 1))
+    plt.sgExp.barcode <- expression.Plot(so = so.query, e.mat = e.mat.log, f.mat = f.mat.bc, 
+                                             which.gene = available_markers[i], which.group = "Barcode", which.data = "data",
+                                              x.label = "Sample", x.label.angle = 25) +  
+      labs(title = "", subtitle = "Samples")  
       
     is.success <- T
   })
@@ -791,6 +796,11 @@ for (i in 1:length(available_markers)){
     print(plt.sgExp.all[[available_markers[i]]])
   }
 }
+
+# plt.sgExp.all
+
+plt.sgExp.all
+
 ```
 
 
@@ -885,10 +895,12 @@ if (compute.cor) {
   
   if (use.var){
     which.missing <- available_markers[!(available_markers %in% rownames(exp.mat) )]
-    for (i in 1:length(which.missing)){
-      exp.missing <- exp.mat.complete[rownames(exp.mat.complete) %in% which.missing[i], ]
-      exp.mat <- rbind(exp.mat, exp.missing)
-      rownames(exp.mat)[rownames(exp.mat) %in% "exp.missing"] <- which.missing[i]
+    if (length(which.missing) > 0){
+      for (i in 1:length(which.missing)){
+        exp.missing <- exp.mat.complete[rownames(exp.mat.complete) %in% which.missing[i], ]
+        exp.mat <- rbind(exp.mat, exp.missing)
+        rownames(exp.mat)[rownames(exp.mat) %in% "exp.missing"] <- which.missing[i]
+      }      
     }
   }
   
@@ -903,7 +915,8 @@ if (compute.cor) {
 }
 
 query.cor.mat.all <- query.cor.mat[!(rownames(query.cor.mat) %in% available_markers),colnames(query.cor.mat) %in% available_markers]
-if (ncol(query.cor.mat.all) == 0) stop("Correlation matrix is missing query features. If precomputed cor mat (M27) was used, try recomputing in current module (M09)")
+
+if (!is.null(dim(query.cor.mat.all)) && ncol(query.cor.mat.all) == 0) stop("Correlation matrix is missing query features. If precomputed cor mat (M27) was used, try recomputing in current module (M09)")
 
 # assign results
 df.cor.list <- as.data.frame(query.cor.mat.all)
