@@ -47,8 +47,8 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # Query input
 # input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
-# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
-input.file <- "M01_NM2_R1_test_300720.Rdata"
+input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
 # input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
 
@@ -56,7 +56,7 @@ input.file <- "M01_NM2_R1_test_300720.Rdata"
 # data prep parameters #########################################################
 
 # specify cluster resolution
-cluster.resolution <- 0.5
+cluster.resolution <- 1
 
 # Data subsampling
 subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
@@ -65,7 +65,7 @@ subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 which.species <- "Mm"
 
 # annotation databases #########################################################
-which.annotation.db <- "Bader"    # Reactome, GO, Bader, msigdb
+which.annotation.db <- "GO"    # Reactome, GO, Bader, msigdb
 
 # msigdb collection specification (see getAnnotationPathways() for options)
 # arguments are ignored if which.annotation.db is not msigdb. 
@@ -84,8 +84,12 @@ only.pos <- F#
 # DEG test
 DEG.test <- "MAST" #options: wilcox, bimod, roc, t, poisson, negbinom, LR, MAST, DESeq2
 
-# specify pairwise comparisons of interest (cluster id); set to NA for all comparisons
-which.clusters <- c(0,1,2)
+# vector specifying pairwise comparisons of interest (cluster id); set to NA for all comparisons
+which.clusters <- c(1,5)
+
+
+# if which.clusters specified, evaluate all query-clusters pairs (T) or restrict analysis to queries only (F)
+all.cluster.query.pairs <- F  # options: T (recommended), F (recommended if specific pair)
 
 # Misc. ############################################################
 do.schex <- T
@@ -98,7 +102,7 @@ max.paths <- 75 # recommended: 80
 
 # specify number of workers (for parallelization)
 n.workers <- list(
-  deg = 8,   # DEG analysis
+  deg = 14,   # DEG analysis
   gsea =  14 # GSEA analysis
 )
 
@@ -138,12 +142,12 @@ if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
 
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
-                             species = which.species, resolution= cluster.resolution, subset = NULL, 
-                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
-                             terms2drop = c("ica", "tsne", "nmf", "corr", "gsva", "deg"), rmv.pattern = "so")
+                         species = which.species, resolution= cluster.resolution, subset = NULL, 
+                         subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
+                         terms2drop = c("ica", "tsne", "nmf", "corr", "gsva", "deg"), rmv.pattern = "so", keep.default.assay.only = T)
 
 # unpack results
-rm(so)
+if (exists("so")) try({rm(so)}, silent = T)
 so.query <- prep.list$so
 current.assay <- prep.list$assay
 n.cells <- prep.list$n.cell
@@ -157,6 +161,13 @@ invisible({gc()})
 # specify whether DEG is performed (optional)
 run.deg <- T
 
+# check input
+if (!all.cluster.query.pairs) {
+  if ((!is.na(which.clusters)) && (length(which.clusters) < 2)) {
+    stop("More than one cluster must be specified in 'which.cluster' parameter\n")
+  }
+}
+
 # Module
 df.log <- initiateLog("29, Pairwise Cluster Differentials")
 df.log <- addLogEntry("Query File (.Rdata)", (input.file), df.log, "input.file")
@@ -165,8 +176,10 @@ df.log <- addLogEntry("Cluster Resolution", (cluster.resolution), df.log, "clust
 
 if (is.na(which.clusters)){
   df.log <- addLogEntry("Pairwise cluster comparisons", ("all"), df.log, "which.clusters")
+  df.log <- addLogEntry("All pairwise comparisons", TRUE, df.log, "all.cluster.query.pairs")
 } else {
   df.log <- addLogEntry("Pairwise cluster comparisons", (which.clusters), df.log, "which.clusters")
+  df.log <- addLogEntry("All pairwise comparisons", all.cluster.query.pairs, df.log, "all.cluster.query.pairs")
 }
 
 df.log <- addLogEntry("Subsample Factor", (subsample_factor), df.log, "subsample_factor")
@@ -185,6 +198,8 @@ df.log <- addLogEntry("gsea.p.threshold", (gsea.p.threshold), df.log, "gsea.p.th
 df.log <- addLogEntry("gsea.NES.threshold", (gsea.NES.threshold), df.log, "gsea.NES.threshold")
 
 
+
+
 ```
 
 
@@ -201,8 +216,10 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
 
 # filter clusters 
-if (exists("which.clusters") && !is.na(which.clusters)){
-  u.clust <- u.clust[u.clust %in% which.clusters]
+if (!all.cluster.query.pairs){
+  if (exists("which.clusters") && !is.na(which.clusters)){
+    u.clust <- u.clust[u.clust %in% which.clusters]
+  } 
 }
 
 # get all unique pairwise cluster combinations
@@ -222,6 +239,16 @@ for (i in 1:nrow(all.pair.combos)){
 }
 all.pair.ordered.u <- unique(all.pair.ordered)
 
+if (all.cluster.query.pairs){
+  if (exists("which.clusters") && !is.na(which.clusters)){
+    match.1 <- all.pair.ordered.u$cluster.1 %in% which.clusters
+    match.2 <- all.pair.ordered.u$cluster.2 %in% which.clusters
+    which.match <- which(match.1|match.2)
+    all.pair.ordered.u <- all.pair.ordered.u[which.match, ]
+  } 
+}
+
+
 cluster.membership <- as.numeric(as.character(so.query@meta.data[["seurat_clusters"]]))
 cell.names <- colnames(so.query)
 
@@ -232,15 +259,15 @@ lfc.threshold <- 1
 p.threshold <- 0.01
 
 if (run.deg){
-
-  # start cluster
-if (n.workers$deg > nrow(all.pair.ordered.u)) n.workers$deg <-nrow(all.pair.ordered.u)
-cl <- parallel::makeCluster(n.workers$deg)
-doParallel::registerDoParallel(cl)
-
-deg.results <- list()
-deg.results <- foreach(j = 1:nrow(all.pair.ordered.u), .packages = c("Seurat", "dplyr"))  %dopar% {
   
+  # start cluster
+  if (n.workers$deg > nrow(all.pair.ordered.u)) n.workers$deg <-nrow(all.pair.ordered.u)
+  cl <- parallel::makeCluster(n.workers$deg)
+  doParallel::registerDoParallel(cl)
+  
+  deg.results <- list()
+  deg.results <- foreach(j = 1:nrow(all.pair.ordered.u), .packages = c("Seurat", "dplyr"))  %dopar% {
+    
     clust.i.name <- paste0("c", all.pair.ordered.u$cluster.1[j])
     clust.j.name <- paste0("c", all.pair.ordered.u$cluster.2[j])
     which.cells.i <- cell.names[cluster.membership %in% all.pair.ordered.u$cluster.1[j]]
@@ -248,63 +275,63 @@ deg.results <- foreach(j = 1:nrow(all.pair.ordered.u), .packages = c("Seurat", "
     
     deg.res <- NULL
     try({
-
-    if (quick_markers == TRUE){
-      deg.res <- FindMarkers(object = so.query, 
-                             ident.1 = all.pair.ordered.u$cluster.1[j], ident.2 = all.pair.ordered.u$cluster.2[j], 
-                             test.use = DEG.test,
-                             only.pos = only.pos,
-                             max.cells.per.ident = 200,
-                             logfc.threshold = lfc.threshold,
-                             min.pct = 0.25)
-      deg.res$pct.dif <- deg.res$pct.1 - deg.res$pct.2
-      deg.res <- deg.res %>% dplyr::filter(p_val_adj < p.threshold)
-
-    } else {
-      deg.res <- FindMarkers(object = so.query, 
-                             ident.1 = all.pair.ordered.u$cluster.1[j], ident.2 = all.pair.ordered.u$cluster.2[j], 
-                             test.use = DEG.test,
-                             only.pos = only.pos,
-                             logfc.threshold = 0.01,
-                             min.pct = 0.01)  
-      deg.res$pct.dif <- deg.res$pct.1 - deg.res$pct.2
-      deg.res <- deg.res %>% dplyr::filter(p_val_adj < p.threshold)
-    }
-            
+      
+      if (quick_markers == TRUE){
+        deg.res <- FindMarkers(object = so.query, 
+                               ident.1 = all.pair.ordered.u$cluster.1[j], ident.2 = all.pair.ordered.u$cluster.2[j], 
+                               test.use = DEG.test,
+                               only.pos = only.pos,
+                               max.cells.per.ident = 200,
+                               logfc.threshold = lfc.threshold,
+                               min.pct = 0.25)
+        deg.res$pct.dif <- deg.res$pct.1 - deg.res$pct.2
+        deg.res <- deg.res %>% dplyr::filter(p_val_adj < p.threshold)
+        
+      } else {
+        deg.res <- FindMarkers(object = so.query, 
+                               ident.1 = all.pair.ordered.u$cluster.1[j], ident.2 = all.pair.ordered.u$cluster.2[j], 
+                               test.use = DEG.test,
+                               only.pos = only.pos,
+                               logfc.threshold = 0.01,
+                               min.pct = 0.01)  
+        deg.res$pct.dif <- deg.res$pct.1 - deg.res$pct.2
+        deg.res <- deg.res %>% dplyr::filter(p_val_adj < p.threshold)
+      }
+      
     }, silent = T)
-
+    
     if (!is.null(deg.res)){
-
-    try({
-    pair.name <- paste0(clust.i.name, "-", clust.j.name)
-    deg.res$pair <-pair.name
-    deg.res <- bind_cols(data.frame(genes = rownames(deg.res)), deg.res)
-    return(list(deg.res = deg.res, pair.name = pair.name, clust.i.name = clust.i.name, clust.j.name = clust.j.name))
-    }, silent = T)
+      
+      try({
+        pair.name <- paste0(clust.i.name, "-", clust.j.name)
+        deg.res$pair <-pair.name
+        deg.res <- bind_cols(data.frame(genes = rownames(deg.res)), deg.res)
+        return(list(deg.res = deg.res, pair.name = pair.name, clust.i.name = clust.i.name, clust.j.name = clust.j.name))
+      }, silent = T)
     } else {
       return(list(deg.res = NULL, pair.name = NULL, clust.i.name = NULL, clust.j.name = NULL))
     }
-
     
-}
-
-# stop workers
-parallel::stopCluster(cl)
-
-deg.res.all <- NULL
-for (i in 1:length(deg.results)){
-  deg.res <- deg.results[[i]]$deg.res
-  if (is.null(deg.res)) next
-  clust.i.name <- deg.results[[i]]$clust.i.name
-  clust.j.name <- deg.results[[i]]$clust.j.name
-  pair.name <- deg.results[[i]]$pair.name
-  deg.res$cluster.1 <- clust.i.name
-  deg.res$cluster.2 <- clust.j.name
-  deg.res.all <- bind_rows(deg.res.all, deg.res)   
-}
-which.round <- c("p_val", "avg_logFC","pct.1","pct.2","p_val_adj","pct.dif")
-deg.res.all[ , which.round]<- signif(deg.res.all[ , which.round], 3)
-
+    
+  }
+  
+  # stop workers
+  parallel::stopCluster(cl)
+  
+  deg.res.all <- NULL
+  for (i in 1:length(deg.results)){
+    deg.res <- deg.results[[i]]$deg.res
+    if (is.null(deg.res)) next
+    clust.i.name <- deg.results[[i]]$clust.i.name
+    clust.j.name <- deg.results[[i]]$clust.j.name
+    pair.name <- deg.results[[i]]$pair.name
+    deg.res$cluster.1 <- clust.i.name
+    deg.res$cluster.2 <- clust.j.name
+    deg.res.all <- bind_rows(deg.res.all, deg.res)   
+  }
+  which.round <- c("p_val", "avg_logFC","pct.1","pct.2","p_val_adj","pct.dif")
+  deg.res.all[ , which.round]<- signif(deg.res.all[ , which.round], 3)
+  
 }
 
 ```
@@ -313,10 +340,10 @@ deg.res.all[ , which.round]<- signif(deg.res.all[ , which.round], 3)
 
 
 plt.umap.final <- DimPlot(so.query, reduction = "umap", 
-                                       label = T, 
-                                       group.by = "seurat_clusters")  + 
-    xlab("UMAP 1") + ylab("UMAP 2") + 
-    labs(title = "UMAP", subtitle = "clusters") + theme_miko() 
+                          label = T, 
+                          group.by = "seurat_clusters")  + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+  labs(title = "UMAP", subtitle = "clusters") + theme_miko() 
 
 if (print.inline) print(plt.umap.final)
 ```
@@ -352,18 +379,20 @@ if (run.deg){
     }
   }
   
-  # if na, set to 0 (no differentials found)
-  n.deg.mat[is.na(n.deg.mat)] <- 0
+  # if na, set to 0 (no differentials found)...conditional on all.cluster.query.pairs
+  if (!all.cluster.query.pairs){
+    n.deg.mat[is.na(n.deg.mat)] <- 0
+  } 
   
-colnames(n.deg.mat) <- paste0("c", u.clust)
-rownames(n.deg.mat) <- paste0("c", u.clust)
-plt.n.deg <- ggplotify::as.ggplot(pheatmap::pheatmap(n.deg.mat, 
-                                                     main = "DEG Counts\nlow DEG ~ high similarity (yellow); 
+  colnames(n.deg.mat) <- paste0("c", u.clust)
+  rownames(n.deg.mat) <- paste0("c", u.clust)
+  plt.n.deg <- ggplotify::as.ggplot(pheatmap::pheatmap(n.deg.mat, 
+                                                       main = "DEG Counts\nlow DEG ~ high similarity (yellow); 
                                                      high DEG ~ low similarity (blue)",
                                                      color = rev(viridis::viridis(20)))) 
-
-if (print.inline) print(plt.n.deg)
-
+  
+  if (print.inline) print(plt.n.deg)
+  
 } else {
   plt.n.deg <- NULL
 }
@@ -378,23 +407,25 @@ if (print.inline) print(plt.n.deg)
 ef.mat <- so.query@assays[[DefaultAssay(so.query)]]@data
 sc.meta <- so.query@meta.data[["seurat_clusters"]]
 u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
+u.clust.all <- u.clust
 
 # filter clusters 
 if (exists("which.clusters") && !is.na(which.clusters)){
   u.clust <- u.clust[u.clust %in% which.clusters]
+  if (!all.cluster.query.pairs) u.clust.all <- u.clust.all[u.clust.all %in% which.clusters]
 }
 
 # initiate empty matrices
-logfc.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust)^2)
-pct.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust)^2)
-e.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
-f.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
+logfc.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust) * length(u.clust.all))
+pct.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust) * length(u.clust.all))
+e.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust.all))
+f.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust.all))
 
 # get cluster-level aggregate scores
 current.index <- 1
 pair.name <- c()
-for (i in 1:length(u.clust)){
-  which.cells.i <- sc.meta %in% u.clust[i]
+for (i in 1:length(u.clust.all)){
+  which.cells.i <- sc.meta %in% u.clust.all[i]
   
   f1 <- rowMeans(ef.mat[, which.cells.i] > 0)
   f.mat[ ,i] <- f1
@@ -410,13 +441,13 @@ for (i in 1:length(u.clust)){
     logfc.mat[ ,current.index] <- e1 - e2
     
     current.index <- current.index + 1
-    pair.name <- c(pair.name, paste0("c", u.clust[i], "-", "c", u.clust[j]))
+    pair.name <- c(pair.name, paste0("c", u.clust.all[i], "-", "c", u.clust[j]))
   }
   
 }
 
 colnames(logfc.mat) <- pair.name
-colnames(e.mat) <-   colnames(f.mat) <-  paste0("c", u.clust)
+colnames(e.mat) <-   colnames(f.mat) <-  paste0("c", u.clust.all)
 rownames(e.mat) <-  rownames(logfc.mat) <-  rownames(f.mat) <- rownames(ef.mat)
 
 # get rid of self-compariosns
@@ -461,7 +492,7 @@ for (i in 1:length(all.pairs)){
   } else {
     which.2 <- c(which.2, sample(which.2,n.cells - length(which.2) , replace = T))
   }
-    
+  
   ef.mat.genesub <- ef.mat[rownames(ef.mat) %in% doi$genes, ]
   if (is.null(dim(ef.mat.genesub))) {
     next
@@ -477,20 +508,19 @@ for (i in 1:length(all.pairs)){
   
   ann.color = list(cluster =  c("black", "grey"))
   names(ann.color$cluster) <- c(paste0("c", cluster.1), paste0("c", cluster.2))
-
+  
   plt.pairwise.deg.map <- ggplotify::as.ggplot(pheatmap::pheatmap(emat.current, 
-                     show_colnames = F, 
-                     color = viridis::inferno(20), 
-                     annotation_col = df.ann,
-                     annotation_colors = ann.color,
-                     main = paste0(current.pair)))
+                                                                  show_colnames = F, 
+                                                                  color = viridis::inferno(20), 
+                                                                  annotation_col = df.ann,
+                                                                  annotation_colors = ann.color,
+                                                                  main = paste0(current.pair)))
   
   if (print.inline) print(plt.pairwise.deg.map)
   
   plt.deg.map[[current.pair]] <- plt.pairwise.deg.map
   
 }
-
 
 ```
 
@@ -564,34 +594,34 @@ score.results <- foreach(i = 1:ncol(logfc.mat), .packages = c("fgsea", "plyr")) 
     return(list(out1 = NULL,
                 out2 = NULL))
   } else {
-
+    
     gse.pathway$query <- colnames(logfc.mat)[i]
-      gse.pathway.filtered <- gse.pathway[((gse.pathway$pval < gsea.p.threshold) & (abs(gse.pathway$NES) > gsea.NES.threshold)), ]
+    gse.pathway.filtered <- gse.pathway[((gse.pathway$pval < gsea.p.threshold) & (abs(gse.pathway$NES) > gsea.NES.threshold)), ]
     
     if (nrow(gse.pathway.filtered) == 0) {
       
-          return(list(out1 = NULL,
-                out2 = NULL))
+      return(list(out1 = NULL,
+                  out2 = NULL))
     } else {
-    
-    # make human readable (map entrez to symbol)
-    gse.pathway.filtered.orig <- gse.pathway.filtered
-    gse.pathway.filtered$set <- lapply(gse.pathway.filtered$leadingEdge, 
-                                       mapvalues,from = my.entrez$ENTREZID, to = my.entrez$SYMBOL)
-    gse.pathway.filtered$set <- lapply(gse.pathway.filtered$set, paste,collapse = ", ")
-    gse.pathway.filtered$query <-colnames(logfc.mat)[i]
-    
-    # sig figs for numerics
-    gse.pathway.filtered$ES <- signif(gse.pathway.filtered$ES, 3)
-    gse.pathway.filtered$NES <- signif(gse.pathway.filtered$NES, 3)
-    gse.pathway.filtered$pval <- signif(gse.pathway.filtered$pval, 6)
-    gse.pathway.filtered$padj <- signif(gse.pathway.filtered$padj, 6)
-    
-    # filter and rearrange columns
-    gse.pathway.cur <- gse.pathway.filtered[ ,c("query", "pathway", "size", "ES", "NES", "pval", "padj", "set")]
-    
-        return(list(out1 = gse.pathway.cur,
-                out2 = gse.pathway))
+      
+      # make human readable (map entrez to symbol)
+      gse.pathway.filtered.orig <- gse.pathway.filtered
+      gse.pathway.filtered$set <- lapply(gse.pathway.filtered$leadingEdge, 
+                                         mapvalues,from = my.entrez$ENTREZID, to = my.entrez$SYMBOL)
+      gse.pathway.filtered$set <- lapply(gse.pathway.filtered$set, paste,collapse = ", ")
+      gse.pathway.filtered$query <-colnames(logfc.mat)[i]
+      
+      # sig figs for numerics
+      gse.pathway.filtered$ES <- signif(gse.pathway.filtered$ES, 3)
+      gse.pathway.filtered$NES <- signif(gse.pathway.filtered$NES, 3)
+      gse.pathway.filtered$pval <- signif(gse.pathway.filtered$pval, 6)
+      gse.pathway.filtered$padj <- signif(gse.pathway.filtered$padj, 6)
+      
+      # filter and rearrange columns
+      gse.pathway.cur <- gse.pathway.filtered[ ,c("query", "pathway", "size", "ES", "NES", "pval", "padj", "set")]
+      
+      return(list(out1 = gse.pathway.cur,
+                  out2 = gse.pathway))
     }
   }
 } 
@@ -642,7 +672,7 @@ df.umap.centers <- getClusterCenters(df.umap, which.center)
 
 # filter clusters 
 if (exists("which.clusters") && !is.na(which.clusters)){
-  df.umap.centers <- df.umap.centers[df.umap.centers$cluster %in% which.clusters, ]
+  df.umap.centers <- df.umap.centers[df.umap.centers$cluster %in% unique(c(u.clust, u.clust.all)), ]
 }
 
 
@@ -654,10 +684,17 @@ names(e2s) <-  my.entrez$ENTREZID
 gsea.path.all$logp <- -1*log10(gsea.path.all$pval)
 gsea.path.all$score <- sqrt((abs(gsea.path.all$NES)^2) + (abs(gsea.path.all$logp)^2))
 
-gsea.path.all <- gsea.path.all %>% dplyr::arrange(-score)
+# pos scores
+gsea.path.all <- gsea.path.all %>% dplyr::arrange(-(score))
 which.dup <- duplicated(gsea.path.all$pathway)
 gsea.path.all.nodup <- gsea.path.all[!(which.dup), ]
-top.gsea.all <- gsea.path.all.nodup[seq(1,max.paths), ]
+gsea.path.all.pos <- gsea.path.all.nodup[gsea.path.all.nodup$NES > 0, ]
+gsea.path.all.neg <- gsea.path.all.nodup[gsea.path.all.nodup$NES < 0, ]
+
+gsea.path.all.pos.top <- gsea.path.all.pos[seq(1,(max.paths/2)), ]
+gsea.path.all.neg.top <- gsea.path.all.neg[seq(1,(max.paths/2)), ]
+
+top.gsea.all <- bind_rows(gsea.path.all.pos.top, gsea.path.all.neg.top)
 top.gsea.u <- unique(top.gsea.all$pathway)
 
 # GSVA enrichment
@@ -667,43 +704,43 @@ for (j in 1:length(paths.sig)){
   paths.sig[[j]] <- paths.sig[[j]][!is.na(paths.sig[[j]])]
 }
 
-  # gsva enrichment
-  gsva.enrich.all <- gsva(e.mat, paths.sig)
-  colnames(gsva.enrich.all) <-  as.character(gsub("c", "",colnames(gsva.enrich.all)))
-  max.gsva <- max(gsva.enrich.all, na.rm = T); min.gsva <- min(gsva.enrich.all, na.rm = T)
-  scale.limits <- max(c(abs(max.gsva), abs(min.gsva)))
+# gsva enrichment
+gsva.enrich.all <- gsva(e.mat, paths.sig)
+colnames(gsva.enrich.all) <-  as.character(gsub("c", "",colnames(gsva.enrich.all)))
+max.gsva <- max(gsva.enrich.all, na.rm = T); min.gsva <- min(gsva.enrich.all, na.rm = T)
+scale.limits <- max(c(abs(max.gsva), abs(min.gsva)))
+
+if (do.schex){
   
-  if (do.schex){
-    
-    og <- getOrderedGroups(so.query)
-    so.query@meta.data[["seurat_clusters"]] <- factor(so.query@meta.data[["seurat_clusters"]], levels = og)
-    
-    so.query <- schex::make_hexbin(so.query, nbins = 40, 
-                                   dimension_reduction = "UMAP")
-    plt.hex <- schex::plot_hexbin_meta(so.query, col = "seurat_clusters", action = "majority", na.rm = T) +
-      theme_miko(legend = T) 
+  og <- getOrderedGroups(so.query)
+  so.query@meta.data[["seurat_clusters"]] <- factor(so.query@meta.data[["seurat_clusters"]], levels = og)
+  
+  so.query <- schex::make_hexbin(so.query, nbins = 40, 
+                                 dimension_reduction = "UMAP")
+  plt.hex <- schex::plot_hexbin_meta(so.query, col = "seurat_clusters", action = "majority", na.rm = T) +
+    theme_miko(legend = T) 
   plt.hex[["mapping"]][["alpha"]]<- 0.5
   
-    plt.hex.v2 <- plt.hex
-    plt.hex.v2[["plot_env"]][["drhex"]] <- NULL
-    plt.hex.v2 <- plt.hex.v2 + labs(fill = "Cluster")
-  }
+  plt.hex.v2 <- plt.hex
+  plt.hex.v2[["plot_env"]][["drhex"]] <- NULL
+  plt.hex.v2 <- plt.hex.v2 + labs(fill = "Cluster")
+}
 
 gsea.cluster.plot.list <- list()
 df.pos.all <- NULL
 for (j in 1:length(top.gsea.u)){
-
+  
   # get current pathway
   cur.pathway <- top.gsea.u[j]
   gsea.path.current <- gsea.path.all[gsea.path.all$pathway %in% cur.pathway, ]
-
+  
   # get gsva enrichment
   gsva.enrich <- t(as.matrix(gsva.enrich.all[rownames(gsva.enrich.all) %in% cur.pathway, ]))
   if (dim(gsva.enrich)[2] == 0) next
   if (dim(gsva.enrich)[1] > 1) gsva.enrich <- t(gsva.enrich[ ,1])
   rownames(gsva.enrich) <- cur.pathway
   colnames(gsva.enrich) <- colnames(gsva.enrich.all)
-
+  
   # get positions and edges
   df.edges <- NULL
   df.positions <- NULL
@@ -753,13 +790,13 @@ for (j in 1:length(top.gsea.u)){
     gsea.cluster.plot <-  plt.hex.v2 + theme_miko(legend = F)  + 
       new_scale_color() +
       geom_segment(
-      data = df.edges,
-      aes(x = x1, y = y1, xend = x2, yend = y2,  color = logp),
-      size = if (length(unique(df.edges$logp)) == 1) 1 else rescaleValues(df.edges$logp, 0.05, 0.25)*4,
-      show.legend = FALSE, inherit.aes = FALSE
+        data = df.edges,
+        aes(x = x1, y = y1, xend = x2, yend = y2,  color = logp),
+        size = if (length(unique(df.edges$logp)) == 1) 1 else rescaleValues(df.edges$logp, 0.05, 0.25)*4,
+        show.legend = FALSE, inherit.aes = FALSE
       ) + 
       scale_colour_gradient(low = "grey", high = "black") +
-       new_scale_fill() +
+      new_scale_fill() +
       geom_point(data = df.positions, aes(x, y, fill = gsva ),size = 6, alpha = 1 , pch=21, inherit.aes = FALSE) +
       labs(x = "UMAP 1", y = "UMAP 2", title = cur.pathway, subtitle = "Segments: NES (significant)\nDot: GSVA scores") + 
       theme_bw() +
@@ -768,27 +805,27 @@ for (j in 1:length(top.gsea.u)){
                            limits = c(-1*scale.limits,scale.limits))
     
   } else {
-
-  gsea.cluster.plot <-  ggplot() +   
-    geom_point(data = df.umap, 
-               aes(x, y, color = cluster),
-               size = 1) +
-     new_scale_color() +
-    geom_segment(
-      data = df.edges,
-      aes(x = x1, y = y1, xend = x2, yend = y2,  color = logp),
-      size = if (length(unique(df.edges$logp)) == 1) 1 else rescaleValues(df.edges$logp, 0.05, 0.25)*4,
-      show.legend = FALSE
-    ) +
-    scale_colour_gradient(low = "grey", high = "black") + 
-    geom_point(data = df.positions, aes(x, y, fill = gsva),size = 6, alpha = 1 , pch=21) +
-    labs(x = "UMAP 1", y = "UMAP 2", title = cur.pathway, subtitle = "Segments: NES (significant)\nDot: GSVA scores") +
-    theme_bw() +
-    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+    
+    gsea.cluster.plot <-  ggplot() +   
+      geom_point(data = df.umap, 
+                 aes(x, y, color = cluster),
+                 size = 1) +
+      new_scale_color() +
+      geom_segment(
+        data = df.edges,
+        aes(x = x1, y = y1, xend = x2, yend = y2,  color = logp),
+        size = if (length(unique(df.edges$logp)) == 1) 1 else rescaleValues(df.edges$logp, 0.05, 0.25)*4,
+        show.legend = FALSE
+      ) +
+      scale_colour_gradient(low = "grey", high = "black") + 
+      geom_point(data = df.positions, aes(x, y, fill = gsva),size = 6, alpha = 1 , pch=21) +
+      labs(x = "UMAP 1", y = "UMAP 2", title = cur.pathway, subtitle = "Segments: NES (significant)\nDot: GSVA scores") +
+      theme_bw() +
+      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
       scale_fill_gradient2(low = scales::muted("blue"), mid = "white", high = scales::muted("red"), 
                            limits = c(-1*scale.limits,scale.limits)) 
   }
-
+  
   if (print.inline) print(gsea.cluster.plot)
   gsea.cluster.plot.list[[cur.pathway]] <- gsea.cluster.plot
   
@@ -807,6 +844,7 @@ df.path.wide <- df.path.wide %>% dplyr::select(-c("path"))
 
 # get pathway profile similarities
 path.cor <- cor(t(df.path.wide))
+rownames(path.cor) <- make.unique(stringr::str_trunc(rownames(path.cor), 50)) 
 plt.path.sim <- ggplotify::as.ggplot(pheatmap::pheatmap(path.cor, show_colnames = F, 
                                                         main = "Pathway GSVA Similarities",
                                                         border_color = NA))
@@ -814,6 +852,7 @@ plt.path.sim <- ggplotify::as.ggplot(pheatmap::pheatmap(path.cor, show_colnames 
 if (print.inline) print(plt.path.sim)
 
 # get cluster vs. pathway similarities
+rownames(df.path.wide) <- make.unique(stringr::str_trunc(rownames(df.path.wide), 50)) 
 plt.path.gsva <- ggplotify::as.ggplot(pheatmap::pheatmap(df.path.wide, show_colnames = T, 
                                                          main = "Cluster x Pathway GSVA Scores",
                                                          border_color = NA))
@@ -824,9 +863,9 @@ if (print.inline) print(plt.path.gsva)
 #reorder umap plots
 gsea.cluster.plot.list <- gsea.cluster.plot.list[plt.path.sim[["plot_env"]][["plot"]][["tree_row"]][["order"]]]
 
- names(gsea.cluster.plot.list) <- make.unique(stringr::str_trunc(names(gsea.cluster.plot.list), 25)) 
+names(gsea.cluster.plot.list) <- make.unique(stringr::str_trunc(names(gsea.cluster.plot.list), 25)) 
 
- gsea.cluster.plot.list
+# gsea.cluster.plot.list
 ```
 
 ```{r central log}
@@ -879,7 +918,7 @@ N DEG
 if (run.deg) {
   print(plt.n.deg)
   savePDF(file.name = paste0(output.path, "PDF/", "M29_n_deg_heatmap.pdf"), plot.handle = plt.n.deg,
-        fig.width = 10, fig.height = 8, save.flag = save.pdf)
+          fig.width = 10, fig.height = 8, save.flag = save.pdf)
 }
 
 ```
@@ -918,7 +957,7 @@ out <- lapply(seq_along(plt.deg.map), function(i) {
 try({
   for (i in 1:length(plt.deg.map)){
     plot.name <- paste0("M29_Paired_Deg_Map_", names(plt.deg.map)[i] ,".pdf")
-
+    
     savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
             plot.handle = plt.deg.map[[i]], 
             fig.width = 8, fig.height=8, save.flag = save.pdf)
@@ -1004,7 +1043,7 @@ out <- lapply(seq_along(gsea.cluster.plot.list), function(i) {
 try({
   for (i in 1:length(gsea.cluster.plot.list)){
     plot.name <- paste0("M29_UMAP_pathDiff_", names(gsea.cluster.plot.list)[i] ,".pdf")
-
+    
     savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
             plot.handle = gsea.cluster.plot.list[[i]], 
             fig.width = 8, fig.height=8, save.flag = save.pdf)
@@ -1037,7 +1076,7 @@ if (run.deg) {
 
 try({
   write.csv(deg.res.all, file = paste0(output.path, "Tables/", "pairwise_cluster_DEGs.csv"), 
-    row.names = F)  
+            row.names = F)  
 }, silent = T)
 
 ```
@@ -1050,7 +1089,7 @@ Row {.tabset}
 
 ```{r gsea.res.all}
 
- out_enrich_table <- flex.multiTabTables(gse.pathway.list, "gse.pathway.list")
+out_enrich_table <- flex.multiTabTables(gse.pathway.list, "gse.pathway.list")
 
 ```
 
@@ -1090,7 +1129,7 @@ knitr::kable(df.log_Module_29)
 
 try({
   write.csv(df.log_Module_29, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
-    row.names = F)  
+            row.names = F)  
 }, silent = T)
 
 ```
