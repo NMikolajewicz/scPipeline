@@ -40,8 +40,8 @@ lapply(packages2load, library, character.only = TRUE)
 ```{r specify parameters}
 
 # query input
-# input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
-input.file <- "M01_NM2_R1_test_300720.Rdata"
+input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
+# input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 # input.file <- "Module1_Suva2019.Rdata"
 
@@ -53,9 +53,6 @@ print.inline <- F
 which.data <- "data" # options: data, scale
 
 data.type  <- "mean count" # options: mean count, DEG
-
-top.N.genes <- 50 # Nth percentile expression
-
 
 # downsampling
 subsample_factor <- 0.5
@@ -298,6 +295,226 @@ res.LR.list2 <- list()
 
 
 ```
+
+
+
+```{r NEW single cell signal R, fig.width = 8, fig.height = 4}
+
+do.scsr <- T
+
+if (do.scsr){
+  
+
+
+library(SingleCellSignalR)
+
+# get seurat clusters
+so.cluster <- as.character(so.query@meta.data[["seurat_clusters"]])
+so.cluster <- as.integer(so.cluster) + 1
+
+# cast as matrix and get genes
+so.data <- as.matrix(so.query@assays[[DefaultAssay(so.query)]]@data)
+so.genes <- rownames(so.data)
+
+# score LR interactions (scsr method)
+sr.signal <- cell_signaling(data = so.data, genes = so.genes, cluster = so.cluster,species = "mus musculus")
+
+# some data wranlging...
+df.scsr <- NULL
+for (i in 1:length(sr.signal)){
+  scsr.results <- sr.signal[[i]]
+  origin.cluster <- colnames(scsr.results)[1]
+  destination.cluster <- colnames(scsr.results)[2]
+  df.scsr <- bind_rows(df.scsr, data.frame(ligand = scsr.results[ ,1],
+                                           receptor =  scsr.results[ ,2],
+                                           origin.cluster = origin.cluster,
+                                           destination.cluster = destination.cluster,
+                                           interaction.type = scsr.results$`interaction type`,
+                                           LR.score = scsr.results$LRscore))
+}
+
+# prep scsr data
+colnames(df.scsr) <- c("ligand", "receptor", "origin_cluster", "destination_cluster", "comm_type", "scrs.score")
+df.scsr <- df.scsr %>% dplyr::arrange(-scrs.score)
+df.scsr$origin_cluster <- paste0("c", as.numeric(gsub("cluster ", "", df.scsr$origin_cluster))-1)
+df.scsr$destination_cluster <- paste0("c", as.numeric(gsub("cluster ", "", df.scsr$destination_cluster))-1)
+df.scsr$ligand <- toupper(df.scsr$ligand)
+df.scsr$receptor <- toupper(df.scsr$receptor)
+
+# prep italk data
+df.italk <- res.by_comm
+colnames(df.italk) <- c("ligand", "receptor", "origin_exp", "origin_cluster", "destination_exp", "destination_cluster", "comm_type")
+df.italk$italk.score <- df.italk$origin_exp * df.italk$destination_exp
+df.italk <- df.italk %>% dplyr::arrange(-italk.score)
+df.italk$ligand <- toupper(df.italk$ligand)
+df.italk$receptor <- toupper(df.italk$receptor)
+
+# merge datasets
+df.merge.scores <- merge(df.scsr, df.italk, by = c("ligand", "receptor", "origin_cluster", "destination_cluster"))
+
+# rank LR-pairs
+df.merge.scores$scrs.rank <- rank(df.merge.scores$scrs.score)
+df.merge.scores$italk.rank <- rank(df.merge.scores$italk.score)
+
+# generate plots
+plt.score <- df.merge.scores %>%
+  ggplot(aes(x = italk.score, y = scrs.score)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = F) + 
+  scMiko::theme_miko() + 
+  labs(title = "LR Interaction Scores", subtitle = "Score comparison between methods") + 
+  ylab("SCRS Score") + xlab("iTalk Score")
+
+plt.rank <- df.merge.scores %>%
+  ggplot(aes(x = italk.rank, y = scrs.rank)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = F) + 
+  scMiko::theme_miko() + 
+  labs(title = "LR Interaction Scores", subtitle = "Rank comparison between methods") + 
+  ylab("SCRS Rank") + xlab("iTalk Rank")
+  
+# combine plots
+plt.method.comparisons <- cowplot::plot_grid(plt.score, plt.rank)
+
+# visualize
+print(plt.method.comparisons)
+
+}
+
+
+
+flex.asDT(df.merge.scores)
+
+```
+
+
+
+
+```{r GSVA, warning = FALSE}
+
+if (do.scsr){
+  
+  # get cluster averages (expression matrix) #####################################
+  av.mat <- avgGroupExpression(
+    so.query,
+    which.data = "data",
+    which.assay = DefaultAssay(so.query))
+  rownames(av.mat) <- av.mat$genes
+  av.mat <- av.mat %>% dplyr::select(-c("genes"))
+  av.mat <- as.matrix(av.mat)
+  
+  # get gene list ################################################################
+  LR.genes <- unique(c(df.merge.scores$ligand, df.merge.scores$receptor))
+  
+  if (which.species == "Mm"){
+    LR.genes <- firstup(LR.genes)
+  } else if (which.species == "Hs") {
+    LR.genes <- toupper(LR.genes)
+  }
+  
+  # get list of relevant pathways ################################################
+  all.genes <- rownames(av.mat)
+  
+  # get symbol to entrez mapping
+  my.symbol <- as.vector(all.genes)
+  my.entrez <- sym2entrez(my.symbol, my.species = which.species )
+  my.entrez <- my.entrez[complete.cases(my.entrez), ]
+  
+  match.ind.LR <- match(LR.genes, my.entrez$SYMBOL)
+  LR.genes.entrez <- as.character(my.entrez$ENTREZID[match.ind.LR]) 
+  
+  match.ind.all <- match(all.genes, my.entrez$SYMBOL)
+  all.genes.entrez <- as.character(my.entrez$ENTREZID[match.ind.all]) 
+  
+  # get pathways
+  pathways.LR <- getAnnotationPathways(LR.genes.entrez, db = "Bader", species = which.species)
+  pathways.all <- getAnnotationPathways(all.genes.entrez, db = "Bader", species = which.species)
+  pathway.subset <- pathways.all[names(pathways.all) %in% names(pathways.LR)]
+  
+  # get entrez to symbol mappings
+  e2s <-  my.entrez$SYMBOL
+  names(e2s) <-  my.entrez$ENTREZID
+  
+  # convert entrez to symbols
+  for (j in 1:length(pathway.subset)){
+    pathway.subset[[j]] <- e2s[pathway.subset[[j]]]
+    pathway.subset[[j]] <- pathway.subset[[j]][!is.na(pathway.subset[[j]])]
+  }
+  
+  # GSVA enrichment ##############################################################
+  gsva.all <- GSVA::gsva(av.mat, pathway.subset)
+  
+  col.num <- as.numeric(gsub("c", "", colnames(gsva.all)))
+  gsva.all <- gsva.all[, order(col.num)]
+  
+  # Harmonize GSVA and LR interactions ###########################################
+  
+  # TODO
+  
+  df.italk$LR.pair <- paste0(df.italk$ligand, "-", df.italk$receptor)
+  u.sources <- unique(df.italk$origin_cluster)
+  u.destinations <- unique(df.italk$destination_cluster)
+  u.LR <- unique(df.italk$LR.pair)
+  
+  
+  df.gsva.lr <- NULL
+  for (i in 1:length(u.LR)){
+    
+    # get data for current LR pair
+    current.df <- df.italk[df.italk$LR.pair %in% u.LR[i], ]
+    
+    # estimate receptor activity (integrate across all ligand inputs)
+    current.df.sum <- current.df %>%
+      group_by(destination_cluster) %>%
+      summarize(r.activity = sum(italk.score))
+    
+    if (sum(current.df.sum$r.activity) == 0) next
+    
+    # reorder dataframe rows
+    row.num <- as.numeric(gsub("c", "", current.df.sum$destination_cluster))
+    current.df.sum <- current.df.sum[order(row.num), ]
+    
+    # filter for relevant pathways
+    rel.genes <- strsplit(u.LR[i], "-")
+    rel.genes2 <- c(rel.genes[[1]][1], rel.genes[[1]][2])
+    
+    if (which.species == "Mm"){
+      rel.genes2 <- firstup(rel.genes2)
+    } else if (which.species == "Hs") {
+      rel.genes2 <- toupper(rel.genes2)
+    }
+    
+    match.ind.rel <- match(rel.genes2, my.entrez$SYMBOL)
+    rel.genes.entrez <- as.character(my.entrez$ENTREZID[match.ind.rel]) 
+    pathways.rel <- getAnnotationPathways(rel.genes.entrez, db = "Bader", species = which.species)
+    gsva.rel <- gsva.all[rownames(gsva.all) %in% names(pathways.rel), ]
+    
+    # find correlation ebtween receptor activity and pathways
+    gsva.cor <- cor(t(gsva.rel), current.df.sum$r.activity)
+    
+    # filter top paths
+    # all.values <- gsva.cor[,1]
+    # av.sd <- sd(all.values)
+    # av.z <- all.values/av.sd
+    which.sig <- gsva.cor[,1] > 0.8
+    if (sum(which.sig) == 0) next
+    which.paths <- rownames(gsva.cor)[which.sig]
+    
+    df.gsva.lr <- bind_rows(df.gsva.lr, data.frame(
+      LR.pair = u.LR[i],
+      ligand = rel.genes2[1],
+      receptor = rel.genes2[2],
+      pathways = which.paths,
+      r = gsva.cor[which.sig, ]
+    ))
+    
+  }
+  
+}
+
+```
+
+
 
 ```{r Interaction SUMMARIES, warning = FALSE, message = FALSE}
 
