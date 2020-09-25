@@ -35,7 +35,8 @@ start.time <- proc.time()
 packages2load <- c("Seurat", "scater", "scMiko", "reticulate", "destiny", "foreach", "doParallel", "dtw", "clusterExperiment", 
                    "plyr", "dplyr", "tidyr", "reshape2", "tidyverse", "RColorBrewer", "ggplot2", "gridExtra", 
                    "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", "ggrepel", "scales", "ggformula",
-                   "slingshot", "tidymodels", "viridis", "future", "diffusr", "markovchain")
+                   "slingshot", "tidymodels", "viridis", "future", "diffusr", "markovchain", "Tempora", "s2a", "glue", 
+                   "sceasy", "reticulate", "SCORPIUS")
 
 # load packages
 invisible({lapply(packages2load, library, character.only = TRUE)})
@@ -129,22 +130,8 @@ scPedigree.parameters <- list(
 #   )
 # )
 
-# UHN
-# scPedigree.parameters <- list(
-#   source = c(2,0),           # cluster ids ordered by pseudotime trajectory. upstream trajectory for all branches
-#   branch = list(                 # cluster ids ordered by pseudotime trajectores, lineage specific trajectories. 
-#     branch.1 = c(12),
-#     branch.2 = c(11),
-#     branch.3 = c(9),
-#     branch.4 = c(4),
-#     branch.5 = 15,
-#     branch.6 = 14
-#   )
-# )
 
 # TEMPORA PARAMETERS ####################################
-
-library(Tempora)
 
 # p7 Hs Mesoderm Differentiation
 tempora.timepoints <- list(
@@ -314,10 +301,7 @@ do.paga <- T
 
 if (do.paga){
   
-  library(s2a)
-  library(glue)
-  library(sceasy)
-  library(reticulate)
+
   py.path <- py_config()
   use_python(py.path[["python"]])
 
@@ -1151,8 +1135,6 @@ slingshot.list$root.cluster <- as.character(start.clust$cluster[1])
 
 
 ```{r SCORPIUS algorithm}
-
-library(SCORPIUS)
 
 # get data matrices
 e.mat <- scMiko::sparse2dense(so.query@assays[[DefaultAssay(so.query)]]@data, transpose = T)
