@@ -67,8 +67,8 @@ which.input <- list(
   #   4: top N cluster markers
   #   5: M09_type5_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
-  query_input_format = 1,
-  do.module = F, #options: T, F, NA; if NA, takes default, otherwise overides. 
+  query_input_format = 3,
+  do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
   which.gene.set = c("R74.markers") # character (e.g., sex.specific)
@@ -108,8 +108,8 @@ cluster.resolution <- 1
 # cluster.resolution <- 0.2
 
 # specify subgroup provided in M00_subgroups.csv; subgroup <- "no.subgroup" to include all data
-# subset.df <- "no.subset"
-subset.df <- data.frame(field = "Barcode", subgroups = "C68")
+subset.df <- "no.subset"
+# subset.df <- data.frame(field = "Barcode", subgroups = "C68")
 
 which.species <- "Mm" # Option: Mm or Hs
 
@@ -157,22 +157,6 @@ if (which.input$query_input_format==1){
   colnames(gene.sets.type5) <- rmvCSVprefix(colnames(gene.sets.type5))
 }
 
-# if (!exists("subgroup")) subgroup <- "no.subset"
-# subset.input <- read.csv("M00_subgroups.csv", header = TRUE, stringsAsFactors = F)
-# colnames(subset.input) <- rmvCSVprefix(colnames(subset.input))
-# 
-# subset.list <- list()
-# for (i in 1:nrow(subset.input)){
-#   subset.list[[subset.input$subset[i]]] <- data.frame(
-#     field = subset.input$field[i],
-#     subgroups =  stringr::str_trim(unlist(strsplit(as.character(subset.input$subgroups[i]), ","))) 
-#   )
-#   if (!is.na(subset.input$field[i]) && subset.input$field[i] == "seurat_clusters"){
-#     subset.list[[subset.input$subset[i]]]$subgroups <- as.numeric(subset.list[[subset.input$subset[i]]]$subgroups)
-#   }
-# }
-# 
-# subset.df <- subset.list[[subgroup]] # NA specified as "no.subset"
 ```
 
 ```{r}
@@ -352,14 +336,25 @@ n_group_members <- length(u_groups)
 
 ```{r analysis log, warning = FALSE}
 
+# subset.df <- "no.subset"
+subset.df <- data.frame(field = "Barcode", subgroups = "C68")
+
 df.log <- initiateLog("9, Query Marker Exploration")
 
 df.log <- addLogEntry("Query File", input.file, df.log, "input.file")
 df.log <- addLogEntry("Gene Set Name", which.gene.set, df.log, "which.gene.set")
 df.log <- addLogEntry("Compute geneset module score", meta.module.flag, df.log, "meta.module.flag")
 df.log <- addLogEntry("Species", which.species, df.log, "which.species")
-df.log <- addLogEntry("Which Subset Field", subset.df$field, df.log, "field")
-df.log <- addLogEntry("Which Subset Groups", subset.df$subgroups, df.log, "subgroups")
+
+if (exists("subset.df")){
+  if ("data.frame" %in% class(subset.df)){
+    df.log <- addLogEntry("Which Subset Field", subset.df$field, df.log, "field")
+    df.log <- addLogEntry("Which Subset Groups", subset.df$subgroups, df.log, "subgroups")    
+  } else if ("character" %in% class(subset.df)){
+    df.log <- addLogEntry("Which Subset Groups", subset.df, df.log, "subset.df")    
+  }
+}
+
 df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
 df.log <- addLogEntry("Grouping Variable", group_name, df.log, "group_name")
 df.log <- addLogEntry("N Groups", n_group_members, df.log, "n_group_members")
