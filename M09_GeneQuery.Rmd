@@ -336,9 +336,6 @@ n_group_members <- length(u_groups)
 
 ```{r analysis log, warning = FALSE}
 
-# subset.df <- "no.subset"
-subset.df <- data.frame(field = "Barcode", subgroups = "C68")
-
 df.log <- initiateLog("9, Query Marker Exploration")
 
 df.log <- addLogEntry("Query File", input.file, df.log, "input.file")
