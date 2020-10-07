@@ -22,6 +22,7 @@ knit: (function(inputFile, encoding) {
 
 # clear global enviroment
 rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
 
 # initiate timer
 start.time <- proc.time()
@@ -39,18 +40,18 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # specify parameters
 analysis.parameters <- analysisParameters(
-  which.data = c("pilot11.Mm"),
-  which.strata = c("neural"),
+  which.data = c("pilot12.Hs"),
+  which.strata = c("Meso"),
   organism.filter.flag = F,                             
-  organism.include = c("Mm"),
+  organism.include = c("Hs"),
   save.flag = T,                                                              # OPTIONAL; logical (default = T)  # save results
-  save.filename = "p11_neural_DIV7_270820.Rdata", # note that prefix containing module number and run ID is appended to save file. 
+  save.filename = "p12_Meso_061020.Rdata", # note that prefix containing module number and run ID is appended to save file. 
   save.directory = "Preprocessed_Datasets/",
   cluster.resolution = 1,
-  gene.upperlimit = 9000,
-  gene.lowerlimit = 200,
-  mt.upperlimit = 60,
-  vars2regress = c("percent.mt", "dataset"),
+  gene.upperlimit = 9000, #9000
+  gene.lowerlimit = 200,  #200
+  mt.upperlimit = 60,   #60
+  vars2regress = c("percent.mt"), # optional: "dataset" (for linear batchcorrection)
   do.additional.reduction = F
 )
 
@@ -58,7 +59,7 @@ save.pdf <- T
 n.workers <- list(
   normScale = 2
 )
-max.memory <- 200 # numeric, in terms of Gb (set to 100 for cluster)
+max.memory <- 20 # numeric, in terms of Gb (set to 100 for cluster)
 
 ```
 
@@ -158,8 +159,9 @@ stopifnot(exists("input.type"))
 stopifnot(exists("input_set")) 
 
 try({
-  stopifnot(exists("analysis.parameters$organism.include")) 
-  if (length(analysis.parameters$organism.include) ==  1) analysis.parameters$organism.include <- rep(analysis.parameters$organism.include, length(input_data))
+  # stopifnot(exists("analysis.parameters$organism.include")) 
+   # if (length(analysis.parameters$organism.include) ==  1) 
+ analysis.parameters$organism.include <- rep(analysis.parameters$organism.include, length(input_data))
 }, silent = T)
 
 # if set_names are not specified, set_names <-  ""
@@ -337,6 +339,143 @@ loadMatdev <- function(import_set, input_organisms, dir) {
 
 ```
 
+```{r}
+
+loadMoffat.dev <- function(import_set, subsample_factor, input_organisms, organism_include, dir) {
+
+  # load gene count matrix
+  import_set_path <- paste(dir, import_set, sep ="")
+  load(import_set_path[1])
+
+  # assign row (genes) and column (cells) names
+  gene_count2 <- gene_count
+
+  # Infer organism
+  orgs <- scMiko::inferSpecies(gene_count2, input_organisms)
+  df_cell$orgs <- orgs
+
+  # filter out incorrect species genes immediately.
+  all.genes <- rownames(gene_count2)
+  include.which.genes <- rep(FALSE, length(all.genes))
+  if ((length(input_organisms) > length(organism_include)) | (length(organism_include) == 1)){
+    for (i in 1:length(organism_include)){
+      if (organism_include[i] == "Mm"){
+        include.which.genes[grepl("MUSG", all.genes)] <- T
+      } else if (organism_include[i] == "Hs"){
+        include.which.genes[!(grepl("MUSG", all.genes))] <- T
+      }
+    }
+
+    df_gene <- df_gene[include.which.genes, ]
+    gene_count <- gene_count[include.which.genes, ]
+    gene_count2 <- gene_count2[include.which.genes, ]
+  }
+
+  # only keep protein coding genes
+
+  # assign gene and cell names
+  rownames(gene_count2) <- df_gene$gene_id
+  colnames(gene_count2) <- df_cell$sample
+
+
+  # subsample data
+  if (subsample_factor < 1){
+    col_ind <- c(1:dim(gene_count2)[2])
+    subsample_ind <- sample(col_ind, round(subsample_factor * dim(gene_count2)[2]), replace = FALSE)
+    gene_count2 <- gene_count2[,subsample_ind]
+  } else {
+    subsample_ind <- c(1:dim(gene_count2)[2])
+  }
+
+  # Need names vectors to add additional metadata to Seurat object
+  gNames <- as.character( df_gene$gene_name );
+  names(gNames) <- as.character( df_gene$gene_id );
+  names(gNames) <-gsub("\\\\..*","",as.vector( names(gNames)))
+
+  # Add PCR barcodes
+  pcr.barcode.flag <- F
+  if (dir != import_set_path[2]){
+    try({
+      grps <- read.csv(import_set_path[2], header=T,sep="\\t",stringsAsFactors=F);
+      wells <- gsub("Han_[0-9]+_([A-Z0-9]{2,3}).[ACGT]+$","\\\\1",colnames(gene_count2));
+      myGrps <- grps$ConditionGroup[ match(wells,grps$sampleWell) ];
+      names(myGrps) <- colnames(gene_count2)
+      myGrps <- myGrps[subsample_ind]
+      pcr.barcode.flag <- T
+    }, silent = T)
+  }
+
+
+  # Add RT barcode
+  rtBC <- tryCatch({
+    rtBC <- read.csv(import_set_path[3],header=T,sep="\\t",stringsAsFactors=F);
+  }, error = function(e){
+    rtBC <- read.csv2(import_set_path[3],header=T,sep="\t",stringsAsFactors=F)
+    return(rtBC)
+  })
+  rtBC <- rtBC[subsample_ind, ]
+  if (is.null(rtBC$Plate)) rtBC$Plate <- ""
+  rtBC$plate.well.sample <- paste0("P", rtBC$Plate, ".", rtBC$Well, ".", rtBC$Sample.type)
+
+
+  barcodes <- gsub(".+([ACGT]{10}$)","\\\\1",colnames(gene_count2));
+  if (unique(barcodes) == "\\1")  barcodes <- gsub(".+([ACGT]{10}$)","\\1",colnames(gene_count2));
+  idx <- match( barcodes,rtBC$rt.bc );
+  rtGrp <- rtBC$Sample.type[idx];
+  names(rtGrp) <- colnames(gene_count2);
+  rtPWS <- data.frame(
+    plate = rtBC$Plate[idx],
+    well = rtBC$Well[idx],
+    sample = rtBC$Sample.type[idx])
+  rtPWS.summary <- rtPWS %>% dplyr::group_by(plate, well, sample) %>% dplyr::tally()
+
+  # remove .* suffix in ensembl
+  rownames(gene_count2)<-gsub("\\\\..*","",as.vector( rownames(gene_count2)))
+
+  # Create seurat object with count matrix data
+  so <- CreateSeuratObject(counts=gene_count2,project="Hong-sciSeq3",min.cells=0,min.features=0,names.field=2,names.delim="." )
+
+  # Add gene symbols as meta data that we can use later
+  mat_ens <- rownames(so@assays[["RNA"]])
+  match.id <- match(mat_ens,  names(gNames))
+
+  so[["RNA"]] <- AddMetaData( object=so[["RNA"]],metadata=names(gNames)[match.id],col.name="ENSEMBL");
+  so[["RNA"]] <- AddMetaData( object=so[["RNA"]],metadata=as.vector((gNames)[match.id]),col.name="SYMBOL");
+
+  # assign meta data
+  so.meta <- so@meta.data
+  so.meta$ind <- seq(1, nrow(so.meta))
+  so.meta$sample <- rownames(so.meta)
+  so.merge <- merge(so.meta, df_cell, by = "sample", all.x = T)
+  so.merge <- so.merge %>% dplyr::arrange(ind)
+  if ("unmatched_rate" %in% colnames(df_cell))  so[["unmatched.rate"]] <- so.merge$unmatched_rate
+  so[["Organism"]] <- so.merge$orgs
+
+  if (length(import_set) > 1){ # same as above, if barecode and well info. provided, assign to so structure
+    # Add group #s for mapping cells to PCR condition groups
+    if (pcr.barcode.flag) {
+      so[["group"]] <- myGrps;
+    } else {
+      so[["group"]] <- "unspecified";
+    }
+
+    # Add in cell line group info
+    so$Barcode <- rtGrp;
+
+  }
+
+  try({so@misc[["gene.info"]] <- df_gene}, silent = T)
+  try({so@misc[["cell.info"]] <- df_cell}, silent = T)
+  try({so@misc[["plate.summary"]] <- rtPWS.summary}, silent = T)
+
+  # return output
+  output <- list(so, gNames)
+
+  return(output)
+}
+
+
+```
 
 
 ```{r c6 - load_data}
