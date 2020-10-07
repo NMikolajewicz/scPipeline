@@ -49,21 +49,23 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # Query input
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-input.file <- "R98_M27_NM2_M02_p467891011_Mm_allGBM_tumorImmune_140920.Rdata"
+input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+
 
 # specify reference genesets
 # "MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat",, , "neural.dif.HH"
-which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm",   "VastDB", "cycling.seurat")
+which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm",   "VastDB", "cycling.seurat", "brain.GBM.R103", "neural.dif.HH", "immune.Monaco")
+# which.references <- "brain.GBM.R103"
 
 # specify cluster resolution
-cluster.resolution <- 0.5 # OPTIONAL; range 0 to inf (default = 1)
+cluster.resolution <- 0.3 # OPTIONAL; range 0 to inf (default = 1)
 
 so.input.species <- "Mm" # eREQUIRED; Hs, Mm
 
 
 # Data subsampling
 subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
-min.geneset.size <- 3 # recommended: 2 (for TF classification, set to 1)
+min.geneset.size <- 3 # recommended: 3 (for TF classification, set to 1)
 
 # print inline
 print.inline <- FALSE # OPTIONAL; TRUE/FALSE
@@ -71,7 +73,7 @@ print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 # specify number of workers for parallelization
 n.workers <- list(
   scoring = 6,
-  deg = 4
+  deg = 6
 )
 
 
@@ -80,6 +82,9 @@ save.pdf <- T
 
 
 ```
+
+
+
 
 
 ```{r specify input references}
@@ -116,6 +121,7 @@ if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "integration.anchors")
 
 # prep seurat object
+# debug(prepSeurat2)
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
                              species = so.input.species, resolution= cluster.resolution, subset.data = NULL, 
                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
@@ -130,6 +136,108 @@ rm(prep.list);
 invisible({gc()})
 
 ```
+
+```{r, fig.width = 15, fig.height = 15}
+# 
+# 
+# library(SingleCellSignalR)
+# 
+# data_test <- function (file, most.variables = 0, lower = 0, upper = 0, normalize = TRUE,
+#                        write = FALSE, verbose = TRUE, plot = FALSE)
+# {
+#   data<-as.matrix(file@assays[[DefaultAssay(file)]]@counts)
+#   stopifnot("matrix" %in% class(data))
+#   if (dir.exists("data") == FALSE & write == TRUE) {
+#     dir.create("data")
+#   }
+#   #data=file
+#   all.genes <- rownames(data)
+#   for (i in 1:ncol(data)) {
+#     if (is.character(data[, i]) == FALSE) {
+#       p = i - 1
+#       break
+#     }
+#   }
+#   if (sum (all.genes %in% c(mm2Hs$`Mouse gene name`, mm2Hs$`Gene name`)) ==
+#       0) {
+#     cat("Please convert gene ID's (Ensembl or NCBI ID) to official HUGO gene symbols",
+#         fill = TRUE)
+#     return()
+#   }
+#   genes = all.genes
+#   #data = data[, -c(1:p)]
+#   #rownames(data) = genes
+#   data = data[rowSums(data) > 0, ]
+#   data = data.frame(data[, apply(data, 2, function(x) quantile(x, 0.99)) > 0])
+#   if (normalize == TRUE) {
+#     cat("log-Normalization", fill = TRUE)
+#     q = apply(data, 2, quantile, 0.99)
+#     data.intermediate <- sweep(data, 2, q/median(q), "/")
+#     data = log1p(data.intermediate)
+#   }
+#   data = data[rowSums(data) > 0, ]
+#   data = data[rowSums(data) < quantile(rowSums(data), 1 -
+#                                          upper) & rowSums(data) > quantile(rowSums(data), lower), ]
+#   if (verbose == TRUE) {
+#     cat(paste(dim(data)[1], "genes"), fill = TRUE)
+#     cat(paste(dim(data)[2], "cells"), fill = TRUE)
+#     cat(paste("Zero rate = ", round(sum(data == 0) * 1000/prod(dim(data)))/10,
+#               "%", sep = ""), fill = TRUE)
+#   }
+#   if (write == TRUE) {
+#     fwrite(data.frame(data), "./data/data.txt", sep = "\t")
+#     fwrite(data.frame(rownames(data)), "./data/genes.txt",
+#            sep = "\t")
+#   }
+#   if (most.variables != 0) {
+#     m = apply(data, 1, mean)
+#     cv = apply(data, 1, sd)/m
+#     names(cv) = rownames(data)
+#     cv = cv[m > quantile(m, 0.5)]
+#     if (length(cv) < most.variables) {
+#       mv.genes = names(cv)
+#     }
+#     else {
+#       mv.genes = names(sort(cv, decreasing = TRUE))[1:most.variables]
+#     }
+#     mv.genes = names(sort(cv, decreasing = TRUE))[1:most.variables]
+#     res = list(data, data[mv.genes, ])
+#     names(res) = c("complete.dataset", "most.var.dataset")
+#   } else {
+#     res = data
+#   }
+#   return(res)
+# }
+# # Prepare the data for the analysis
+# small_so <- so.query
+# data = data_test(small_so, write = FALSE)
+# genes = rownames(data)
+# # Proceed to clustering
+# cluster <- as.character(small_so@meta.data[["seurat_clusters"]])
+# cluster <- as.integer(cluster) + 1
+# # clust = clustering(data = data,n = 10, method = "simlr")
+# # cluster = clust$cluster
+# # tsne = clust$`t-SNE`
+# # Cell classification
+# #my.markers = markers(c("immune", "tme", "melanoma", "bc"))
+# # class = cell_classifier(data=data, genes=genes, plot.details = TRUE)
+# # Cluster analysis
+# # clust.ana = cluster_analysis(data = data, genes = genes, cluster = cluster)
+# # Proceed to cell signaling
+# # debug(cell_signaling)
+# signal = cell_signaling(data = data, genes = genes, cluster = cluster,species = "mus musculus", logFC = log2(0.15), s.score = 0.5)
+# # Visualization
+# visualize(inter = signal)
+# visualize(inter = signal, show.in = c(1))
+# expression.plot(data = data, name = "LYPLA1", tsne = tsne)
+# expression.plot.2(data = data, name.1 = "LYPLA1", name.2 = "TRAM1", tsne = tsne)
+# # Create interface network
+# inter.net = inter_network(data = data, signal = signal, genes = genes, cluster = cluster)
+# # Show interactions downstream a specific receptor
+# intra = intra_network(goi = "S1PR1",data = data,genes = genes,cluster = cluster,coi="cluster 3",signal=signal)
+```
+
+
 
 ```{r analysis log}
 
@@ -750,113 +858,113 @@ for (i in 1:length(signatures.symbol)){
 ```{r DEG analysis using module scores}
 
 # get cell-level annotation scores 
-
-plt.deg.mod.1 <- NULL
-plt.deg.mod.2 <- NULL
-deg.mod.final <- NULL
-
-sc.mod.all <- NULL
-sig.names.all <- c()
-for (i in 1:length(signatures.symbol)){
-  
-  # get current signautre list
-  which.sig <- names(signatures.symbol)[i]
-  sig <- signatures.symbol[[which.sig]] 
-  
-  # clean lists
-  list.lengths <- unlist(lapply(sig, length))
-  sig <- sig[list.lengths >= min.geneset.size]
-  
-  if (length(sig) == 0) next
-  
-  for (j in 1:length(sig)){
-    sig.name <- names(sig)[j]
-    sig.features <- sig[[sig.name]]
-    sc.mod.all <-  rbind(sc.mod.all, colMeans(ef.mat[rownames(ef.mat) %in% sig.features, ]))
-    sig.names.all[length(sig.names.all) + 1] <- sig.name
-  }
-}
-
-# assign annotation names
-rownames(sc.mod.all) <- sig.names.all
-
-sc.mod.all <- as.data.frame(t(sc.mod.all))
-rownames(sc.mod.all) <- colnames(so.query)
-so.deg <- CreateSeuratObject(
-  counts = t(sc.mod.all),
-  project = "module.score.DEG",
-  assay = "RNA",
-  min.cells = 0,
-  min.features = 0,
-  names.field = 1,
-  names.delim = "_",
-  meta.data = NULL
-)
-
-# get original seurat clusters
-so.deg@meta.data[["seurat_clusters"]] <- so.query@meta.data[["seurat_clusters"]]
-Idents(so.deg) <- so.deg@meta.data[["seurat_clusters"]]
-
-if (n.workers$deg > length(u.clusters)) n.workers$deg <- length(u.clusters)
-
-deg.gene <- FindAllMarkers.Parallel(object = so.deg, 
-                                    n.work = n.workers$deg,
-                                    only.pos = T, 
-                                    min.pct = 0,
-                                    test.use = "MAST",
-                                    logfc.threshold = 0, 
-                                    max.cells.per.ident = 200,
-                                    return.thresh = 1, #1 ensures all genes are returned
-                                    verbose = T)
-
-# data wrangling
-deg.gene$pDif <- deg.gene$pct.1 - deg.gene$pct.2
-deg.gene$euc <- (((deg.gene$pDif/max(deg.gene$pDif))^2)  +  ((deg.gene$avg_logFC/max(deg.gene$avg_logFC))^2))
-deg.gene$log.p <- -log10(deg.gene$p_val)
-deg.gene$u.label <- paste0("c", deg.gene$cluster, "-", deg.gene$gene)
-top.dg.v1 <- deg.gene %>% group_by(cluster) %>%  top_n(1, euc)
-deg.gene$label.v1 <- ""
-deg.gene$label.v1[deg.gene$u.label %in% top.dg.v1$u.label] <- deg.gene$u.label[deg.gene$u.label %in% top.dg.v1$u.label]
-top.dg.v2 <- deg.gene %>%  top_n(15, euc)
-deg.gene$label.v2 <- ""
-deg.gene$label.v2[deg.gene$u.label %in% top.dg.v2$u.label] <- deg.gene$u.label[deg.gene$u.label %in% top.dg.v2$u.label]
-
-
-deg.gene.sig <- deg.gene[deg.gene$p_val_adj < 0.05, ]
-
-# plot
-plt.deg.mod.1 <- deg.gene.sig %>%
-  ggplot(aes(x = avg_logFC, y = pDif, color = cluster, size = log.p)) + 
-  geom_point(data = deg.gene, aes(x = avg_logFC, y = pDif), color = "grey", size = 1) + 
-  geom_point() + 
-  theme_miko(legend = T) + 
-  xlab('logFC (cluster n - other)') + 
-  ylab('expressing fraction difference (cluster n - other)') + 
-  labs(title = "Differential Module Analysis", subtitle = "colored: p < 0.05; grey: non-significant") + 
-  ggrepel::geom_text_repel(aes(label = label.v1)) 
-
-plt.deg.mod.2 <- deg.gene.sig %>%
-  ggplot(aes(x = avg_logFC, y = pDif, color = cluster, size = log.p)) + 
-  geom_point(data = deg.gene, aes(x = avg_logFC, y = pDif), color = "grey", size = 1) + 
-  geom_point() + 
-  theme_miko(legend = T) + 
-  xlab('logFC (cluster n - other)') + 
-  ylab('expressing fraction difference (cluster n - other)') + 
-  labs(title = "Differential Module Analysis", subtitle = "colored: p < 0.05; grey: non-significant") + 
-  ggrepel::geom_text_repel(aes(label = label.v2)) 
-
-deg.mod.final <- deg.gene.sig[ , c( "avg_logFC", "p_val","p_val_adj","pct.1", "pct.2",  "pDif", "euc", "cluster", "gene")]
-colnames(deg.mod.final) <- c( "avg_logFC", "p_val","p_val_adj","pct.1", "pct.2",  "pct.Dif", "dist.Origin", "Cluster", "Annotation")
-deg.mod.final[ ,c("p_val", "avg_logFC", "pct.1", "pct.2", "p_val_adj", "pct.Dif", "dist.Origin")] <- signif(deg.mod.final[ ,c("p_val", "avg_logFC", "pct.1", "pct.2", "p_val_adj", "pct.Dif", "dist.Origin")], 3)
-
-if (print.inline){
-  print(plt.deg.mod.1)
-  print(plt.deg.mod.2)
-  # deg.mod.final
-}
-
-# clean baggage 
-rm(so.deg)
+# 
+# plt.deg.mod.1 <- NULL
+# plt.deg.mod.2 <- NULL
+# deg.mod.final <- NULL
+# 
+# sc.mod.all <- NULL
+# sig.names.all <- c()
+# for (i in 1:length(signatures.symbol)){
+#   
+#   # get current signautre list
+#   which.sig <- names(signatures.symbol)[i]
+#   sig <- signatures.symbol[[which.sig]] 
+#   
+#   # clean lists
+#   list.lengths <- unlist(lapply(sig, length))
+#   sig <- sig[list.lengths >= min.geneset.size]
+#   
+#   if (length(sig) == 0) next
+#   
+#   for (j in 1:length(sig)){
+#     sig.name <- names(sig)[j]
+#     sig.features <- sig[[sig.name]]
+#     sc.mod.all <-  rbind(sc.mod.all, colMeans(ef.mat[rownames(ef.mat) %in% sig.features, ]))
+#     sig.names.all[length(sig.names.all) + 1] <- sig.name
+#   }
+# }
+# 
+# # assign annotation names
+# rownames(sc.mod.all) <- sig.names.all
+# 
+# sc.mod.all <- as.data.frame(t(sc.mod.all))
+# rownames(sc.mod.all) <- colnames(so.query)
+# so.deg <- CreateSeuratObject(
+#   counts = t(sc.mod.all),
+#   project = "module.score.DEG",
+#   assay = "RNA",
+#   min.cells = 0,
+#   min.features = 0,
+#   names.field = 1,
+#   names.delim = "_",
+#   meta.data = NULL
+# )
+# 
+# # get original seurat clusters
+# so.deg@meta.data[["seurat_clusters"]] <- so.query@meta.data[["seurat_clusters"]]
+# Idents(so.deg) <- so.deg@meta.data[["seurat_clusters"]]
+# 
+# if (n.workers$deg > length(u.clusters)) n.workers$deg <- length(u.clusters)
+# 
+# deg.gene <- FindAllMarkers.Parallel(object = so.deg, 
+#                                     n.work = n.workers$deg,
+#                                     only.pos = T, 
+#                                     min.pct = 0,
+#                                     test.use = "MAST",
+#                                     logfc.threshold = 0, 
+#                                     max.cells.per.ident = 200,
+#                                     return.thresh = 1, #1 ensures all genes are returned
+#                                     verbose = T)
+# 
+# # data wrangling
+# deg.gene$pDif <- deg.gene$pct.1 - deg.gene$pct.2
+# deg.gene$euc <- (((deg.gene$pDif/max(deg.gene$pDif))^2)  +  ((deg.gene$avg_logFC/max(deg.gene$avg_logFC))^2))
+# deg.gene$log.p <- -log10(deg.gene$p_val)
+# deg.gene$u.label <- paste0("c", deg.gene$cluster, "-", deg.gene$gene)
+# top.dg.v1 <- deg.gene %>% group_by(cluster) %>%  top_n(1, euc)
+# deg.gene$label.v1 <- ""
+# deg.gene$label.v1[deg.gene$u.label %in% top.dg.v1$u.label] <- deg.gene$u.label[deg.gene$u.label %in% top.dg.v1$u.label]
+# top.dg.v2 <- deg.gene %>%  top_n(15, euc)
+# deg.gene$label.v2 <- ""
+# deg.gene$label.v2[deg.gene$u.label %in% top.dg.v2$u.label] <- deg.gene$u.label[deg.gene$u.label %in% top.dg.v2$u.label]
+# 
+# 
+# deg.gene.sig <- deg.gene[deg.gene$p_val_adj < 0.05, ]
+# 
+# # plot
+# plt.deg.mod.1 <- deg.gene.sig %>%
+#   ggplot(aes(x = avg_logFC, y = pDif, color = cluster, size = log.p)) + 
+#   geom_point(data = deg.gene, aes(x = avg_logFC, y = pDif), color = "grey", size = 1) + 
+#   geom_point() + 
+#   theme_miko(legend = T) + 
+#   xlab('logFC (cluster n - other)') + 
+#   ylab('expressing fraction difference (cluster n - other)') + 
+#   labs(title = "Differential Module Analysis", subtitle = "colored: p < 0.05; grey: non-significant") + 
+#   ggrepel::geom_text_repel(aes(label = label.v1)) 
+# 
+# plt.deg.mod.2 <- deg.gene.sig %>%
+#   ggplot(aes(x = avg_logFC, y = pDif, color = cluster, size = log.p)) + 
+#   geom_point(data = deg.gene, aes(x = avg_logFC, y = pDif), color = "grey", size = 1) + 
+#   geom_point() + 
+#   theme_miko(legend = T) + 
+#   xlab('logFC (cluster n - other)') + 
+#   ylab('expressing fraction difference (cluster n - other)') + 
+#   labs(title = "Differential Module Analysis", subtitle = "colored: p < 0.05; grey: non-significant") + 
+#   ggrepel::geom_text_repel(aes(label = label.v2)) 
+# 
+# deg.mod.final <- deg.gene.sig[ , c( "avg_logFC", "p_val","p_val_adj","pct.1", "pct.2",  "pDif", "euc", "cluster", "gene")]
+# colnames(deg.mod.final) <- c( "avg_logFC", "p_val","p_val_adj","pct.1", "pct.2",  "pct.Dif", "dist.Origin", "Cluster", "Annotation")
+# deg.mod.final[ ,c("p_val", "avg_logFC", "pct.1", "pct.2", "p_val_adj", "pct.Dif", "dist.Origin")] <- signif(deg.mod.final[ ,c("p_val", "avg_logFC", "pct.1", "pct.2", "p_val_adj", "pct.Dif", "dist.Origin")], 3)
+# 
+# if (print.inline){
+#   print(plt.deg.mod.1)
+#   print(plt.deg.mod.2)
+#   # deg.mod.final
+# }
+# 
+# # clean baggage 
+# rm(so.deg)
 
 
 ```
@@ -1119,6 +1227,7 @@ vst.merge$cell.type <- gsub("-c[0-9]*", "", vst.merge$annotation)
 vst.merge.final <- vst.merge[ ,c("cluster", "cell.type", "ref.set", "n.genes","exp","gsva","per","logfc", "pd", "composite")]
 
 vst.merge.final$z.comp <- signif(apply(vst.merge.final[ ,c("exp","gsva","per","logfc", "pd")], 1, function(x) mean(x, na.rm = T) / sd(x, na.rm = T)), 3)
+vst.merge.final$z.comp[(sum(is.infinite(vst.merge.final$z.comp)) | (vst.merge.final$z.comp > 10))] <- 10
 vst.merge.final$cv.comp <- signif(apply(vst.merge.final[ ,c("exp","gsva","per","logfc", "pd")], 1, function(x) sd(x, na.rm = T) / mean(x, na.rm = T)), 3)
 
 ```
@@ -1173,33 +1282,33 @@ if (print.inline){
 sig.thresh <- 1.96
 vst.merge.cloud <- vst.merge.final
 vst.merge.cloud$sig.lenient <- F
-vst.merge.cloud$sig.lenient[vst.merge.cloud$exp > sig.thresh | 
-                              vst.merge.cloud$gsva > sig.thresh |
-                              vst.merge.cloud$per > sig.thresh | 
-                              vst.merge.cloud$logfc > sig.thresh | 
-                              vst.merge.cloud$pd > sig.thresh] <- T
+vst.merge.cloud$sig.lenient[vst.merge.cloud$exp >= sig.thresh | 
+                              vst.merge.cloud$gsva >= sig.thresh |
+                              vst.merge.cloud$per >= sig.thresh | 
+                              vst.merge.cloud$logfc >= sig.thresh | 
+                              vst.merge.cloud$pd >= sig.thresh] <- T
 
 
 psum <- function(x) Reduce("+",x)
 vst.merge.cloud$n.sigUp <- 0
-vst.merge.cloud$n.sigUp <- psum(data.frame(vst.merge.cloud$exp > sig.thresh , 
-                                           vst.merge.cloud$gsva > sig.thresh ,
-                                           vst.merge.cloud$per > sig.thresh ,
-                                           vst.merge.cloud$logfc > sig.thresh ,
-                                           vst.merge.cloud$pd > sig.thresh))
+vst.merge.cloud$n.sigUp <- psum(data.frame(vst.merge.cloud$exp >= sig.thresh , 
+                                           vst.merge.cloud$gsva >= sig.thresh ,
+                                           vst.merge.cloud$per >= sig.thresh ,
+                                           vst.merge.cloud$logfc >= sig.thresh ,
+                                           vst.merge.cloud$pd >= sig.thresh))
 vst.merge.cloud$n.sigDown <- 0
-vst.merge.cloud$n.sigDown <- psum(data.frame(vst.merge.cloud$exp < -1*sig.thresh , 
-                                             vst.merge.cloud$gsva < -1*sig.thresh ,
-                                             vst.merge.cloud$per < -1*sig.thresh ,
-                                             vst.merge.cloud$logfc < -1*sig.thresh ,
-                                             vst.merge.cloud$pd < -1*sig.thresh))
+vst.merge.cloud$n.sigDown <- psum(data.frame(vst.merge.cloud$exp <= -1*sig.thresh , 
+                                             vst.merge.cloud$gsva <= -1*sig.thresh ,
+                                             vst.merge.cloud$per <= -1*sig.thresh ,
+                                             vst.merge.cloud$logfc <= -1*sig.thresh ,
+                                             vst.merge.cloud$pd <= -1*sig.thresh))
 
 vst.merge.cloud$sig.stringent <- F
-vst.merge.cloud$sig.stringent[vst.merge.cloud$exp > sig.thresh & 
-                                vst.merge.cloud$gsva > sig.thresh &
-                                vst.merge.cloud$per > sig.thresh & 
-                                vst.merge.cloud$logfc > sig.thresh & 
-                                vst.merge.cloud$pd > sig.thresh] <- T
+vst.merge.cloud$sig.stringent[vst.merge.cloud$exp >= sig.thresh & 
+                                vst.merge.cloud$gsva >= sig.thresh &
+                                vst.merge.cloud$per >= sig.thresh & 
+                                vst.merge.cloud$logfc >= sig.thresh & 
+                                vst.merge.cloud$pd >= sig.thresh] <- T
 
 vst.merge.cloud$colorUp <- "grey"
 hue.col <- 0
@@ -1636,57 +1745,59 @@ for (i in 1:length(u.cl)){
 ```
 
 
-Differential Module Scores
-===================================== 
 
-differential analysis of annotation scores. Independent of earlier composite scoring (intended as indepenent annotation method).
-
-Row {.tabset}
--------------------------------------
-
-### Differential Scores 1
-
-Top annotation for each cluster is shown.
 
 ```{r plt.deg.mod.1}
 
-try({
-  print(plt.deg.mod.1)
-savePDF(file.name = paste0(output.path, "PDF/", "M05_differential_genesets_1.pdf"), plot.handle = plt.deg.mod.1, 
-        fig.width = 7, fig.height = 5, save.flag = save.pdf)
-}, silent = T)
+# Differential Module Scores
+# ===================================== 
+# 
+# differential analysis of annotation scores. Independent of earlier composite scoring (intended as indepenent annotation method).
+# 
+# Row {.tabset}
+# -------------------------------------
+# 
+# ### Differential Scores 1
+# 
+# Top annotation for each cluster is shown.
+# try({
+#   print(plt.deg.mod.1)
+# savePDF(file.name = paste0(output.path, "PDF/", "M05_differential_genesets_1.pdf"), plot.handle = plt.deg.mod.1, 
+#         fig.width = 7, fig.height = 5, save.flag = save.pdf)
+# }, silent = T)
 
 ```
 
-### Differential Scores 2
 
-Top N annotations are shown. 
 
 ```{r plt.deg.mod.2}
 
-try({
-print(plt.deg.mod.2)
+### Differential Scores 2
 
-savePDF(file.name = paste0(output.path, "PDF/", "M05_differential_genesets_2.pdf"), plot.handle = plt.deg.mod.2, 
-        fig.width = 7, fig.height = 5, save.flag = save.pdf)
-}, silent = T)
+# Top N annotations are shown. 
+# try({
+# print(plt.deg.mod.2)
+# 
+# savePDF(file.name = paste0(output.path, "PDF/", "M05_differential_genesets_2.pdf"), plot.handle = plt.deg.mod.2, 
+#         fig.width = 7, fig.height = 5, save.flag = save.pdf)
+# }, silent = T)
 ```
 
-### DEG Table
+
 
 ```{r deg.mod.final}
-
-try({
-datatable(deg.mod.final,
-          filter = 'top',
-          extensions = 'Buttons',
-          options = list(pageLength = 50,
-                         dom = 'Bfrtip',
-                         buttons = c('copy', 'csv', 'pdf')))
-
-write.csv(deg.mod.final, file = paste0(output.path, "Tables/", "differential_genesets_statistics.csv"), 
-          row.names = F) 
-}, silent = T)
+### DEG Table
+# try({
+# datatable(deg.mod.final,
+#           filter = 'top',
+#           extensions = 'Buttons',
+#           options = list(pageLength = 50,
+#                          dom = 'Bfrtip',
+#                          buttons = c('copy', 'csv', 'pdf')))
+# 
+# write.csv(deg.mod.final, file = paste0(output.path, "Tables/", "differential_genesets_statistics.csv"), 
+#           row.names = F) 
+# }, silent = T)
 
 ```
 
