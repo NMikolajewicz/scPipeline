@@ -41,7 +41,7 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # specify parameters
 analysis.parameters <- analysisParameters(
   which.data = c("pilot12.Hs"),
-  which.strata = c("Meso"),
+  which.strata = c("Lung"),
   organism.filter.flag = F,                             
   organism.include = c("Hs"),
   save.flag = T,                                                              # OPTIONAL; logical (default = T)  # save results
@@ -823,7 +823,13 @@ if (analysis.parameters$print.inline){
 ```{r c14 - QC scatterplots, fig.height= 5, fig.width = 12}
 
 # Generate QC scatterplots
-plt.QC_scatter <- QC.scatterPlot(so)
+max.cells <- 40000
+if (ncol(so) > max.cells) {
+  plt.QC_scatter <- QC.scatterPlot(downsampleSeurat(so,  subsample.n = max.cells))
+} else {
+  plt.QC_scatter <- QC.scatterPlot(so)
+}
+
 if (analysis.parameters$print.inline)  print(plt.QC_scatter)
 
 ```
