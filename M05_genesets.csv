@@ -20,3 +20,4 @@ immune.signatures,Hs,VALID_immuneSignatures_Nirmal_2018_SYMBOLS_170320.csv
 cancerSEA,Hs,VALID_CancerSEA_HS_270320.csv
 immuneSubtype,Hs,VALID_Thorsson2018_tumorImmuneSubtypes_260420.csv
 brain.GBM.R103,Mm,VALID_R103_brain_gbm_panel_160920.csv
+immune.Monaco,Hs,VALID_Monaco2019_ImmuneSubsets_071020
