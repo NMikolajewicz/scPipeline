@@ -54,8 +54,10 @@ pilot8.Mm,GBM.R3,GL261_R3
 pilot9.Hs,GBM.PR,"01_GBM_63P, 02_GBM_173R, 03_GBM_190P, 04_GBM_225R, 05_GBM_162P, 06_GBM_265R"
 pilot9.Mm,CT2A,PR_CT2A
 pilot10.Hs,GBM.Hs,"Ps, Rs"
-pilot11.Mm,GL261,"GL261"
-pilot11.Mm,Renca,"RT"
-pilot11.Mm,neural,"DIV7"
+pilot11.Mm,GL261,GL261
+pilot11.Mm,Renca,RT
+pilot11.Mm,neural,DIV7
 pilot10.Mm,GBM.Mm,"GL261, CT2A"
-pilot10.Mm,CGR8,"CGR8"
+pilot10.Mm,CGR8,CGR8
+pilot12.Hs,Meso,Meso
+pilot12.Hs,Lung,LT
