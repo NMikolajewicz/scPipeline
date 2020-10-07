@@ -24,6 +24,7 @@ knit: (function(inputFile, encoding) {
 
 # clear global enviroment
 rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
 
 # initiate timer
 start.time <- proc.time()
@@ -43,54 +44,47 @@ invisible({lapply(packages2load, library, character.only = TRUE)})
 
 save.flag <- T
 
-save.filename <- "M02_neuroDif_p41011_010920"
+save.filename <- "M02_neuroDif_sct_p1011_011020"
 
 k.filter <-  200 # lower k.filter value (e.g., 50) if there is few cells. Default = 200
 
 n.anchors <- 3000  # number of features used for data integration # if datasets are divergent, may need fewer genes to align with (e.g., 1000)
 
-integration_method <- "rPCA" # "CCA" for small datasets, "rPCA" for large datasets
+integration_method <- "CCA" # "CCA" for small datasets, "rPCA" for large datasets
 
 print.inline <- FALSE
 
 n.workers <- list(
   import = 6,
-  integration = 1 #(limit to 1 for cluster)
+  integration = 4 #(limit to 1 for cluster)
 )
 
   do.memory.limit <- T # specify whether to limit max memory (set T if local)
-  max.memory <- 200 # numeric, in terms of Gb (set to 100 for cluster)
+  max.memory <- 300 # numeric, in terms of Gb (set to 100 for cluster)
 
 
 
 target.species <- "Mm" #if mixed input, specify target as 'Hs' for best performance
-target.cluster.resolution <- 1
+target.cluster.resolution <- 0.5
 
 
 subset.all <- 1
 
 input.data <- list(
-  p4.neuro = list(
-    file = "R72_M01_NM2_p4_neuralDif_010920.Rdata",
-    cluster.resolution = 1,
-    species = "Mm",
-    subsample = subset.all,
-    grouping.field = NA,
-    groups = NA),
   p10.CGR8 = list(
     file = "R71_M01_NM2_p10_CGR8_310820.Rdata",
-    cluster.resolution = 1,
+    cluster.resolution = 0.3,
     species = "Mm",
     subsample = subset.all,
-    grouping.field = NA,
-    groups = NA),
+    grouping.field = "dataset",
+    groups ="pilot10.Mm"),
   p11.DIV7 = list(
     file = "R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
-    cluster.resolution = 1,
+    cluster.resolution = 0.2,
     species = "Mm",
     subsample = subset.all,
-    grouping.field = NA,
-    groups = NA)
+    grouping.field = "dataset",
+    groups = "pilot11.Mm")
 )
 
 # save PDF
@@ -243,6 +237,8 @@ import.list <- list()
 cl <- parallel::makeCluster(if (n.workers$import > n.datasets) n.datasets else n.workers$import)
 doParallel::registerDoParallel(cl)
 
+
+
 # iterate through each input file
 import.list <- foreach(i = 1:length(input.files), .packages = c("scMiko"))  %dopar% {
   
@@ -288,10 +284,11 @@ import.list <- foreach(i = 1:length(input.files), .packages = c("scMiko"))  %dop
   if (input.data[[input.label]]$subsample < 1)  so <- downsampleSeurat(so, input.data[[input.label]]$subsample)
   
   # store results
-  list(so = so,
+  return(list(so = so,
        gList = gNames.list,
-       gNames = names(gNames.list)
-  )
+       gNames = names(gNames.list),
+       input.label = input.label
+  ))
 }
 
 # stop workers
@@ -302,8 +299,8 @@ so.list <- list()
 gList <- list()
 gNames <- list()
 
-for (i in 1:length(input.labels)){
-  input.label <- input.labels[i]
+for (i in 1:length(import.list)){
+  input.label <- import.list[[i]]$input.label
   so.list[[input.label]] <- import.list[[i]]$so
   gList[[input.label]] <- import.list[[i]]$gList
   gNames[[input.label]] <- import.list[[i]]$gNames
@@ -555,6 +552,19 @@ stopifnot(length(all.cell.names) == length(unique(all.cell.names)))
 ```
 
 
+```{r drop scale}
+
+# drop scaled data to allow computational scaling
+# for (i in 1:length(so.list)){
+#   try({so.list[[i]]@assays[["RNA"]]@scale.data <- matrix(NA)}, silent = T)
+#   try({so.list[[i]]@assays[["SCT"]]@scale.data <- matrix(NA)}, silent = T)
+#   try({so.list[[i]]@assays[["integrated"]]@scale.data <- matrix(NA)}, silent = T) 
+# }
+# 
+# invisible({gc()})
+
+```
+
 ```{r integrate data}
 
 if (length(so.list) > 1){ # intergrate if there are multiple datasets provided
@@ -583,14 +593,17 @@ warning("Selecting integration features...\n")
   
   # Added override step
   # Note: solution to retain sct scaled values post-integration proposed by chlee-tabin (https://github.com/satijalab/seurat/issues/2590)
-  for (i in 1:n.datasets) {
-    so.list2[[i]][["SCT"]] <- SetAssayData( 
-      object = so.list2[[i]][["SCT"]], 
-      slot = "scale.data", 
-      new.data = GetAssayData( so.list[[i]], assay = "SCT", slot = "scale.data" )
-    )
-  }
-  rm(so.list)
+  retain.sct.scale <- F
+  if (retain.sct.scale){
+    for (i in 1:n.datasets) {
+      so.list2[[i]][["SCT"]] <- SetAssayData( 
+        object = so.list2[[i]][["SCT"]], 
+        slot = "scale.data", 
+        new.data = GetAssayData( so.list[[i]], assay = "SCT", slot = "scale.data" )
+      )
+    }    
+  } 
+  rm(so.list); invisible({gc()})
   
   # ensure the k.filer is not larger than smallest dataset
   k.filter <- min(200, min(sapply(so.list2, ncol)))
@@ -612,7 +625,7 @@ warning("Selecting integration features...\n")
     
   }
   
-  rm(so.list2); 
+  rm(so.list2); invisible({gc()})
   # which.features.integrate <- query.panel
   which.features.integrate <- Reduce(intersect, lapply(so.anchors@object.list, rownames))
   which.features.integrate <- which.features.integrate[which.features.integrate %in% query.panel]
