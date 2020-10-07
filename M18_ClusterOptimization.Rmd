@@ -35,6 +35,12 @@ packages2load <- c("scMiko", "Seurat", "sctransform", "clustree",
                    "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "readxl", "MAST", 
                    "future", "cluster", "doParallel", "parallel", "foreach")
 
+library(treemap)
+library(data.tree)
+library(DiagrammeR)
+ library(igraph)
+library(dendextend)
+
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE))
 
@@ -50,18 +56,18 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
-input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+input.file <- "R173_M02_NM2_M02_neuroDif_sct_p1011_011020.Rdata"
 
 # Rapid marker finding (logical flag)
 quick_markers <- TRUE 
 
 # specify cluster resolution
 # cluster_resolution <- c(0.01, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
-cluster_resolution <- c(0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1)
+cluster_resolution <- c(0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5)
 # cluster_resolution <- c(0.01, 0.15, 0.45, 0.7, 1)
 
-# log fold change threshold
-lfc.threshold <- 0.5
+# log fold change threshold (0.5 recommended)
+lfc.threshold <- 1
 
 # p.value threshold <- p.threshold
 p.threshold <- 0.01
@@ -82,8 +88,8 @@ subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify number of workers (for parallelization)
 n.workers <- list(
-  clustering = 4, # data clustering
-  deg = 4         # DEG analysis
+  clustering = 7, # data clustering
+  deg = 16         # DEG analysis
 )
 
 # which markers to return
@@ -136,11 +142,18 @@ load(paste(data.path, dir.preprocessed, input.file, sep = ""))
 
 if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 
+
+if ("integrated" %in% names(so@assays)){
+  terms2drop <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "sct")
+} else {
+  terms2drop <- c("ica", "tsne", "nmf", "corr", "gsva", "deg")
+}
+
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
                              species = which.species, resolution= NULL, subset = NULL, 
-                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
-                             terms2drop = c("ica", "tsne", "nmf", "corr", "gsva", "deg"), rmv.pattern = "so", 
+                             subsample = 1, M00_subgroup.path = "M00_subgroups.csv",
+                             terms2drop = terms2drop, rmv.pattern = "so", 
                          scale.reprocessed = T, neighbors.reprocessed = T)
 
 # unpack results
@@ -261,8 +274,18 @@ auxillary.groups <- c(auxillary.groups, "subset_group")
 
 DefaultAssay(so.query) <- assay.holder
 cr_names <- c(cluster_resolution, auxillary.groups)
+
+# plt.umap_by_cluster
 ```
 
+```{r subsample data here}
+if (exists("subsample_factor")){
+  if ((subsample_factor < 1) |( subsample_factor > 0)){
+    so.query = subset(so.query, cells = sample(Cells(so.query), round(ncol(so.query)*subsample_factor)))
+  }
+}
+
+```
 
 ```{r function for long to wide annotation table}
 
@@ -364,6 +387,261 @@ rm(marker.list)
 rm(so.markers)
 
 ```
+
+
+
+
+```{r MST step 1}
+
+library(clustree);
+
+# get cluster centers for each reslution
+df.all.centers <- NULL
+a.mat <- NULL
+
+# check for single cluster resolution
+lowest.res.membership <- so.query@meta.data[[paste0(assay.pattern, min(cluster_resolution))]]
+add.single.clust <- F
+if (length(unique(lowest.res.membership)) > 0 ) {
+  add.single.clust <- T
+  low.res.mem <- factor(rep(0, length(lowest.res.membership)))
+  mst.cr <- c(0, cluster_resolution)
+} else {
+  mst.cr <- cluster_resolution
+}
+
+clustering.mem <- NULL
+for (i in 1:length(mst.cr)){
+  
+  # get umap coordinates
+  if (add.single.clust && mst.cr[i] == 0){
+  df.umap <- data.frame(x = so.query@reductions[["umap"]]@cell.embeddings[,1],
+                        y = so.query@reductions[["umap"]]@cell.embeddings[,2],
+                        cluster = low.res.mem)    
+  clust.info <- data.frame( low.res.mem)
+  } else {
+  df.umap <- data.frame(x = so.query@reductions[["umap"]]@cell.embeddings[,1],
+                        y = so.query@reductions[["umap"]]@cell.embeddings[,2],
+                        cluster = so.query@meta.data[[paste0(assay.pattern, mst.cr[i])]]) 
+  clust.info <- data.frame( so.query@meta.data[[paste0(assay.pattern, mst.cr[i])]])
+  }
+
+  
+  # get umap centers
+  df.center <- getClusterCenters(df.umap, which.center = "median")
+  
+  # get number of cells per cluster
+  df.umap.cells <- df.umap %>% 
+    group_by(cluster) %>%
+    summarize(n.cell = length(cluster))
+  df.center$resolution <- as.character(cluster_resolution[i])
+  df.center <- merge(df.center, df.umap.cells, by = "cluster")
+  
+  # bind resoluts
+  df.all.centers <- bind_rows(df.all.centers, df.center)
+
+  # get cluster membership info
+  colnames(clust.info) <- as.character( mst.cr[i])
+  clustering.mem <- bind_cols(clustering.mem, clust.info)
+
+}
+
+# cast memberships to matrix
+cm.mat <- as.matrix(clustering.mem)
+
+# tally cell inheritence in hierarchial clusters model
+df.tally.all <- NULL
+
+for (i in 2:ncol(clustering.mem)){
+  
+  dp.tally <- NULL
+  
+  d1 <- as.character(clustering.mem[,i-1])
+  d2 <- as.character(clustering.mem[,i])
+  dpair <- paste0(d1, "-", d2)
+  
+  dp.tally <- data.frame(table(dpair))
+  
+  dp.split <- strsplit(as.character(dp.tally$dpair), "-")
+  for (j in 1:nrow(dp.tally)){
+    dp.tally$parent[j] = dp.split[[j]][1]
+    dp.tally$child[j] = dp.split[[j]][2]
+  }
+
+  dp.tally$parent.res <- as.numeric(colnames(clustering.mem)[i-1])
+  dp.tally$child.res <- as.numeric(colnames(clustering.mem)[i])
+  
+  df.tally.all <- bind_rows(df.tally.all, dp.tally)
+}
+
+
+```
+
+```{r MST step 2}
+
+
+# configure hierarchial clusters into data.tree object
+df.tree <- NULL
+c.tree <- clustering.mem
+all.clust.col <- colnames(c.tree)
+c.tree$pathString <- ""
+for (i in 1:length(all.clust.col)){
+  which.col <- colnames(c.tree) %in% all.clust.col[i]
+  c.tree$pathString <- paste( c.tree$pathString, c.tree[ ,which.col], sep = "/" )
+}
+
+# tally each
+c.table <- data.frame(table( c.tree$pathString))
+c.split <- strsplit(as.character(c.table$Var1), "/")
+
+# explode 
+for (i in 1:length(c.split)){
+  for (j  in 1:length(all.clust.col)){
+    c.table[ i,all.clust.col[j]] <- c.split[[i]][j+1]
+  }
+}
+
+c.table$pathString <- "pop"
+for (i in 1:length(all.clust.col)){
+  which.col <- colnames(c.table) %in% all.clust.col[i]
+  c.table[ ,which.col] <- paste0("r", colnames(c.table)[which.col], "-", c.table[,which.col])
+
+  c.table$pathString <- paste( c.table$pathString, c.table[ ,which.col], sep = "/" )
+}
+
+method.prune <- "a"
+  total.freq <- sum(c.table$Freq)
+if (method.prune == "a"){
+c.table.filt <- c.table %>%
+  group_by(get(as.character(max(mst.cr)))) %>%
+  top_n(1, Freq)
+} else  if (method.prune == "b"){
+  
+
+  lower.limit <- round(total.freq * 0.05)
+c.table.filt <- c.table[c.table$Freq>lower.limit, ]  
+}
+
+c.table.filt <- c.table.filt[ , c("Freq", "pathString")]
+
+population <- FromDataFrameTable(c.table.filt)
+
+ population$Set(name =  paste0(population$Get("name"), ".", seq(1, length(population$Get("name")))))
+ 
+ so.dend <- as.dendrogram(population)
+# plot(so.dend, center = TRUE)
+
+
+so.ig <- as.igraph.Node(population)
+
+so.mst <-  igraph::mst(so.ig)
+
+
+ library(ggnetwork)
+
+so.mst.gg <- ggnetwork(so.mst)
+
+so.mst.gg$name <- as.character(so.mst.gg$name)
+
+# get cluster resolution
+so.mst.gg$cr <- stringr::str_extract( so.mst.gg$name, "r[0]*.[0-9]*")  
+so.mst.gg$cr <- stringr::str_remove(so.mst.gg$cr, "-[0-9]*")
+so.mst.gg$cr <- as.character(gsub("r", "", so.mst.gg$cr ))
+
+# get cluster ID
+so.mst.gg$cluster <- stringr::str_extract( so.mst.gg$name, "-[0-9]*.") 
+so.mst.gg$cluster <- as.character(gsub("-", "", so.mst.gg$cluster ))
+so.mst.gg$cluster <- as.character(gsub("\\.", "", so.mst.gg$cluster ))
+
+# get cluster sizes
+df.size <- df.tally.all[ ,c("Freq", "child", "child.res" )]
+colnames(df.size) <- c("n", "cluster", "cr")
+parent.node <-  data.frame(n = total.freq, cluster = as.character(0), cr = as.numeric(min(mst.cr)))
+# parent.node$cr <- as.character(parent.node$cr)
+df.size <- bind_rows(df.size,parent.node)
+so.mst.gg <- merge(so.mst.gg, df.size)
+
+# so.mst.gg <- so.mst.gg[complete.cases(so.mst.gg), ]
+plt.mst <- ggplot(so.mst.gg, aes(x = x, y = y, xend = xend, yend = yend))+
+  geom_edges(color = "darkgray") +
+  geom_nodes(aes(color = cr, size = n, label = cluster)) + theme_blank()+
+  theme(legend.position="bottom") + 
+  geom_text(aes(label = cluster)) + 
+  theme_miko(legend = T) + 
+  xlab("Hierarchial Cluster MST 1") + ylab("Hierarchial Cluster MST 2") + 
+  labs(title = "Trajectory", subtitle = "Minimal-Spanning Tree", color = "Resolution")
+
+if (print.inline){
+  print(plt.mst)
+}
+
+```
+```{r, fig.width = 8, fig.height=5}
+# 
+# so.query <- FindClusters(object = so.query, resolution = max(cluster_resolution), verbose = 0, algorithm = 1, modularity.fxn = 1)
+
+# so.query <- FindClusters(object = so.query, resolution = max(cluster_resolution), verbose = 0, algorithm = 1, modularity.fxn = 1)
+# so.query <- BuildClusterTree(object = so.query)
+do.clust <- F
+if (do.clust){
+
+assay.holder <- DefaultAssay(so.query)
+if ("integrated" %in% names(so.query@assays)){
+  DefaultAssay(so.query) <- "integrated"
+}
+
+for (i in 1:length(cluster_resolution)){
+
+  try({
+    
+
+which.cluster.ind <- i
+which.clust <-  cluster.name[which.cluster.ind]
+Idents(object = so.query) <-which.clust
+so.query <- BuildClusterTree(object = so.query)
+# PlotClusterTree(object = so.query)
+
+
+
+so2.phylo <- so.query@tools[["BuildClusterTree"]]
+so2.dend <- as.hclust(as.dendrogram(so2.phylo))
+so2.igraph <- as.igraph(so2.phylo)
+
+try(plot(so2.dend))
+
+# so.ig <- as.igraph.Node(population)
+
+so2.mst <-  igraph::mst(so2.igraph)
+so2.mst.gg <- ggnetwork(so2.mst)
+
+# so2.mst.gg$name <- gsub("Node", "n", so2.mst.gg$name)
+so2.mst.gg$name[grepl("Node", so2.mst.gg$name)] <- ""
+
+plt.graph <- ggplot(so2.mst.gg, aes(x = x, y = y, xend = xend, yend = yend))+
+  geom_edges(color = "darkgray") +
+  # geom_nodes(aes()) +
+  theme_blank()+
+  theme(legend.position="bottom") + 
+  geom_text(aes(label = name)) +
+  theme_miko(legend = T) + 
+  xlab("Hierarchial Cluster MST 1") + ylab("Hierarchial Cluster MST 2") + 
+  labs(title = "Trajectory", subtitle = which.clust, color = "Resolution")
+
+
+plt.cur.umap <- plt.umap_by_cluster[[which.cluster.ind]]
+
+print(cowplot::plot_grid(plt.cur.umap, plt.graph))
+
+  }, silent = T)
+  
+}
+
+DefaultAssay(so.query) <- assay.holder
+
+  
+}
+```
+
 
 ```{r make wide function}
 
@@ -1046,6 +1324,19 @@ Cluster Tree
 
 Row {.tabset}
 -------------------------------------
+
+### MST
+
+```{r mst plots, fig.width = 12, fig.height = 8}
+
+print(plt.mst)
+
+savePDF(file.name = paste0(output.path, "PDF/", "MST.pdf"), plot.handle =  plt.mst, 
+        fig.width = 6, fig.height = 6, save.flag = save.pdf)
+
+```
+
+
 
 ### Cluster Tree
 
