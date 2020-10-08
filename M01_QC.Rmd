@@ -41,7 +41,7 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # specify parameters
 analysis.parameters <- analysisParameters(
   which.data = c("pilot12.Hs"),
-  which.strata = c("Lung"),
+  which.strata = c("Meso"),
   organism.filter.flag = F,                             
   organism.include = c("Hs"),
   save.flag = T,                                                              # OPTIONAL; logical (default = T)  # save results
@@ -57,9 +57,9 @@ analysis.parameters <- analysisParameters(
 
 save.pdf <- T
 n.workers <- list(
-  normScale = 2
+  normScale = 1
 )
-max.memory <- 20 # numeric, in terms of Gb (set to 100 for cluster)
+max.memory <- 200 # numeric, in terms of Gb (set to 100 for cluster)
 
 ```
 
