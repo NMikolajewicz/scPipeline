@@ -56,8 +56,8 @@ Sox2,cd274,lag3,,DDX3Y,EGFR,,cd47,STARD3,S100a9,Jak2,,Tnfaip3,IMMP2L,C4orf29,PTE
 ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,Gm28187,Adgrl2,Gm28187,VIM,Anxa5,,,,,,,Ccdc3,Srsf10,Diaph2
 ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,Sema4d,Nrn1,Sema4d,MT2A,Col11a1,,,,,,,Tacr1,Nova1,Gm15230
 ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,Chn2,Galnt18,Chn2,C1S,Tmpo,,,,,,,Dnah2,Nova2,Erdr1
-,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,Arhgap30,Slco3a1,Arhgap30,NAMPT,Rrbp1,,,,,,,Fndc3b,Ptbp1,
-,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,Crip1,Anxa3,Crip1,EFEMP1,Pdlim5,,,,,,,Frmd4b,Ptbp2,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,Arhgap30,Slco3a1,Arhgap30,NAMPT,Rrbp1,,,,,,,Fndc3b,Ptbp1,Npas2
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,Crip1,Anxa3,Crip1,EFEMP1,Pdlim5,,,,,,,Frmd4b,Ptbp2,Mep1a
 ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,Crabp2,Khdrbs3,Crabp2,C1R,Arhgdia,,,,,,,Rp1,Rbfox1,
 ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,Ly6c1,Nr2f2,Ly6c1,SOD2,Myo10,,,,,,,Plcl1,,
 ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,Trf,Btbd11,Trf,IFITM3,Cd44,,,,,,,Ttc6,,
