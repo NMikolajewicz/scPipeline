@@ -34,6 +34,7 @@ knit: (function(inputFile, encoding) {
 # 6) GSVA
 # 7) Differential gene expression analysis (DEG)
 # 8) unweighted PCA (for rare cell populations)
+# 8) reproject data (using selected geneset)
 
 # Output: ######################################################################
 # Seurat object with precomputed intermediate results. 
@@ -71,7 +72,8 @@ invisible(lapply(packages2load, library, character.only = TRUE, quietly = TRUE))
 # input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
-input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
+# input.file <- "R98_M27_NM2_M02_p467891011_Mm_allGBM_tumorImmune_140920.Rdata"
+input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R44_M27_NM2_p4789_allGBM_tumorSubpop1_150820.Rdata"
 # input.file <- "R32_M02_NM2_M02_testSet_rPCA_120820.Rdata"
@@ -82,10 +84,11 @@ override.input <- F # if true, output.file is ignored and input.file is overwrit
 
 # output file (required only if override input = F)
 # output.file <- "M02_cor_p467891011_Mm_GBM_080920.Rdata" # note that run id, module number and user name will automatically be appended as prefix.
-output.file <- "M02_p467891011_Mm_allGBM_ImmuneOnly_150920.Rdata"
+# R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata
+output.file <- "M02_neuroDif_p41011_neuralReprojection_long_260920.Rdata"
 
 # cluster resolution
-cluster.resolution <- 0.5
+cluster.resolution <-0.2
 
 # print inline
 print.inline <- F
@@ -98,29 +101,32 @@ which.species <- "Mm"
 
 # specify subseting 
 # which.subset <- "p4789_immune_cr0_45"
-which.subset <- "p4567891011_immune_res0_5"
-# p4567891011_brainTissue
+# which.subset <- "p4567891011_tumorImmune_res0_5"
+# which.subset <- data.frame(field = "seurat_clusters", subgroups = c(0,1,2,3,4,5,6,7,9,11,12,13,14,16,17,18,20,23,24,25,26))
+which.subset <- NULL
 
 # save pdf
 save.pdf <- T
 
 # specify decorations
 decoration.list <- list(
-  PCA = T,
+  reprojection = T,
+  PCA = F,
   ICA = F,
   TSNE = T,
   NMF = F,
   rho.matrix = F,
   cell.cycle.scoring = T,
-  DEG = T,
+  DEG = F,
   GSVA = F
 )
 
 # secondary analysis parameters
 parameter.list <- list(
-  PCA.weight.by.var = T,  # is pca unweighted?
+  PCA.weight.by.var = T,  # is pca weighted?
   PCA.var.explained = 0.9,
-  NMF.n.iterations = 3  # number of iterations per rank (during optimization step)
+  NMF.n.iterations = 3,  # number of iterations per rank (during optimization step)
+  reprojection.set = "HH.neural.dif.long"   # geneset name for reprojection; set to NA if unspecified (M27_reprojection_sets.csv)
 )
 
 
@@ -196,6 +202,123 @@ df.log <- addLogEntry("Data Rescaled", data.rescaled, df.log, "data.rescaled")
 warning("Getting log history...\n")
 cur.env <- objects()
 module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+```{r Reprojection, warning = FALSE, message = FALSE, include = FALSE}
+
+if (decoration.list$reprojection){
+  
+  # import all available genelists
+  geneset.path <- "M27_reprojection_sets.csv"
+  df.geneset <- read.csv(geneset.path)
+  colnames(df.geneset) <- rmvCSVprefix(colnames(df.geneset))
+  
+  # check if genelist is available
+  warning("Checking if geneset for reprojection is available...\n")
+  do.reprojection <- F
+  if ("reprojection.set" %in% names(parameter.list)){
+    geneset.query <- parameter.list$reprojection.set
+    if (is.na(geneset.query)) {
+      warning("Reprojection set is unspecified. Reprojection not performed. \n")
+    } else if (!(geneset.query %in% colnames(df.geneset))){
+      warning("Reprojection set not found in available gene lists. Reprojection not performed. \n")
+    } else {
+      do.reprojection <- T
+    }
+  } else {
+    warning("Reprojection set is unspecified. Reprojection not performed. \n")
+  }
+  
+  # perform reprojection
+  if (do.reprojection){
+    warning("Running reprojection...\n")
+    # retrieve geneset
+    reproj.genes <- df.geneset[ ,(colnames(df.geneset) %in% geneset.query)]
+    reproj.genes <- unique(reproj.genes[reproj.genes != ""])
+    
+    # ensure genes are species-appropriate
+    if (which.species == "Mm"){
+      reproj.genes <- firstup(reproj.genes)
+    } else  if (which.species == "Hs"){
+      reproj.genes <- toupper(reproj.genes)
+    }
+    
+    # rerun processing with subset of genes
+    so.neural <- subset(so.query, features = reproj.genes)
+    
+    # if ("integrated" %in% names(so.query@assays)){
+    #   
+    #   # assign default assay
+    #   input.assay <- DefaultAssay(so.neural)
+    #   DefaultAssay(so.neural) <- "integrated"
+    #   
+    #   
+    #   # find neighbors and cluster; perform UMAP embedding
+    #   warning("Computing clusters...\n")
+    #   so.neural <- RunPCA(so.neural, features = reproj.genes)
+    #   so.neural <- FindNeighbors(so.neural, dims = 1:30, reduction = "pca")
+    #   so.neural <- FindClusters(so.neural, resolution = cluster.resolution)
+    #   warning("Computing UMAP...\n")
+    #   so.neural <- RunUMAP(so.neural, dims = 1:30)  
+    #   
+    #   # get final genelist
+    #   final.geneset <- rownames(so.neural)
+    #   
+    #   # reassign original assay
+    #   DefaultAssay(so.neural) <- input.assay
+    #   
+    # } else {
+      # find neighbors and cluster; perform UMAP embedding
+    warning("Computing normalization and scalings...\n")
+    so.neural <- NormalizeData(so.neural)
+    so.neural <- ScaleData(so.neural, features = reproj.genes)
+      warning("Computing clusters...\n")
+      so.neural <- RunPCA(so.neural, features = reproj.genes)
+      so.neural <- FindNeighbors(so.neural, dims = 1:30, reduction = "pca")
+      so.neural <- FindClusters(so.neural, resolution = cluster.resolution)
+      warning("Computing UMAP...\n")
+      so.neural <- RunUMAP(so.neural, dims = 1:30)  
+      
+      # get final genelist
+      final.geneset <- rownames(so.neural)
+    # }
+    
+    # assign reprojected dimnesional reductions to original object 
+    so.query@reductions[["umap"]] <- so.neural@reductions[["umap"]]
+    so.query@reductions[["pca"]] <- so.neural@reductions[["pca"]]
+    so.query@meta.data[["seurat_clusters"]] <- so.neural@meta.data[["seurat_clusters"]]
+    so.query@active.ident <- so.neural@active.ident
+    
+    # store geneset
+    so.query@misc[["reprojection.set"]] <- list(
+      set.name = geneset.query,
+      genes.queried = reproj.genes,
+      genes.used = final.geneset
+    )
+    
+    # get umaps
+    reprojected.umap.cluster <- cluster.UMAP(so.query) + theme_miko(legend = T) + labs(subtitle = "Reprojected Data")
+    reprojected.umap.bc <- cluster.UMAP(so.query, group.by = "Barcode") + labs(subtitle = "Reprojected Data")
+    
+    # log analysis
+    df.log <- addLogEntry("Data reprojected", TRUE, df.log, "")
+    df.log <- addLogEntry("Reprojection genes input", length(reproj.genes), df.log, "length(reproj.genes)")
+    df.log <- addLogEntry("Reprojection genes available", length(final.geneset), df.log, "length(final.geneset)")
+    
+    if (print.inline){
+      print(reprojected.umap.cluster)
+      print(reprojected.umap.bc)
+    }
+    
+  } else {
+    reprojected.umap.cluster <- NULL
+    reprojected.umap.bc <- NULL
+  }
+} else {
+  reprojected.umap.cluster <- NULL
+  reprojected.umap.bc <- NULL  
+}
 
 ```
 
@@ -934,6 +1057,10 @@ if (exists("DEG.results")){
 
 UMAP
 ===================================== 
+
+Row {.tabset}
+-------------------------------------
+
 ### Uniform Manifold Approximation and Projection
 ```{r}
 
@@ -941,6 +1068,24 @@ plt.umap_by_cluster <- plt.umap_by_cluster + theme_miko(legend = T)
 print(plt.umap_by_cluster)
 savePDF(file.name = paste0(output.path, "PDF/", "M27_UMAP.pdf"), plot.handle = plt.umap_by_cluster, 
         fig.width = 7, fig.height = 5, save.flag = save.pdf)
+
+```
+
+### Reprocessed UMAP (cluster)
+```{r}
+
+print(reprojected.umap.cluster)
+savePDF(file.name = paste0(output.path, "PDF/", "M27_reprocessed_UMAP_byCluster.pdf"), plot.handle = reprojected.umap.cluster, 
+        fig.width = 7, fig.height = 5, save.flag = save.pdf)
+
+```
+
+### Reprocessed UMAP (barcode)
+```{r}
+
+print(reprojected.umap.bc)
+savePDF(file.name = paste0(output.path, "PDF/", "M27_reprocessed_UMAP_byBC.pdf"), plot.handle = reprojected.umap.bc, 
+        fig.width = 8, fig.height = 5, save.flag = save.pdf)
 
 ```
 
