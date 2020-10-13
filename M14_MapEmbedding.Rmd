@@ -1,68 +1,71 @@
 ---
-title: "Module14_map_embeddings"
+title: "Map Embedding"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: fill
 editor_options: 
   chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = if (exists("user")){paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", format(Sys.Date(), "%d%m%y"), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
+    )
+  })
 ---
 
 
 ```{r load libraries, include=FALSE}
 
 # clear global enviroment
-rm(list = ls())
+rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
 
 # initiate timer
 start.time <- proc.time()
 
 # List of packages to load
-packages2load <- c("Seurat", "sctransform",
+packages2load <- c("Seurat", "sctransform", "scMiko", 
                    "plyr", "dplyr", "tidyr", "reshape2", "RColorBrewer", "ggplot2", "gridExtra", 
                    "DT", "flexdashboard", "ggpmisc", "ggExtra", "grid", "ggrepel", "ddpcr")
 
 # load packages
-lapply(packages2load, library, character.only = TRUE)
+invisible({lapply(packages2load, library, character.only = TRUE)})
 
 ```
-
-
-```{r check available input files}
-
-show.available.files <- FALSE
-if (show.available.files){
-  list.files("Preprocessed Datasets/")
-  }
-
-```
-
 
 ```{r parameter specification}
 
-input1 <- data.frame(name = "integrated_T12_4000ds_renca",
-                    file = "Module2_Renca_cell_nuc_sci_T12_4000ds_Celsius_integrated_240220.Rdata",
-                    cluster.resolution = 0.4,
-                    integrated.set = T, 
-                    subsample_factor = 0.2, 
+# TODO
+# subset specification not yet implemented (i.e., map.field, cluster.resolution, specific.clusters)
+
+# R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata
+input.ref <- data.frame(name = "neuroDif",
+                    file = "R173_M02_NM2_M02_neuroDif_sct_p1011_011020.Rdata",
+                    cluster.resolution = 1,
+                    map.field = "seurat_clusters",
+                    subsample_factor = 1, 
                     specific.clusters = NA) # e.g., I(list(c(4,5,6,7,8,14)))
 
-input2 <- data.frame(name = "nuc_t1",
-                    file = "Module1_renca_nuc_T1_040320.Rdata",
-                    integrated.set = F,
-                    subsample_factor = 0.2, 
-                    cluster.resolution = 0.4)
 
-# Module1_Neftel_ss2_GBM_160120.Rdata
-# Module1_Neftel_10x_160120.Rdata
-
-
-
-mapping.orientation <- "horizontal" #horizontal (recommended), vertical
-
-dir.preprocessed <- "Preprocessed Datasets/"
+input.query <- list(
+  CGR8 = data.frame(
+    file = "R71_M01_NM2_p10_CGR8_310820.Rdata",
+    map.field = "seurat_clusters",
+    cluster.resolution = 1),
+  DIV7 = data.frame(
+    file = "R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
+    map.field = "seurat_clusters",
+    cluster.resolution = 1
+  )
+)
 
 print.inline <- F
+save.pdf <- T
 
 
 ```
@@ -70,52 +73,12 @@ print.inline <- F
 ```{r analysis log}
 
 # Module
-df.log <- data.frame()
-df.log[nrow(df.log)+1, 1] <- as.character("Module")
-df.log[nrow(df.log), 2] <- as.character("")
-df.log[nrow(df.log), 3] <- as.character("14, map embedding")
-colnames(df.log) <- c("Description", "Variable Name", "Value")
-
-# User 
-df.log[nrow(df.log)+1, 1] <- as.character("User")
-df.log[nrow(df.log), 2] <- as.character("Sys.getenv('USERDOMAIN')")
-df.log[nrow(df.log), 3] <- as.character(Sys.getenv("USERDOMAIN"))
-
-# Date
-df.log[nrow(df.log)+1, 1] <- as.character("Date")
-df.log[nrow(df.log), 2] <- as.character("Sys.time()")
-df.log[nrow(df.log), 3] <- as.character(Sys.time())
-
-# label 1
-df.log[nrow(df.log)+1, 1] <- as.character("Input Label 1 (.Rdata)")
-df.log[nrow(df.log), 2] <- as.character("input1$name")
-df.log[nrow(df.log), 3] <- as.character(input1$name)
-
-# file 1
-df.log[nrow(df.log)+1, 1] <- as.character("Input File 1 (.Rdata)")
-df.log[nrow(df.log), 2] <- as.character("input1$file")
-df.log[nrow(df.log), 3] <- as.character(input1$file)
-
-# cluster resolution 1
-df.log[nrow(df.log)+1, 1] <- as.character("Cluster Resolution 1")
-df.log[nrow(df.log), 2] <- as.character("input1$cluster.resolution")
-df.log[nrow(df.log), 3] <- as.character(input1$cluster.resolution)
-
-# label 2
-df.log[nrow(df.log)+1, 1] <- as.character("Input Label 2 (.Rdata)")
-df.log[nrow(df.log), 2] <- as.character("input2$name")
-df.log[nrow(df.log), 3] <- as.character(input2$name)
-
-# file 2
-df.log[nrow(df.log)+1, 1] <- as.character("Input File 2 (.Rdata)")
-df.log[nrow(df.log), 2] <- as.character("input2$file")
-df.log[nrow(df.log), 3] <- as.character(input2$file)
-
-# cluster resolution 2
-df.log[nrow(df.log)+1, 1] <- as.character("Cluster Resolution 2")
-df.log[nrow(df.log), 2] <- as.character("input2$cluster.resolution")
-df.log[nrow(df.log), 3] <- as.character(input2$cluster.resolution)
-
+df.log <- initiateLog("14, map embedding")
+df.log <- addLogEntry("Reference set", (input.ref$name), df.log, as.character(""))
+df.log <- addLogEntry("Reference path", (input.ref$file), df.log, as.character(""))
+df.log <- addLogEntry("Query set(s)", paste(names(input.query), collapse = ", "), df.log, as.character(""))
+df.log <- addLogEntry("Print inline", print.inline, df.log, as.character("print.inline"))
+df.log <- addLogEntry("Save PDF(s)", save.pdf, df.log, as.character("save.pdf"))
 
 ```
 
@@ -127,289 +90,335 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 
 ```
 
-```{r import seurat objects}
+```{r import reference dataset}
 
+dir.preprocessed <- "Preprocessed_Datasets/"
 if (!exists("dir.preprocessed")) dir.preprocessed <- ""
 
-# import data1
-input.file1 <- paste(dir.preprocessed, input1$file, sep = "")
-load(input.file1)
 
-# subsample (for dev purposes)
-n.subset <- round(input1$subsample_factor *ncol(so))
-cell.ind <- sample(x = seq(1, ncol(so)), size = n.subset, replace = FALSE, prob = NULL)
-so <- SubsetData(so , cells = cell.ind)
+# UMAP coord/meta helper function ##############################################
 
-so1 <- so
-rm(so)
-
-# import data2
-input.file2 <- paste(dir.preprocessed, input2$file, sep = "")
-load(input.file2)
-
-# subsample (for dev purposes)
-n.subset <- round(input2$subsample_factor *ncol(so))
-cell.ind <- sample(x = seq(1, ncol(so)), size = n.subset, replace = FALSE, prob = NULL)
-so <- SubsetData(so , cells = cell.ind)
-
-so2 <- so
-rm(so)
-
-```
-
-
-```{r get cell barcodes and umap embeddings}
-
-# get cluster memberships
-current.assay1 <- DefaultAssay(so1)
-current.cluster1 <- paste(current.assay1, "_snn_res.", input1$cluster.resolution, sep = "")
-if (!(current.cluster1 %in% so1@meta.data)){
-  so1 <- FindClusters(object = so1, resolution = input1$cluster.resolution, verbose = 0, algorithm = 1, modularity.fxn = 1)
-}
-
-current.assay2 <- DefaultAssay(so2)
-current.cluster2 <- paste(current.assay2, "_snn_res.", input2$cluster.resolution, sep = "")
-if (!(current.cluster2 %in% so2@meta.data)){
-  so2 <- FindClusters(object = so2, resolution = input2$cluster.resolution, verbose = 0, algorithm = 1, modularity.fxn = 1)
-}
-
-# get umap embeddings
-df.embedding1 <- as.data.frame(so1@reductions[["umap"]]@cell.embeddings)
-colnames(df.embedding1) <- c("x1", "y1")
-df.embedding1$cell <- rownames(df.embedding1)
-df.embedding1$cluster1 <- so1@meta.data[[current.cluster1]]
-
-df.embedding2 <- as.data.frame(so2@reductions[["umap"]]@cell.embeddings)
-colnames(df.embedding2) <- c("x2", "y2")
-df.embedding2$cell <- rownames(df.embedding2)
-df.embedding2$cluster2 <- so2@meta.data[[current.cluster2]]
-
-
-# match names (partial match, set 1 to 2; revserse not reciprocated)
-c1 <- df.embedding1$cell
-c2 <- df.embedding2$cell
-
-for (i in 1:length(c1)){
-  try({
-    c2[which(grepl(c1[i], c2))] <- c1[i]
-  }, silent = T)
-}
-df.embedding2$cell <- c2
-
-
-```
-
-```{r}
-# get umap dimensions
-x1.min <- min(df.embedding1$x1)
-x1.max <- max(df.embedding1$x1)
-y1.min <- min(df.embedding1$y1)
-y1.max <- max(df.embedding1$y1)
-
-x2.min <- min(df.embedding2$x2)
-x2.max <- max(df.embedding2$x2)
-y2.min <- min(df.embedding2$y2)
-y2.max <- max(df.embedding2$y2)
-
-x.range <- c(min(c(x1.min, x2.min)), max(c(x1.max, x2.max)))
-y.range <- c(min(c(y1.min, y2.min)), max(c(y1.max, y2.max))) 
-
-x.span <- abs((x.range[1] - x.range[2]))
-y.span <- abs((y.range[1] - y.range[2]))
-
-if (mapping.orientation == "horizontal"){
-  df.embedding2$x2 <- df.embedding2$x2 + x.span
-} else if (mapping.orientation == "vertical"){
-  df.embedding2$y1 <- df.embedding2$y1 + y.span
-}
-
-df.embedding1.v2 <- df.embedding1
-df.embedding2.v2 <- df.embedding2
-colnames(df.embedding1.v2)[c(1,2, 4)] <- c("x", "y", "cluster")
-colnames(df.embedding2.v2)[c(1,2, 4)] <- c("x", "y", "cluster")
-
-df.embedding1.v2$embedding <- input1$name
-df.embedding2.v2$embedding <- input2$name
-
-integrated.1 <- input1$integrated.set 
-integrated.2 <- input2$integrated.set 
-
-
-df.embedding.v2 <- bind_rows(df.embedding1.v2, df.embedding2.v2)
-df.embedding.v1 <- join(df.embedding1, df.embedding2)
-
-
-df.embedding.v2$duplicate.set <- df.embedding.v2$cell %in% df.embedding.v1$cell
-
-```
-
-```{r,  fig.width=11, fig.height=5}
-# group.by = "seurat_cluster", 
-
-plt.umap_original <-  DimPlot(so1, reduction = "umap", label = TRUE, repel = TRUE)  + 
-  ggtitle(label = input1$name) + 
-  xlab("UMAP 1") + 
-  ylab("UMAP 2") + 
-  theme(legend.position = "none")
-
-plt.umap_new <-  DimPlot(so2, reduction = "umap", label = TRUE, repel = TRUE)  + 
-  ggtitle(label = input2$name) + 
-  xlab("UMAP 1") + 
-  ylab("") + 
-  theme(legend.position = "none")
-
-plt.umap.list <- list(original = plt.umap_original, new = plt.umap_new)
-
-if (print.inline)   print((CombinePlots(plt.umap.list, ncol = length(plt.umap.list), legend = 'none')))
-
-```
-
-
-```{r, fig.height= 5, fig.width= 10}
-
-plt.embedding <- ggplot(data = df.embedding.v2, aes(x = x, y = y)) + 
-  geom_point(aes(color = duplicate.set), size = 0.5) + 
-  geom_segment(aes(x = x1, y = y1, xend = x2, yend = y2), alpha = 0.01, data = df.embedding.v1) + 
-  theme(panel.grid = element_blank(),
-        axis.title = element_blank(),
-        axis.text = element_blank(),
-        axis.ticks = element_blank(),
-        panel.background = element_blank()) 
-
-if (print.inline) print(plt.embedding)
-
-
-```
-
-
-```{r}
-
-u.cluster1 <- as.numeric(as.vector(unique(df.embedding.v1$cluster1)))
-u.cluster1 <- u.cluster1[order(u.cluster1)]
-u.cluster2 <-  as.numeric(as.vector(unique(df.embedding.v1$cluster2)))
-u.cluster2 <- u.cluster2[order(u.cluster2)]
-
-
-if ("specific.clusters" %in% colnames(input1)){
-  if (!is.na(input1$specific.clusters)){
-    u.cluster1 <- as.numeric(as.vector(unlist(input1$specific.clusters)))
-    u.cluster1 <- u.cluster1[order(u.cluster1)]
+meta.data <- function(object){
+  md <- object@meta.data
+  md.umap <- data.frame(object@reductions[["umap"]]@cell.embeddings)
+  md$x <- md.umap$UMAP_1;
+  md$y <- md.umap$UMAP_2;
+  if ("orig_cellname" %in% colnames(md)){
+    md$cells <- md$orig_cellname
+  } else {
+    md$cells <- rownames(md)
   }
+  return(md)
 }
 
-plt.embedding_by_cluster.list <- list()
-df.embedding_by_cluster <- NULL
-for (i in 1:length(u.cluster1)){
-  
-  cur.cluster <- as.character(u.cluster1[i])
-  
-  df.embedding.v1$highlight.cluster <- df.embedding.v1$cluster1 %in% cur.cluster
+# reference dataset ############################################################
+# import reference data
+input.path <- paste(data.path, dir.preprocessed, input.ref$file, sep = "")
+load(input.path)
 
-  df.embedding.v1$highlight.color <- "black"
-  df.embedding.v1$highlight.alpha <- 0.005
-  df.embedding.v1$highlight.color[df.embedding.v1$highlight.cluster] <- "red"
-  df.embedding.v1$highlight.alpha[df.embedding.v1$highlight.cluster] <- 0.05
+# get relevant meta.data
+so.ref <- meta.data(so)
+
+# filter based on unique barcodes
+if ("orig_cellname" %in% colnames(so.ref)){
+  which.cells.table <- data.frame(table(so.ref$orig_cellname))
+  which.cells <- as.character(which.cells.table$Var1[which.cells.table$Freq==1])
+  which.cells <- rownames(so.ref)[so.ref$orig_cellname %in% which.cells]
+} else {
+  which.cells.table <- data.frame(table(rownames(so.ref)))
+  which.cells <- as.character(which.cells.table$Var1[which.cells.table$Freq==1])
+}
+
+# remove duplicate barcodes
+so <- subset(so , cells = which.cells)
+
+# subsample
+n.subset <- round(input.ref$subsample_factor *ncol(so))
+cell.ind <- sample(x = colnames(so), size = n.subset, replace = FALSE, prob = NULL)
+so <- subset(so , cells = cell.ind)
+
+# get relevant meta.data
+so.ref <- meta.data(so)
+
+if ("orig_cellname" %in% colnames(so.ref)){
+  which.cells.table <- data.frame(table(so.ref$orig_cellname))
+  which.cells <- as.character(which.cells.table$Var1[which.cells.table$Freq==1])
+  so.ref$cells <- so.ref$orig_cellname
+} else {
+  which.cells.table <- data.frame(table(rownames(so.ref)))
+  which.cells <- as.character(which.cells.table$Var1[which.cells.table$Freq==1])
+  so.ref$cells <- rownames(so.ref)
+}
+
+rm(so); invisible({gc()});
+
+
+
+```
+
+
+```{r import query datasets}
+
+
+# query datasets ###############################################################
+library(doParallel)
+library(foreach)
+
+so.list <- list()
+
+n.import <- 4
+if (length(input.query) < n.import) n.import <- length(input.query)
+
+cl <- parallel::makeCluster(n.import)
+doParallel::registerDoParallel(cl)
+
+so.list <- foreach(i = 1:length(input.query), .packages = c("dplyr", "Seurat"))  %dopar% {
   
-  df.embedding.v2$highlight.cluster <- df.embedding.v2$cell %in% df.embedding.v1$cell[df.embedding.v1$highlight.cluster]
-  df.embedding.v2$highlight.color[df.embedding.v2$embedding == input1$name] <- "grey0"
-  df.embedding.v2$highlight.color[df.embedding.v2$embedding == input2$name] <- "grey18"
-  df.embedding.v2$highlight.color[df.embedding.v2$highlight.cluster] <- "red"
+  # import data
+  input.name <- names(input.query)[i]
+  input.current <- input.query[[i]]
+  input.path <- paste(data.path, dir.preprocessed, input.current$file, sep = "")
+  load(input.path)
   
-  plt.embedding_by_cluster.list[[cur.cluster]] <- ggplot(data = df.embedding.v2, aes(x = x, y = y)) + 
-  geom_point(color = df.embedding.v2$highlight.color, size = 0.5) + 
-  geom_segment(aes(x = x1, y = y1, xend = x2, yend = y2), 
-               color = df.embedding.v1$highlight.color, alpha = df.embedding.v1$highlight.alpha, data = df.embedding.v1) + 
+  cells.current <- colnames(so)[colnames(so) %in% which.cells]
+  
+  so <- subset(so , cells = cells.current)
+  # so.list[[input.name]] <- meta.data(so)
+  
+  return(meta.data(so))
+  # rm(so); invisible({gc()})
+  
+  
+}
+
+stopCluster(cl)
+names(so.list) <- names(input.query)
+invisible({gc()})
+
+```
+
+```{r specify umap ranges}
+
+ref.range <- c(0,1)
+# get umap embeddings
+df.embedding <- data.frame(x0 = so.ref$x, y0 = so.ref$y)
+df.embedding$x0 <- rescaleValues(df.embedding$x0, new.min = ref.range[1], new.max = ref.range[2])
+df.embedding$y0 <- rescaleValues(df.embedding$y0, new.min = ref.range[1], new.max = ref.range[2])
+df.embedding$cell <- so.ref$cells
+df.embedding$group.ref <- so.ref[ ,input.ref$map.field]
+
+query.range <- c(0.1, 0.9)
+df.emb.query <- NULL
+for (i in 1:length(so.list)){
+df.embedding.current <- data.frame(x = so.list[[i]]$x, y = so.list[[i]]$y)
+df.embedding.current$x <- rescaleValues(df.embedding.current$x, new.min = query.range[1], new.max = query.range[2])
+df.embedding.current$y <- rescaleValues(df.embedding.current$y, new.min = query.range[1], new.max = query.range[2])
+
+df.embedding.current$cell <- so.list[[i]]$cells
+df.embedding.current$group.ref <- so.list[[i]][ ,input.ref$map.field]  
+df.embedding.current$name <- names(so.list)[i]
+df.emb.query <- bind_rows(df.emb.query, df.embedding.current)
+}
+
+```
+
+```{r assemble umap}
+# assemble umap on common coordinate system
+n.sets <- length(so.list)
+
+window.span <- 1.25
+
+fig.width.height <- c(10,5)
+
+if (n.sets == 1){
+  df.emb.query$x <- df.emb.query$x - window.span
+  fig.width.height <- c(10,5)
+} else if (n.sets == 2){
+  g1 <- df.emb.query %>% dplyr::filter(name == names(so.list)[1]) %>% mutate(x = x-window.span)
+  g2 <- df.emb.query %>% dplyr::filter(name == names(so.list)[2]) %>% mutate(x = x+window.span)
+  df.emb.query <- bind_rows(g1, g2)
+  fig.width.height <- c(15,5)
+} else if (n.sets == 3){
+  g1 <- df.emb.query %>% dplyr::filter(name == names(so.list)[1]) %>% mutate(x = x-window.span)
+  g2 <- df.emb.query %>% dplyr::filter(name == names(so.list)[2]) %>% mutate(x = x+window.span)
+  g3 <- df.emb.query %>% dplyr::filter(name == names(so.list)[3]) %>% mutate(y = y-window.span)
+  df.emb.query <- bind_rows(g1, g2, g3)
+  fig.width.height <- c(15,10)
+} else if (n.sets == 4){
+  g1 <- df.emb.query %>% dplyr::filter(name == names(so.list)[1]) %>% mutate(x = x-window.span)
+  g2 <- df.emb.query %>% dplyr::filter(name == names(so.list)[2]) %>% mutate(x = x+window.span)
+  g3 <- df.emb.query %>% dplyr::filter(name == names(so.list)[3]) %>% mutate(y = y-window.span)
+  g4 <- df.emb.query %>% dplyr::filter(name == names(so.list)[4]) %>% mutate(y = y+window.span)
+  df.emb.query <- bind_rows(g1, g2, g3, g4)
+  fig.width.height <- c(15,15)
+} else if (n.sets == 5){
+  g1 <- df.emb.query %>% dplyr::filter(name == names(so.list)[1]) %>% mutate(x = x-window.span)
+  g2 <- df.emb.query %>% dplyr::filter(name == names(so.list)[2]) %>% mutate(x = x+window.span)
+  g3 <- df.emb.query %>% dplyr::filter(name == names(so.list)[3]) %>% mutate(y = y-window.span)
+  g4 <- df.emb.query %>% dplyr::filter(name == names(so.list)[4]) %>% mutate(y = y+window.span)
+  g5 <- df.emb.query %>% dplyr::filter(name == names(so.list)[5]) %>% mutate(y = y+window.span, x = x-window.span)
+  df.emb.query <- bind_rows(g1, g2, g3, g4, g5)
+  fig.width.height <- c(15,15)
+} else if (n.sets == 6){
+  g1 <- df.emb.query %>% dplyr::filter(name == names(so.list)[1]) %>% mutate(x = x-window.span)
+  g2 <- df.emb.query %>% dplyr::filter(name == names(so.list)[2]) %>% mutate(x = x+window.span)
+  g3 <- df.emb.query %>% dplyr::filter(name == names(so.list)[3]) %>% mutate(y = y-window.span)
+  g4 <- df.emb.query %>% dplyr::filter(name == names(so.list)[4]) %>% mutate(y = y+window.span)
+  g5 <- df.emb.query %>% dplyr::filter(name == names(so.list)[5]) %>% mutate(y = y+window.span, x = x-window.span)
+  g6 <- df.emb.query %>% dplyr::filter(name == names(so.list)[6]) %>% mutate(y = y+window.span, x = x+window.span)
+  df.emb.query <- bind_rows(g1, g2, g3, g4, g5, g6)
+  fig.width.height <- c(15,15)
+} else if (n.sets == 7){
+  g1 <- df.emb.query %>% dplyr::filter(name == names(so.list)[1]) %>% mutate(x = x-window.span)
+  g2 <- df.emb.query %>% dplyr::filter(name == names(so.list)[2]) %>% mutate(x = x+window.span)
+  g3 <- df.emb.query %>% dplyr::filter(name == names(so.list)[3]) %>% mutate(y = y-window.span)
+  g4 <- df.emb.query %>% dplyr::filter(name == names(so.list)[4]) %>% mutate(y = y+window.span)
+  g5 <- df.emb.query %>% dplyr::filter(name == names(so.list)[5]) %>% mutate(y = y+window.span, x = x-window.span)
+  g6 <- df.emb.query %>% dplyr::filter(name == names(so.list)[6]) %>% mutate(y = y+window.span, x = x+window.span)
+  g7 <- df.emb.query %>% dplyr::filter(name == names(so.list)[7]) %>% mutate(y = y-window.span, x = x-window.span)
+  df.emb.query <- bind_rows(g1, g2, g3, g4, g5, g6, g7)
+  fig.width.height <- c(15,15)
+} else if (n.sets == 8){
+  g1 <- df.emb.query %>% dplyr::filter(name == names(so.list)[1]) %>% mutate(x = x-window.span)
+  g2 <- df.emb.query %>% dplyr::filter(name == names(so.list)[2]) %>% mutate(x = x+window.span)
+  g3 <- df.emb.query %>% dplyr::filter(name == names(so.list)[3]) %>% mutate(y = y-window.span)
+  g4 <- df.emb.query %>% dplyr::filter(name == names(so.list)[4]) %>% mutate(y = y+window.span)
+  g5 <- df.emb.query %>% dplyr::filter(name == names(so.list)[5]) %>% mutate(y = y+window.span, x = x-window.span)
+  g6 <- df.emb.query %>% dplyr::filter(name == names(so.list)[6]) %>% mutate(y = y+window.span, x = x+window.span)
+  g7 <- df.emb.query %>% dplyr::filter(name == names(so.list)[7]) %>% mutate(y = y-window.span, x = x-window.span)
+  g8 <- df.emb.query %>% dplyr::filter(name == names(so.list)[7]) %>% mutate(y = y-window.span, x = x+window.span)
+  df.emb.query <- bind_rows(g1, g2, g3, g4, g5, g6, g7, g8)
+  fig.width.height <- c(15,15)
+}
+
+# combine datasets
+df.emb.ref <- data.frame(x = df.embedding$x0, y = df.embedding$y0, 
+                         cell = df.embedding$cell, group.ref = df.embedding$group.ref, 
+                         name = "reference")
+df.integrated.point <- bind_rows(df.emb.ref, df.emb.query)
+df.integrated.seg <- merge(df.embedding, df.emb.query, by = "cell")
+
+
+c2g.map <- df.integrated.seg$name
+names(c2g.map) <- df.integrated.seg$cell
+df.integrated.point$group <- c2g.map[df.integrated.point$cell]
+df.integrated.point <- df.integrated.point[complete.cases(df.integrated.point), ]
+
+```
+
+```{r, fig.height= 5, fig.width= 15}
+
+subsample.seg <- 0.25
+df.integrated.seg.sub <- df.integrated.seg[sample(1:nrow(df.integrated.seg), subsample.seg*nrow(df.integrated.seg)), ]
+
+plt.embedding_0_1 <- ggplot() + 
+  geom_point(data = df.integrated.point, aes(x = x, y = y, color = group), size = 0.5) + 
+  geom_segment(aes(x = x0, y = y0, xend = x, yend = y, color = name), alpha = 0.01, data = df.integrated.seg.sub) + 
   theme(panel.grid = element_blank(),
         axis.title = element_blank(),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
         panel.background = element_blank()) + 
-    ggtitle(paste("Cluster ", cur.cluster, sep  =""))
+  ggthemes::scale_color_ptol()
 
-  if (print.inline) print(plt.embedding_by_cluster.list[[cur.cluster]])
-  
+plt.embedding_0_5 <- ggplot() + 
+  geom_point(data = df.integrated.point, aes(x = x, y = y, color = group), size = 0.5) + 
+  geom_segment(aes(x = x0, y = y0, xend = x, yend = y, color = name), 
+               alpha = 0.02, data = df.integrated.seg.sub) + 
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank()) + 
+  ggthemes::scale_color_ptol()
+
+plt.embedding_1 <- ggplot() + 
+  geom_point(data = df.integrated.point, aes(x = x, y = y, color = group), size = 0.5) + 
+  geom_segment(aes(x = x0, y = y0, xend = x, yend = y, color = name), alpha = 0.1, 
+               data = df.integrated.seg.sub[sample(1:nrow(df.integrated.seg.sub), 0.1*nrow(df.integrated.seg.sub)), ]) + 
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank()) + 
+  ggthemes::scale_color_ptol()
+
+if (print.inline) print(plt.embedding_0_1)
+
+# plt.embedding
+# plt.embedding_0_5
+
+```
+
+```{r central log}
+
+# update central log
+run.id <- NULL
+if (!exists("user")) user <- "guest"
+
+clog.update.success <- F
+try({
+  run.id <-  updateCentralLog(Module = "M14", input.data = input.ref$file, input.subset = NA, pdf.flag = save.pdf)
+  clog.update.success <-  T
+}, silent = F)
+if (is.null(run.id))  {
+  warning("Central log update was unsuccessful :(\n")
+  run.id <- paste("M14_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
 }
 
 ```
 
-```{r table}
+```{r setup output directories}
 
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
 
-df.embedding.v1$cluster1 <- as.numeric(as.vector(df.embedding.v1$cluster1))
-df.embedding.v1$cluster2 <- as.numeric(as.vector(df.embedding.v1$cluster2))
-
-df.cluster_tally <- df.embedding.v1 %>%
-  group_by(cluster1, cluster2) %>%
-  tally(cluster2) %>%
-  group_by(cluster1) %>%
-  mutate(freq = signif(n/sum(n), 3))
-
-# df.cluster_tally.subset <- df.cluster_tally %>% dplyr::select(c("cluster1", "cluster2", "freq"))
-# colnames(df.cluster_tally) <- c("original cluster", "new cluster", "count", "frequency")
-
-df.cluster_tally$cluster1 <- as.character(df.cluster_tally$cluster1) 
-df.cluster_tally$cluster2 <- as.character(df.cluster_tally$cluster2) 
-
-colnames(df.cluster_tally) <- c("original cluster", "new cluster", "count", "frequency")
+# create output directories
+dir.create(output.path)
+dir.create(paste0(output.path, "Tables/"))
+if (save.pdf) dir.create(paste0(output.path, "PDF/"))
 
 ```
 
-
-
-
-Clusters
+UMAP Remapping (a=0.01)
 ===================================== 
 
-```{r plt.umap.list, fig.width=11, fig.height=5}
-print((CombinePlots(plt.umap.list, ncol = length(plt.umap.list), legend = 'none')))
+```{r plt.embedding 01, fig.height= 5, fig.width= 15}
+print(plt.embedding_0_1)
 ```
 
-
-UMAP Remapping
+UMAP Remapping (a=0.05)
 ===================================== 
 
-```{r plt.embedding, fig.height= 5, fig.width= 10}
-print(plt.embedding)
+```{r plt.embedding 05, fig.height= 5, fig.width= 15}
+print(plt.embedding_0_5)
 ```
 
-
-
-Cluster-Specific Remapping (1)
+UMAP Remapping (a=0.1)
 ===================================== 
 
-### Remapping Table
-```{r tbl.embedding, fig.height= 5, fig.width= 10}
-
-datatable(df.cluster_tally, rownames = F, filter = 'top', options = list(
- columnDefs = list(list(className = 'dt-center', targets = 0:(ncol(df.cluster_tally)-1)))))
-
-
+```{r plt.embedding 1, fig.height= 5, fig.width= 15}
+print(plt.embedding_1)
 ```
 
-Cluster-Specific Remapping (2)
-===================================== 
+```{r save pdfs}
 
-
-Row {.tabset}
--------------------------------------
-
-```{r res2, echo = FALSE, eval = TRUE}
-
-out <- lapply(seq_along(plt.embedding_by_cluster.list), function(i) {
-
-  a1 <- knitr::knit_expand(text = sprintf("### %s\n", names(plt.embedding_by_cluster.list)[i])) # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.height= 5, fig.width= 10}", paste(i, "umap"))) # start r chunk
-  a3 <- knitr::knit_expand(text = sprintf("\nprint(plt.embedding_by_cluster.list[[%d]])", i)) 
-  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-
-  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
-
-})
-
+try({
+  savePDF(file.name = paste0(output.path, "PDF/", "M14_map_embedding_alpha0_01.pdf"), 
+          plot.handle = (plt.embedding_0_1), 
+          fig.width = fig.width.height[1], fig.height = fig.width.height[2], save.flag = save.pdf)
+  
+  savePDF(file.name = paste0(output.path, "PDF/", "M14_map_embedding_alpha0_05.pdf"), 
+          plot.handle = (plt.embedding_0_5), 
+          fig.width = fig.width.height[1], fig.height = fig.width.height[2], save.flag = save.pdf)
+  
+  savePDF(file.name = paste0(output.path, "PDF/", "M14_map_embedding_alpha0_1.pdf"), 
+          plot.handle = (plt.embedding_1), 
+          fig.width = fig.width.height[1], fig.height = fig.width.height[2], save.flag = save.pdf)
+}, silent = T)
 
 ```
-
-`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
 
 
@@ -434,19 +443,24 @@ out1 <- lapply(seq_along(module.logs), function(i) {
 
 `r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
 
+
+
 Log (Module 14)
 ===================================== 
 
 ```{r table.log_current}
 
-# Run time
+# run time
 end.time <- proc.time()
 elapsed.time <- round((end.time - start.time)[[3]], 2)
-df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
-df.log[nrow(df.log), 2] <- as.character("elapsed.time")
-df.log[nrow(df.log), 3] <- as.character(elapsed.time)
+df.log <- addLogEntry("Run Time (s)", (elapsed.time), df.log, "elapsed.time")
+
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
 
 df.log_Module_14 <- df.log
+
 
 knitr::kable(df.log_Module_14)
 
