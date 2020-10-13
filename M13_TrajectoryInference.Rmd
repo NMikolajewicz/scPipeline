@@ -53,14 +53,23 @@ dir.preprocessed <- "Preprocessed_Datasets/"
 # Query input
 # input.file <- "Module16_pilot4_G261_CT2A_tumorOnly_180120.Rdata"
 # input.file <- "R152_M27_NM2_M02_neuroDif_p41011_0_1ds_230920.Rdata"
-input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file <- "R154_M27_NM2_M02_neuroDif_p41011_neuralReprojection_260920.Rdata"
+# input.file <- "R155_M27_NM2_M02_neuroDif_p41011_neuralReprojection_short_260920.Rdata"
+# input.file <- "R155_M27_NM2_M02_neuroDif_p41011_neuralReprojection_short_260920.Rdata"
+# input.file <- "R154_M27_NM2_M02_neuroDif_p41011_neuralReprojection_260920.Rdata"
+# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
 # input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
 
+do.reprojection <- T
+
 # Data subsampling
-subsample_factor <- 0.1 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify cluster resolution
-cluster.resolution <- 1
+cluster.resolution <- 0.5
 
 # print inline
 print.inline <-F
@@ -75,19 +84,23 @@ n.hvg <- 500
 # N genes for time Varying Analysus (only used if less than n.hvg)
 n.top.genes.timeVaryingAnalysis <- n.hvg
 
+# subset data
+# subset.df <- NA
+subset.df <- data.frame(field = "Barcode", subgroups = c("WT"))
+
 
 # filtering parameters ############################################
 # cluster ids to include/omit
 filter.parameters <- list(
   include = NULL,
-  omit = NULL    # e.g., c(19, 2)
+  omit = c(9,12)    # e.g., c(19, 2) c(6,8,13) c(8,10)
 )
 
 # SLINGSHOT PARAMETERS #####################################
 slingshot.parameters <- list(
   
   # cluster id (ensure it coincided with correct cluster.resolution). Set to NULL if unspecified. 
-  start.cluster = NULL,                
+  start.cluster = 4,               
   end.cluster = NULL,
   
   # Which reduction to use for sling shot (multiple can be chosen as character vector
@@ -104,13 +117,13 @@ slingshot.parameters <- list(
 
 
 # Mesoderm
-scPedigree.parameters <- list(
-  do.scPedigree = F,
-  source = c(0,3),           # cluster ids ordered by pseudotime trajectory. upstream trajectory for all branches
-  branch = list(                 # cluster ids ordered by pseudotime trajectores, lineage specific trajectories.
-    branch.1 = c(1),
-    branch.2 = c(7,2,6)
-  )
+# scPedigree.parameters <- list(
+#   do.scPedigree = F,
+#   source = c(0,3),           # cluster ids ordered by pseudotime trajectory. upstream trajectory for all branches
+#   branch = list(                 # cluster ids ordered by pseudotime trajectores, lineage specific trajectories.
+#     branch.1 = c(1),
+#     branch.2 = c(7,2,6)
+#   )
   # twig = list(
   #   twig.1 = c(5, 0, 4),
   #   twig.2 = c(4,3),
@@ -118,17 +131,52 @@ scPedigree.parameters <- list(
   #   twig.4 = c(3, 1),
   #   twig.5 = c(3, 2,6)
   # )
-)
+# )
 
+# neuro res 1
 # scPedigree.parameters <- list(
-#   twig = list(
-#     twig.1 = c(5, 0, 4),
-#     twig.2 = c(4,3),
-#     twig.3 = c(0,3),
-#     twig.4 = c(3, 1),
-#     twig.5 = c(3, 2,6)
+#   do.scPedigree = T,
+#   source = c(1),
+#   branch = list(
+#     branch.1 = c(2,4,19),
+#     branch.2 = c(2,4,22),
+#     branch.3 = c(2,12,28, 10, 29, 18),
+#     branch.4 = c(3,10, 29, 18, 13, 16)
 #   )
 # )
+
+# neuro res 0.1
+# scPedigree.parameters <- list(
+#   do.scPedigree = T,
+#   source = c(0),
+#   branch = list(
+#     branch.2 = c(1, 6),
+#     branch.3 = c(1, 5),
+#     branch.5 = c(3,2,7,4)
+#   )
+# )
+
+# neuro res 0.3
+scPedigree.parameters <- list(
+  do.scPedigree = F,
+  source = c(0),
+  branch = list(
+    branch.1 = c(7),
+    branch.2 = c(4),
+    branch.3 = c(1, 11, 9),
+    branch.4 = c(1, 12),
+    branch.5 = c(15),
+    branch.6 = c(2,8),
+    branch.7 = c(2,3),
+    branch.8 = c(2,6,5)
+  ),
+  twig = list(
+    twig.1 = c(3,13,5),
+    twig.2 = c(10,5),
+    twig.3 = c(3,6,12),
+    twig.4 = c(3,8)
+  )
+)
 
 
 # TEMPORA PARAMETERS ####################################
@@ -144,8 +192,8 @@ tempora.timepoints <- list(
 
 # ENSEMBLE Parameters
 ensemble.parameters <- list(
-  root.cluster.ensemble = "c1",
-  tolerance.threshold = 0 # lineage extension, tolerance threshold (recommended range: 0 [stringent] to 0.15 [lenient])
+  root.cluster.ensemble = 4,   # set to NA if unspecified
+  tolerance.threshold = 0.15 # lineage extension, tolerance threshold (recommended range: 0 [stringent] to 0.15 [lenient])
 )
 
 
@@ -165,7 +213,7 @@ n.workers <- list(
   time.varying.genes = 16,
   random.forest = 16,
   cor.rank = 16, 
-  GO.enrich = 16
+  GO.enrich = 12
 )
 
 
@@ -194,8 +242,8 @@ if (!(exists("subset.df"))) subset.df <- "no.subset"
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
                          species = which.species, resolution= cluster.resolution, subset = subset.df, 
                          subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
-                         terms2drop = c("ica", "tsne", "nmf", "gsva", "deg"), rmv.pattern = "so", 
-                         scale.reprocessed = T, neighbors.reprocessed = F, keep.default.assay.only = T)
+                         terms2drop = c("ica", "tsne", "nmf", "gsva", "deg"), rmv.pattern = NA, 
+                         scale.reprocessed = T, neighbors.reprocessed = T, keep.default.assay.only = F)
 
 # unpack results
 if (exists("so")) try({rm(so)}, silent = T)
@@ -212,9 +260,26 @@ so.query@meta.data[["seurat_clusters"]] <- factor(so.query@meta.data[["seurat_cl
                                                   levels = u.clust.meta[order(u.clust.meta)])
 Idents(so.query) <- so.query@meta.data[["seurat_clusters"]]
 
+
+# cluster.UMAP(so.query)
 ```
 
 
+```{r}
+
+# expression matrix
+# gc()
+# e.mat <- aggGroupExpression(so.query, which.center = "fraction", do.parallel = F)
+# 
+# cluster.order <- colnames(e.mat)[2:ncol(e.mat)]
+# 
+# cluster.order <- as.numeric(as.character(gsub("c", "", cluster.order)))
+# 
+# e.mat.2 <- signif(e.mat[ ,colnames(e.mat)[2:ncol(e.mat)][order(cluster.order)]], 3)
+# rownames(e.mat.2) <- e.mat$genes
+# 
+# flex.asDT(e.mat.2)
+```
 
 
 
@@ -289,18 +354,376 @@ if (exists("filter.parameters")){
 }
 
 ```
+```{r reproject neural, warning=FALSE, message=FALSE}
+
+# if (do.reprojection){
+#   
+# 
+# # get neural dif markers
+# marker.path <- paste0(data.path, "Reference_Datasets/VALID_NeuralDifferentiation_HH_Mm_040220_SYMBOLS.csv")
+# df.markers <- read.csv(marker.path)
+# 
+# df.markers.long <- pivot_longer(df.markers, colnames(df.markers))
+# df.markers.long <- df.markers.long[complete.cases(df.markers.long), ]
+# 
+# dif.genes <- df.markers.long$value
+# dif.genes <- unique(dif.genes[dif.genes != ""])
+# 
+# if (which.species == "Mm"){
+#   dif.genes <- firstup(dif.genes)
+# } else  if (which.species == "Hs"){
+#   dif.genes <- toupper(dif.genes)
+# }
+# 
+# # rerun so processing with subset of genes
+# 
+# so.neural <- subset(so.query, features = dif.genes)
+# so.neural <-NormalizeData(so.neural, verbose = FALSE)
+# so.neural <- ScaleData(so.neural, verbose = FALSE, features = rownames(so.neural))
+# so.neural <- FindVariableFeatures(so.neural, selection.method = "vst", nfeatures = 3000)
+# so.neural <- RunPCA(so.neural)
+# 
+# 
+# so.neural <- FindNeighbors(so.neural)
+# so.neural <- FindClusters(so.neural)
+# 
+# so.neural <- RunUMAP(so.neural, dims = 1:30)
+# 
+# # assign reprojected dimnesional reductions to original object 
+# so.query@reductions[["umap"]] <- so.neural@reductions[["umap"]]
+# so.query@reductions[["pca"]] <- so.neural@reductions[["pca"]]
+# so.query@meta.data[["seurat_clusters"]] <- so.neural@meta.data[["seurat_clusters"]]
+# so.query@active.ident <- so.neural@active.ident
+# 
+# cluster.UMAP(so.query)
+# 
+# 
+# }
+
+```
+
+
+
+
+```{r cluster data}
+
+# cluster_resolution <- c(0.01, 0.05,  0.1, 0.15,  0.2, 0.3, 0.4, 0.5)
+# 
+# # initiate list to store cluster plots
+# plt.umap_by_cluster <- list()
+# cluster.name <- c()
+# 
+# # get cluster identify pattern
+# assay.names <- names(so.query@assays)
+# assay.holder <- DefaultAssay(so.query)
+# if ("integrated" %in% assay.names){
+#   DefaultAssay(so.query) <- "integrated"
+# } 
+# current.assay <- DefaultAssay(so.query)
+# assay.pattern <- paste0(current.assay, "_snn_res.")
+# 
+# n.workers$clustering <- 16
+# # start cluster
+# if (n.workers$clustering > length(cluster_resolution)) n.workers$clustering <-length(cluster_resolution)
+# cl <- parallel::makeCluster(n.workers$clustering)
+# doParallel::registerDoParallel(cl)
+
+# ensure neighbors computed
+# if (length(so.query@graphs) == 0){
+# pca.prop <- propVarPCA(so.query)
+# target.pc <- max(pca.prop$pc.id[pca.prop$pc.cum_sum<0.9])+1
+# so.query <- FindNeighbors(so.query, verbose = F, reduction = "pca", dims = 1:target.pc)
+# so.query@graphs <- NULL
+# so.query <- FindNeighbors(so.query, verbose = F, reduction = "pca", dims = NULL,  assay = DefaultAssay(so.query))
+# so.query <- FindClusters(object = so.query, resolution = 1, verbose = 0, algorithm = 1, modularity.fxn = 1)
+# }
+   
+   # so2 <- so.query
+   # so2@commands[["NormalizeData.RNA"]] <- NULL
+   # so2@commands[["ScaleData.RNA"]] <- NULL
+   # so2@commands[["FindVariableFeatures.RNA"]] <- NULL
+   # so2 <- FindClusters(object = so2, resolution = 1, verbose = 0, algorithm = 1, modularity.fxn = 1)
+
+# iterate through each input file
+# cluster.membership <- foreach(i = 1:length(cluster_resolution), .packages = c("Seurat"))  %dopar% {
+#   so.query <- FindClusters(object = so.query, resolution = cluster_resolution[i], verbose = 0, algorithm = 1, modularity.fxn = 1)
+#   return(so.query@meta.data[[paste0(assay.pattern, cluster_resolution[i])]])
+# }
+# 
+# # stop workers
+# parallel::stopCluster(cl); invisible({gc()})
+# 
+# 
+# # retrieve data
+# for (i in 1:length(cluster_resolution)) {
+#   
+#   # get cluster name
+#   current.cluster <- paste0(assay.pattern, cluster_resolution[i])
+#   so.query@meta.data[[current.cluster]] <- cluster.membership[[i]]
+#   cluster.name[i] <- paste(DefaultAssay(so.query),"_snn_res.", cluster_resolution[i], sep = "")
+# 
+#   # enforce correct cluster order
+#   ordered.clusters <- getOrderedGroups(so.query, which.group = cluster.name[i], is.number = T)
+#   so.query@meta.data[[cluster.name[i]]] <- factor(so.query@meta.data[[cluster.name[i]]], levels = ordered.clusters)
+#   
+#   # generate plot
+#   plt.umap_by_cluster[[i]] <- cluster.UMAP( so.query, group.by = cluster.name[i],
+#   x.label = "UMAP 1", y.label = "UMAP 2", plot.name = "UMAP", include.labels = T, reduction = "umap") + theme_miko(legend = T) + 
+#   labs(title = "UMAP", subtitle = paste("Resolution: ", cluster_resolution[i], sep = ""))
+#   
+#   if (print.inline){
+#     print(plt.umap_by_cluster[[i]])
+#   }
+# }
+# 
+# # clean baggage
+# # rm(cluster.membership)
+# 
+# 
+# # generate additional UMAPs....
+# auxillary.groups <- c()
+# if ("Barcode" %in% names(so.query@meta.data)){
+#   plt.umap_by_barcode <- cluster.UMAP( so.query, group.by = "Barcode",
+#   x.label = "UMAP 1", y.label = "UMAP 2", plot.name = "UMAP", include.labels = F, reduction = "umap") + theme_miko(legend = T) + 
+#   labs(title = "UMAP", subtitle = "Barcodes")
+# plt.umap_by_cluster[[length(plt.umap_by_cluster)+1]] <- plt.umap_by_barcode
+# auxillary.groups <- c(auxillary.groups, "Barcodes")
+# }
+# 
+# if ("group" %in% names(so.query@meta.data)){
+#   plt.umap_by_group <- cluster.UMAP( so.query, group.by = "group",
+#   x.label = "UMAP 1", y.label = "UMAP 2", plot.name = "UMAP", include.labels = F, reduction = "umap") + theme_miko(legend = T) + 
+#   labs(title = "UMAP", subtitle = "group")
+# plt.umap_by_cluster[[length(plt.umap_by_cluster)+1]] <- plt.umap_by_group
+# auxillary.groups <- c(auxillary.groups, "group")
+# }
+# 
+# if ("dataset" %in% names(so.query@meta.data)){
+#   plt.umap_by_dataset <- cluster.UMAP( so.query, group.by = "dataset",
+#   x.label = "UMAP 1", y.label = "UMAP 2", plot.name = "UMAP", include.labels = F, reduction = "umap") + theme_miko(legend = T) + 
+#   labs(title = "UMAP", subtitle = "dataset")
+# plt.umap_by_cluster[[length(plt.umap_by_cluster)+1]] <- plt.umap_by_dataset
+# auxillary.groups <- c(auxillary.groups, "dataset")
+# }
+# 
+# if ("subset_group" %in% names(so.query@meta.data)){
+#   plt.umap_by_subset <- cluster.UMAP( so.query, group.by = "subset_group",
+#   x.label = "UMAP 1", y.label = "UMAP 2", plot.name = "UMAP", include.labels = F, reduction = "umap") + theme_miko(legend = T) + 
+#   labs(title = "UMAP", subtitle = "subset_group")
+# plt.umap_by_cluster[[length(plt.umap_by_cluster)+1]] <- plt.umap_by_subset
+# auxillary.groups <- c(auxillary.groups, "subset_group")
+# }
+
+# DefaultAssay(so.query) <- assay.holder
+# cr_names <- c(cluster_resolution, auxillary.groups)
+
+# so.sub <- scMiko::subsetSeurat(so.query,subset.df)
+# subset.df
+
+# plt.umap_by_cluster
+```
+```{r}
+
+# cluster tree
+# library(ips)
+# so.query <- FindClusters(object = so.query, resolution = max(cluster_resolution), verbose = 0, algorithm = 1, modularity.fxn = 1)
+# so.query <- BuildClusterTree(object = so.query)
+# PlotClusterTree(object = so.query)
+# 
+# so.phylo <- so.query@tools[["BuildClusterTree"]]
+# so.mst <- phylo2mst(so.phylo)
+# plot(so.mst)
+# 
+# 
+# cluster.UMAP( so.query, group.by = "seurat_clusters",
+#   x.label = "UMAP 1", y.label = "UMAP 2", plot.name = "UMAP", include.labels = T, reduction = "umap") + theme_miko(legend = T) + 
+#   labs(title = "UMAP", subtitle = "seurat_clusters")
+
+```
+
+
+
+```{r}
+# 
+# df.all.centers <- NULL
+# a.mat <- NULL
+# 
+# 
+# clustering.mem <- NULL
+# for (i in 1:length(cluster_resolution)){
+#   
+#   
+#   df.umap <- data.frame(x = so.query@reductions[["umap"]]@cell.embeddings[,1],
+#                         y = so.query@reductions[["umap"]]@cell.embeddings[,2],
+#                         cluster = so.query@meta.data[[paste0(assay.pattern, cluster_resolution[i])]])
+#   df.center <- getClusterCenters(df.umap, which.center = "median")
+#   
+#   df.umap.cells <- df.umap %>% 
+#     group_by(cluster) %>%
+#     summarize(n.cell = length(cluster))
+#   df.center$resolution <- as.character(cluster_resolution[i])
+#   df.center <- merge(df.center, df.umap.cells, by = "cluster")
+#   
+#   df.all.centers <- bind_rows(df.all.centers, df.center)
+# 
+#   
+#   clust.info <- data.frame( so.query@meta.data[[paste0(assay.pattern, cluster_resolution[i])]])
+#   colnames(clust.info) <- as.character( cluster_resolution[i])
+#   clustering.mem <- bind_cols(clustering.mem, clust.info)
+# 
+# }
+# 
+# cm.mat <- as.matrix(clustering.mem)
+# 
+# library(clustree);
+# 
+# 
+# 
+# df.tally.all <- NULL
+# 
+# for (i in 2:ncol(clustering.mem)){
+#   
+#   dp.tally <- NULL
+#   
+#   d1 <- as.character(clustering.mem[,i-1])
+#   d2 <- as.character(clustering.mem[,i])
+#   dpair <- paste0(d1, "-", d2)
+#   
+#   dp.tally <- data.frame(table(dpair))
+#   
+#   dp.split <- strsplit(as.character(dp.tally$dpair), "-")
+#   for (j in 1:nrow(dp.tally)){
+#     dp.tally$parent[j] = dp.split[[j]][1]
+#     dp.tally$child[j] = dp.split[[j]][2]
+#   }
+# 
+#   dp.tally$parent.res <- as.numeric(colnames(clustering.mem)[i-1])
+#   dp.tally$child.res <- as.numeric(colnames(clustering.mem)[i])
+#   
+#   df.tally.all <- bind_rows(df.tally.all, dp.tally)
+# }
+# 
+# 
+
+
+
+```
+```{r format tallies}
+# 
+# library(treemap)
+# library(data.tree)
+# library(DiagrammeR)
+#  library(igraph)
+# library(dendextend)
+# 
+# df.tree <- NULL
+# c.tree <- clustering.mem
+# all.clust.col <- colnames(c.tree)
+# c.tree$pathString <- ""
+# for (i in 1:length(all.clust.col)){
+#   which.col <- colnames(c.tree) %in% all.clust.col[i]
+#   c.tree$pathString <- paste( c.tree$pathString, c.tree[ ,which.col], sep = "/" )
+# }
+# 
+# # tally each
+# c.table <- data.frame(table( c.tree$pathString))
+# c.split <- strsplit(as.character(c.table$Var1), "/")
+# 
+# # explode 
+# for (i in 1:length(c.split)){
+#   for (j  in 1:length(all.clust.col)){
+#     c.table[ i,all.clust.col[j]] <- c.split[[i]][j+1]
+#   }
+# }
+# 
+# 
+# c.table$pathString <- "pop"
+# for (i in 1:length(all.clust.col)){
+#   which.col <- colnames(c.table) %in% all.clust.col[i]
+#   c.table[ ,which.col] <- paste0("r", colnames(c.table)[which.col], "-", c.table[,which.col])
+# 
+#   c.table$pathString <- paste( c.table$pathString, c.table[ ,which.col], sep = "/" )
+# }
+# 
+# hist(c.table$Freq)
+# 
+# 
+# method.prune <- "a"
+#   total.freq <- sum(c.table$Freq)
+# if (method.prune == "a"){
+# c.table.filt <- c.table %>%
+#   group_by(get(as.character(max(cluster_resolution)))) %>%
+#   top_n(1, Freq)
+# } else  if (method.prune == "b"){
+#   
+# 
+#   lower.limit <- round(total.freq * 0.05)
+# c.table.filt <- c.table[c.table$Freq>lower.limit, ]  
+# }
+# 
+# c.table.filt <- c.table.filt[ , c("Freq", "pathString")]
+# 
+# population <- FromDataFrameTable(c.table.filt)
+# 
+#  population$Set(name =  paste0(population$Get("name"), ".", seq(1, length(population$Get("name")))))
+#  
+#  so.dend <- as.dendrogram(population)
+# plot(so.dend, center = TRUE)
+# 
+# 
+# so.ig <- as.igraph.Node(population)
+# 
+# so.mst <-  igraph::mst(so.ig)
+# 
+# 
+#  
+# 
+# so.mst.gg <- ggnetwork(so.mst)
+# 
+# so.mst.gg$name <- as.character(so.mst.gg$name)
+# 
+# # get cluster resolution
+# so.mst.gg$cr <- stringr::str_extract( so.mst.gg$name, "r[0]*.[0-9]*")  
+# so.mst.gg$cr <- as.character(gsub("r", "", so.mst.gg$cr ))
+# so.mst.gg$cr <- as.character(gsub("r", "", so.mst.gg$cr ))
+# 
+# # get cluster ID
+# so.mst.gg$cluster <- stringr::str_extract( so.mst.gg$name, "-[0-9]*.") 
+# so.mst.gg$cluster <- as.character(gsub("-", "", so.mst.gg$cluster ))
+# so.mst.gg$cluster <- as.character(gsub("\\.", "", so.mst.gg$cluster ))
+# 
+# # get cluster sizes
+# df.size <- df.tally.all[ ,c("Freq", "child", "child.res" )]
+# colnames(df.size) <- c("n", "cluster", "cr")
+# parent.node <-  data.frame(n = total.freq, cluster = as.character(0), cr = as.numeric(min(cluster_resolution)))
+# # parent.node$cr <- as.character(parent.node$cr)
+# df.size <- bind_rows(df.size,parent.node)
+# so.mst.gg <- merge(so.mst.gg, df.size)
+# 
+# # so.mst.gg <- so.mst.gg[complete.cases(so.mst.gg), ]
+# ggplot(so.mst.gg, aes(x = x, y = y, xend = xend, yend = yend))+
+#   geom_edges(color = "darkgray") +
+#   geom_nodes(aes(color = cr, size = n, label = cluster)) + theme_blank()+
+#   theme(legend.position="bottom") + 
+#   geom_text(aes(label = cluster)) + 
+#   theme_miko(legend = T) + 
+#   xlab("Hierarchial Cluster MST 1") + ylab("Hierarchial Cluster MST 2") + 
+#   labs(title = "Trajectory", subtitle = "Miko Method", color = "Resolution")
+
+```
 
 
 
 ```{r PAGA1}
+
+# stop()
 # ensure igraph and fa2 module is avaialbe, if not, install
 # reticulate::py_install("python-igraph", pip = TRUE)
-# reticulate::py_install("fa2", pip = TRUE)
+# reticulate::py_install("tbb", pip = TRUE)
 
-do.paga <- T
+do.paga <- which.models$paga
 
 if (do.paga){
-  
 
   py.path <- py_config()
   use_python(py.path[["python"]])
@@ -321,16 +744,27 @@ if (do.paga){
   
   
   # run PAGA analysis
-  pr <- PAGA(so.query,assay = DefaultAssay(so.query), seurat_grouping = "seurat_clusters", 
+  so.paga <- so.query
+  if (DefaultAssay(so.paga) != "RNA"){
+    if (DefaultAssay(so.paga) == "SCT"){
+      so.paga <- RenameAssays(so.paga,SCT = "RNA")      
+    } else if (DefaultAssay(so.paga) == "integrated"){
+      so.paga <- RenameAssays(so.paga,integrated = "RNA")
+    }
+  }
+  
+  pr <- PAGA(so.paga,assay = DefaultAssay(so.paga), seurat_grouping = "seurat_clusters", 
              edge_filter_weight = 0.1, dpt_root_cluster = sample(u.clust, 1),
+             clustering_resolution = cluster.resolution, 
              paga_root = sample(u.clust, 1))
+  
+  rm(so.paga); invisible({gc()});
   
   
   # set root cell and compute pseudotimes
   alpha <- pr@misc[["paga"]][["AnnData"]]
   root_cell <- pr@misc[["paga"]][["root.cell"]]
   reticulate::py_set_item(alpha$uns, 'iroot', as.integer(root_cell))
-  # py_run_string(paste0("r.alpha.uns['iroot'] = ", as.integer(root_cell)), local = F)
   sc$tl$dpt(adata = alpha)
   df.meta.py <- alpha$obs
   df.meta.r <- py_to_r(df.meta.py)
@@ -370,7 +804,7 @@ if (do.paga){
   # generate plot
   paga.plot <- ggplot() +   
     geom_point(data = df.umap, 
-               aes(x, y, color = cluster),
+               aes(x, y, color = orderedFactor(cluster)),
                size = 1) +
     geom_segment(
       data = df.edges,
@@ -381,7 +815,7 @@ if (do.paga){
     ) +
     geom_point(data = df.positions, aes(x, y, fill = group), size = 7, alpha = 1 , color = "black", pch=21, show.legend = FALSE) +
     geom_text(data = df.positions, aes(x, y, label = group), color = "black", fontface = "bold") +
-    labs(x = "UMAP 1", y = "UMAP 2", title = "UMAP", subtitle = "PAGA Trajectories") +
+    labs(x = "UMAP 1", y = "UMAP 2", title = "UMAP", subtitle = "PAGA Trajectories", color = "Cluster") +
     theme_bw() +
     theme(
       panel.grid.major = element_blank(),
@@ -394,7 +828,7 @@ if (do.paga){
     print(plt.paga.pt.umap + theme_miko(legend = T))
   }
   
-}
+
 
 # store paga results
 paga.list$trajectory.plot <- paga.plot
@@ -441,11 +875,17 @@ paga.list$global.pseudotime.plot <- LT.results$plt.trajectory +
 
 rm(pr); invisible({gc()})
 
+}
+
 ```
 
 ```{r Diffusion Maps}
 
-# get PCA embedding
+do.dm <- which.models$dpt
+
+if (do.dm){
+
+  # get PCA embedding
 so.pca <- so.query@reductions[["pca"]]@cell.embeddings
 
 cell.names <- rownames(so.pca)
@@ -507,12 +947,13 @@ plt.dmap.bc <- ggplot(df.tmp, aes(x = DC1, y = DC2, colour = barcode)) +
   ylab("Diffusion component 2") +
   theme_classic()
 
-plt.dmap.cl <- ggplot(df.tmp, aes(x = DC1, y = DC2, colour = cluster)) +
+plt.dmap.cl <- ggplot(df.tmp, aes(x = DC1, y = DC2, colour = orderedFactor(cluster))) +
   geom_point() + 
   ggbeeswarm::geom_quasirandom(groupOnX = FALSE) +
   xlab("Diffusion component 1") + 
   ylab("Diffusion component 2") +
-  theme_classic()
+  theme_classic() + 
+  labs(colour = "Cluster")
 
 
 
@@ -589,12 +1030,13 @@ dpt.list$barcode <- df.dpt$barcode
 dpt.list$global.pseudotime <- df.dpt$dptval
 dpt.list$root.cluster <-  tip.cluster
 
+}
 
 ```
 
 ```{r Diffusion Maps v2, fig.width=12, fig.height=4}
 # print results (from diffusion map analysis)
-if (print.inline){
+if (print.inline && do.dm){
   cowplot::plot_grid(plt.dmap.peudotime,  plt.dmap.cl, plt.dmap.bc,ncol = 3)
   cowplot::plot_grid(plt.so.cl, plt.dt.pseudotime.cl, plt.dt.pseudotime.bc, ncol = 3)
 }
@@ -603,6 +1045,8 @@ if (print.inline){
 
 
 ```{r Diffusion Maps - project diffusion map onto UMAP}
+
+if (do.dm){
 
 df.pt <- data.frame(
   pseudotime_dpt.rank =  rank(dpt$dpt) ,
@@ -667,7 +1111,7 @@ dm.plot <- ggplot() +
   geom_segment(
     data = df.dm.edge.sub,
     aes(x = x1, y = y1, xend = x2, yend = y2),
-    size = df.dm.edge.sub$weight*7,
+    size = df.dm.edge.sub$weight*4,
     colour = "black",
     show.legend = FALSE
   ) +
@@ -679,11 +1123,15 @@ dm.plot <- ggplot() +
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank()
   ) 
-
+  
+}
 
 ```
 
 ```{r Diffusion Maps - lineage-specific PT}
+
+if (do.dm){
+
 
 div <-1
 dpt_flat <- branch_divide(dpt, div)
@@ -778,6 +1226,11 @@ dpt.list$lineage.pseudotime.plot <- plt.remap
 dpt.list$lineage.principal.curves <- df.tp.m
 dpt.list$lineage.umap <- df.umap.sub.m
 
+  
+}
+
+
+
 ```
 
 
@@ -785,6 +1238,8 @@ dpt.list$lineage.umap <- df.umap.sub.m
 
 
 ```{r Diffusion Maps - globals, fig.height=5, fig.width=10}
+
+if (do.dm){
 
 # order clusters by pseudotime
 df.pt.sum <- df.pt.sum %>%  arrange(pt)
@@ -814,6 +1269,8 @@ if (print.inline){
 dpt.list$trajectory.plot <- dm.plot
 dpt.list$global.pseudotime.plot <- LT.results$plt.trajectory 
 
+}
+
 ```
 
 
@@ -821,6 +1278,9 @@ dpt.list$global.pseudotime.plot <- LT.results$plt.trajectory
 
 ```{r Slingshot - prep data}
 
+do.ss <- which.models$slingshot
+
+if (do.ss){
 
 if (use.deg.reduction){
   deg.gene <- FindAllMarkers(so.query, 
@@ -866,7 +1326,8 @@ if ((tolower(which.reduction) == "umap-pca") | (tolower(which.reduction) == "uma
   # Seurat::DimPlot(so.query, reduction = "tsne")
 } else if (tolower(which.reduction) == "pca"){
   stopifnot(which.reduction %in% names(so.query@reductions))
-  n.dim <- 30
+  pca.so <- propVarPCA(so.query)
+  n.dim <- sum(pca.so$pc.cum_sum < 0.9) +1
   # Seurat::DimPlot(so.query, reduction = "pca")
 } else if (tolower(which.reduction) == "ica"){
   so.query <- RunICA(so.query, verbose = F)
@@ -878,10 +1339,15 @@ if ((tolower(which.reduction) == "umap-pca") | (tolower(which.reduction) == "uma
   start.cluster <- as.numeric(tip.cluster)
   end.cluster <- NULL
 }
+  
+}
 
 ```
 
 ```{r Slingshot algorithm, message=FALSE, warning=FALSE}
+
+if (do.ss){
+
 
 # https://bioconductor.org/packages/release/bioc/vignettes/slingshot/inst/doc/vignette.html
 # https://bioconductor.org/packages/release/bioc/vignettes/slingshot/inst/doc/vignette.html#detailed-slingshot-functionality
@@ -903,9 +1369,14 @@ df.red$barcode <- so.query@meta.data[["Barcode"]]
 df.red$bc.color <- cell_pal(df.red$barcode, brewer_pal("qual", "Set2"))
 df.red$clust.color <- cell_pal(df.red$cluster, hue_pal())
 
+  
+}
+
 ```
 
 ```{r Slingshot - alternative reduction}
+
+if (do.ss){
 
 # get data for alternative reduction
 if (tolower(which.reduction) == "umap") {
@@ -919,11 +1390,15 @@ df.alt.red$cluster <- as.vector(so.query@meta.data[["seurat_clusters"]])
 df.alt.red$barcode <- so.query@meta.data[["Barcode"]]
 df.alt.red$bc.color <- cell_pal(df.red$barcode, brewer_pal("qual", "Set2"))
 df.alt.red$clust.color <- cell_pal(df.red$cluster, hue_pal())
+  
+}
 
 ```
 
 
 ```{r Slingshot - function to compute cluster linkages}
+
+if (do.ss){
 
 get.linkage.coordinates <- function(df.center, df.adjacency, sling){
   
@@ -943,19 +1418,28 @@ get.linkage.coordinates <- function(df.center, df.adjacency, sling){
   output <- list(df.adjacency, df.center)
   return(output)
 }
+  
+}
+
 
 ```
 
 
 ```{r Slingshot - PCA variance explained }
-# calculate proportion of variance explained by each PC ---------------------
-df.pca <- propVarPCA(so.query)
-pc1.var.explained <- signif(df.pca$pc.prop_var[1] * 100, 3)
-pc2.var.explained <-  signif(df.pca$pc.prop_var[2] * 100, 3)
+
+if (do.ss){
+  # calculate proportion of variance explained by each PC ---------------------
+  df.pca <- propVarPCA(so.query)
+  pc1.var.explained <- signif(df.pca$pc.prop_var[1] * 100, 3)
+  pc2.var.explained <-  signif(df.pca$pc.prop_var[2] * 100, 3)
+}
+
 ```
 
 
 ```{r Slingshot trajectories - ggplot plots, message=FALSE, warning=FALSE, fig.width=8, fig.height=5}
+
+if (do.ss){
 
 # get adjacency matrix
 adjacency.mat  <- sling@adjacency
@@ -1049,6 +1533,8 @@ slingshot.list$umap.y <- df.alt.red$y
 slingshot.list$embedding.x <- df.red$x
 slingshot.list$embedding.y <- df.red$y
 slingshot.list$embedding.name <- toupper(which.reduction)
+  
+}
 
 ```
 
@@ -1056,7 +1542,8 @@ slingshot.list$embedding.name <- toupper(which.reduction)
 
 ```{r Slingshot umap lineage, fig.width=12, fig.height=5}
 
-
+if(do.ss){
+ 
 ss.lineages <- sling@lineages
 LT.ss.list <- list()
 pc.coord.merge <- NULL
@@ -1101,6 +1588,7 @@ df.ss.umap <- data.frame(
 # assert factor order
 u.lin <- paste0("Lineage", as.numeric(gsub("Lineage", "", unique(pc.coord.merge$lineage))))
 pc.coord.merge$lineage <- factor(pc.coord.merge$lineage, levels = u.lin)
+lineage.dimred$lineage <- factor(lineage.dimred$lineage, levels = u.lin)
 
 # generate lineage plots (overlaid on UMAP)
 plot.lineage.umap.ss <- ggplot() + 
@@ -1126,7 +1614,8 @@ if (print.inline) {
 slingshot.list$lineage.pseudotime.plot <- plot.lineage.umap.ss
 slingshot.list$lineage.umap <- lineage.dimred
 slingshot.list$root.cluster <- as.character(start.clust$cluster[1])
-
+ 
+}
 
 
 
@@ -1135,6 +1624,10 @@ slingshot.list$root.cluster <- as.character(start.clust$cluster[1])
 
 
 ```{r SCORPIUS algorithm}
+
+do.scorpius <- which.models$scorpius
+
+if (do.scorpius){
 
 # get data matrices
 e.mat <- scMiko::sparse2dense(so.query@assays[[DefaultAssay(so.query)]]@data, transpose = T)
@@ -1149,6 +1642,7 @@ init.traj <- tryCatch({
   init.traj <- inferInitialTrajectory(space, k = 4)
 }, error = function(e){
   init.traj <- NULL
+  return(init.traj)
 }
 )
 
@@ -1163,11 +1657,15 @@ scorp.ps <- dynutils::scale_minmax(pc.fit$lambda)
 
 # infer trajectory (and pseudotimes)
 traj <- SCORPIUS::infer_trajectory(space, stretch = 2, smoother = "smooth_spline")
+  
+}
 
 ```
 
 
 ```{r SCORPIUS to UMAP projections}
+
+if (do.scorpius){
 
 # get paga global principal curve
 df.scorp.pt.order <- data.frame(x = so.query@reductions[["umap"]]@cell.embeddings[ ,1],
@@ -1209,10 +1707,17 @@ scorpius.list$umap.y <- so.query@reductions[["umap"]]@cell.embeddings[ ,2]
 scorpius.list$embedding.x <- space[ ,1]
 scorpius.list$embedding.y <- space[ ,2]
 scorpius.list$embedding.name <- 'scorpius.dim.red'
+  
+}
+
 
 ```
 
 ```{r scPedigree helper functions}
+
+do.sp <- which.models$scPedigree
+
+if (do.sp){
 
 prepPedigreeLineages <- function(source= NULL, branch = NULL, twig = NULL){
   
@@ -1255,13 +1760,16 @@ prepPedigreeLineages <- function(source= NULL, branch = NULL, twig = NULL){
   return(lineages)
   
 }
+  
+}
+
 
 
 ```
 
 ```{r prep scPedigree input}
 
-if (scPedigree.parameters$do.scPedigree){
+if (scPedigree.parameters$do.scPedigree & do.sp){
   
   
   
@@ -1305,18 +1813,30 @@ if (scPedigree.parameters$do.scPedigree){
                                 destination = lineage.cluster[2:(n.clust)])
     df.sp.adj <- bind_rows(df.sp.adj, df.sp.adj.lin)
   }
-  df.sp.adj <- unique(df.sp.adj)
+
+  df.sp.adj <- df.sp.adj[complete.cases(df.sp.adj), ]
+    df.sp.adj <- unique(df.sp.adj)
   
   df.sp.coord <- NULL
   for (i in 1:nrow(df.sp.adj)){
+    is.success <- F
+    try({
     x.origin <- df.sp.umap.centers$x.center[df.sp.umap.centers$cluster == df.sp.adj$origin[i]]
     y.origin <- df.sp.umap.centers$y.center[df.sp.umap.centers$cluster == df.sp.adj$origin[i]]
     x.destination <- df.sp.umap.centers$x.center[df.sp.umap.centers$cluster == df.sp.adj$destination[i]]
     y.destination <- df.sp.umap.centers$y.center[df.sp.umap.centers$cluster == df.sp.adj$destination[i]]
-    df.sp.coord <- bind_rows(df.sp.coord, data.frame(x.origin, y.origin, x.destination, y.destination))
+    df.sp.coord <- bind_rows(df.sp.coord, data.frame(x.origin, y.origin, x.destination, y.destination))    
+    is.success <- T
+    }, silent = T)
+    if (!is.success){
+      df.sp.coord <- bind_rows(df.sp.coord, data.frame(NA, NA, NA, NA))   
+    }
+
   }
   
   df.sp.adj <- bind_cols(df.sp.adj, df.sp.coord)
+  df.sp.adj <- df.sp.adj[, c("origin","destination","x.origin","y.origin","x.destination","y.destination")]
+  df.sp.adj <- df.sp.adj[complete.cases(df.sp.adj), ]
   
 }
 
@@ -1324,7 +1844,7 @@ if (scPedigree.parameters$do.scPedigree){
 
 ```{r scPedigree}
 
-if (scPedigree.parameters$do.scPedigree){
+if (scPedigree.parameters$do.scPedigree & do.sp){
   
   LT.sp.list <- list()
   pc.sp.coord.merge <- NULL
@@ -1333,12 +1853,12 @@ if (scPedigree.parameters$do.scPedigree){
   for (i in 1:length(sp.lineages)){
     lineage.name <- names(sp.lineages)[i]
     
+    if (length(sp.lineages[[lineage.name]]) == 1) next
     dimSubset <- subsetDimRed(so.query, which.features = sp.lineages[[lineage.name]], reduction = "umap")
     
     start.clust <- dimSubset[["centers"]]
     start.clust <- start.clust[match(sp.lineages[[lineage.name]], start.clust$cluster), ]
-    # start.traj <- inferInitialTrajectory(as.matrix(dimSubset[["reduction"]]), k = length(unique(dimSubset[["features"]])))
-    
+
     LT.sp.results <- lineageTrajectory(space = as.matrix(dimSubset[["reduction"]][ ,c(1,2)]),
                                        start = as.matrix(start.clust[ ,c(2,3)]),
                                        group.labels = dimSubset[["features"]],
@@ -1362,17 +1882,21 @@ if (scPedigree.parameters$do.scPedigree){
   }
   
   if ("fork" %in% df.sp.umap.centers$node.type){
-    df.sp.umap.centers$node.type <- factor(df.sp.umap.centers$node.type, levels = c("end", "link", "start", "fork"))
+    df.sp.umap.centers$node.type <- factor(df.sp.umap.centers$node.type, 
+                                           levels = c("end", "link", "start", "fork"))
   }
   
   plt.trajectory.sp <- ggplot() +
-    geom_point(data = df.sp.umap, aes(x= x, y= y, color = cluster)) +
+    geom_point(data = df.sp.umap, aes(x= x, y= y, color = orderedFactor(cluster))) +
     theme_classic() +
     xlab("UMAP 1") +
     ylab("UMAP 2")  +
-    geom_segment(data = df.sp.adj, aes(x = x.origin, y = y.origin, xend = x.destination, yend = y.destination), size = 1) +
-    geom_point(data = df.sp.umap.centers, aes(x = x.center, y = y.center, fill = node.type ), pch = 21, size = 4) +
-    ggtitle(paste("Lineages (", toupper(alt.reduction), ")", sep = "")) 
+    geom_segment(data = df.sp.adj, aes(x = x.origin, y = y.origin, 
+                                       xend = x.destination, yend = y.destination), size = 1) +
+    geom_point(data = df.sp.umap.centers, aes(x = x.center, y = y.center, 
+                                              fill = node.type ), pch = 21, size = 4) +
+    ggtitle(paste("Lineages (", toupper(alt.reduction), ")", sep = "")) + 
+    labs(subtitle = "scPedigree", color = "Cluster")
   
   
   lineage.dimred$lineage <- factor(lineage.dimred$lineage , levels = names(sp.lineages))
@@ -1539,10 +2063,6 @@ trajectory.Plot <- function(umap.x, umap.y, umap.cluster, edge.x1, edge.y1, edge
   df.edge <- data.frame(x.origin = edge.x1, y.origin = edge.y1, x.destination = edge.x2, y.destination = edge.y2, weights = edge.weights)
   df.centers <- data.frame(x.center = node.x, y.center = node.y, cluster = node.cluster)
   
-  
-  # clust <- as.numeric(df.umap$cluster
-  
-  
   plot.trajectory <- ggplot() +   
     geom_point(data = df.umap, 
                aes(x, y, color = orderedFactor(cluster)),
@@ -1576,9 +2096,28 @@ trajectory.Plot <- function(umap.x, umap.y, umap.cluster, edge.x1, edge.y1, edge
 # prep inputs
 list.trajectories <- list()
 
+# get umap centers
+which.center <- "mean"
+df.umap <- data.frame(so.query@reductions[["umap"]]@cell.embeddings)
+df.umap$cluster <- so.query@meta.data[["seurat_clusters"]]
+
+colnames(df.umap) <- c("x","y", "cluster")
+df.umap.centers <- getClusterCenters(df.umap, which.center)
+u.clusters <- as.numeric(as.character(unique(df.umap.centers$cluster)))
+
+# get all adjacencies
+df.adj.all <- expand.grid(u.clusters, u.clusters)
+colnames(df.adj.all) <- c("origin", "destination")
+df.adj.all <- enforceOrderedDirection(df.adj.all)
+df.adj.all <- unique(df.adj.all)
+df.adj.all <- fillNodeCoordinates(df.adj.all, df.umap.centers, u.clusters)
+
+
 # PAGA ####################################
+if (do.paga){
+
 df.edges.all <- pr.list[["edges.all"]]
-u.clusters <- unique(df.umap.centers$cluster)
+# u.clusters <- unique(df.umap.centers$cluster)
 df.adj.paga <- data.frame(origin = df.edges.all$group1,
                           destination = df.edges.all$group2,
                           x.origin = df.edges.all$x1,
@@ -1586,21 +2125,41 @@ df.adj.paga <- data.frame(origin = df.edges.all$group1,
                           x.destination = df.edges.all$x2,
                           y.destination = df.edges.all$y2,
                           weights = df.edges.all$weight)
-df.adj.paga <- fillNodeCoordinates(df.adj.paga, df.umap.centers, u.clusters)
+# df.adj.paga <- fillNodeCoordinates(df.adj.paga, df.umap.centers, u.clusters)
 df.adj.paga$weights <- rescaleValues(df.adj.paga$weights)
 
 
 df.adj.paga <- enforceOrderedDirection(df.adj.paga)
-df.adj.all <-df.adj.paga[ ,c("origin", "destination")]
+
+
+  s1 <- paste0(df.adj.paga$origin, "-", df.adj.paga$destination)
+  s2.f <- paste0(df.adj.all$origin, "-", df.adj.all$destination)
+
+  df.adj.missing <- df.adj.all[!(s2.f %in% s1), ]
+  df.complete.missing <- data.frame(origin = as.numeric(df.adj.missing$origin),
+                                    destination = as.numeric(df.adj.missing$destination),
+                                    x.origin = NA,
+                                    y.origin = NA,
+                                    x.destination = NA,
+                                    y.destination = NA,
+                                    weights = 0)
+  df.adj.paga$origin <- as.numeric(as.character(df.adj.paga$origin))
+  df.adj.paga$destination <- as.numeric(as.character(df.adj.paga$destination))
+
+  df.adj.paga <- bind_rows(df.adj.paga, df.complete.missing)
+  
+    df.adj.paga <- fillNodeCoordinates(df.adj.paga, df.umap.centers, u.clusters)
+  df.adj.paga <- enforceOrderedDirection(df.adj.paga) 
 
 list.trajectories[["paga"]] <- df.adj.paga
 list.trajectories$paga$od <- paste0(list.trajectories$paga$origin, "-", list.trajectories$paga$destination)
 list.trajectories$paga <- list.trajectories$paga %>% arrange(od)
+  
+}
 
 # scPedigree ####################################
 
-bias.ensemble <- scPedigree.parameters$do.scPedigree
-
+bias.ensemble <- do.sp
 
 if (bias.ensemble & exists("df.sp.adj")){
   df.sp.adj.traj <- df.sp.adj
@@ -1630,6 +2189,9 @@ if (bias.ensemble & exists("df.sp.adj")){
 
 
 # Slingshot ####################################
+
+if (do.ss){
+
 df.ss.adj.traj <- df.u.adjacency.alt
 df.adj.av <-df.ss.adj.traj[ ,c("origin", "destination")]
 df.adj.av <- enforceOrderedDirection(df.adj.av)
@@ -1655,6 +2217,8 @@ df.ss.adj.traj <- enforceOrderedDirection(df.ss.adj.traj)
 list.trajectories[["slingshot"]] <- df.ss.adj.traj
 list.trajectories$slingshot$od <- paste0(list.trajectories$slingshot$origin, "-", list.trajectories$slingshot$destination)
 list.trajectories$slingshot <- list.trajectories$slingshot %>% arrange(od)
+  
+}
 
 # tempora ####################################
 
@@ -1691,6 +2255,8 @@ if (exists("so.tempora")){
 }
 
 # Diffusion MAP ##################################
+if (do.dm){
+
 df.dm.adj.traj <- data.frame(origin = as.numeric(df.dm.edge$group1),
                              destination = as.numeric(df.dm.edge$group2),
                              x.origin = df.dm.edge$x1,
@@ -1706,9 +2272,33 @@ df.dm.adj.traj <- df.dm.adj.traj[!(df.dm.adj.traj$origin == df.dm.adj.traj$desti
 df.dm.adj.traj <- fillNodeCoordinates(df.dm.adj.traj, df.umap.centers, u.clusters)
 df.dm.adj.traj$weights <- rescaleValues(df.dm.adj.traj$weights)
 
+  s1 <- paste0(df.dm.adj.traj$origin, "-", df.dm.adj.traj$destination)
+  s2.f <- paste0(df.adj.all$origin, "-", df.adj.all$destination)
+  # s2.r <- paste0(df.adj.all$destination, "-", df.adj.all$origin)
+  
+  df.adj.missing <- df.adj.all[!(s2.f %in% s1), ]
+  df.complete.missing <- data.frame(origin = as.numeric(df.adj.missing$origin),
+                                    destination = as.numeric(df.adj.missing$destination),
+                                    x.origin = NA,
+                                    y.origin = NA,
+                                    x.destination = NA,
+                                    y.destination = NA,
+                                    weights = 0)
+  
+    df.dm.adj.traj$origin <- as.numeric(as.character(df.dm.adj.traj$origin))
+  df.dm.adj.traj$destination <- as.numeric(as.character(df.dm.adj.traj$destination))
+  
+  # df.tempora.adj.traj$weights <- 1
+  df.dm.adj.traj <- bind_rows(df.dm.adj.traj, df.complete.missing)
+  df.dm.adj.traj <- fillNodeCoordinates(df.dm.adj.traj, df.umap.centers, u.clusters)
+  df.dm.adj.traj <- enforceOrderedDirection(df.dm.adj.traj) 
+
 list.trajectories[["dpt"]] <- df.dm.adj.traj
 list.trajectories$dpt$od <- paste0(list.trajectories$dpt$origin, "-", list.trajectories$dpt$destination)
 list.trajectories$dpt <- list.trajectories$dpt %>% arrange(od)
+
+  
+}
 
 # POOL lineages
 df.ens.adj <- NULL
@@ -1727,8 +2317,8 @@ for (i in 1:length(list.trajectories)){
 df.ens.adj <- df.ens.adj %>% arrange(od)
 df.ens.adj.weights <- df.ens.adj %>% dplyr::select(-c("od"))
 
-df.ensemble.edges <- data.frame(origin = df.adj.paga$origin,
-                                destination = df.adj.paga$destination,
+df.ensemble.edges <- data.frame(origin = df.adj.all$origin,
+                                destination = df.adj.all$destination,
                                 x.origin = NA,
                                 y.origin = NA,
                                 x.destination = NA,
@@ -1763,27 +2353,39 @@ colnames(df.umap) <- c("x","y", "cluster")
 
 # PLOTS
 
-ensemble.geom.plot <- trajectory.Plot(umap.x = df.umap$x, umap.y = df.umap$y, umap.cluster = df.umap$cluster, 
-                                      edge.x1 = df.ensemble.edges$x.origin, edge.y1 = df.ensemble.edges$y.origin, 
-                                      edge.x2 = df.ensemble.edges$x.destination, edge.y2 = df.ensemble.edges$y.destination, 
+ensemble.geom.plot <- trajectory.Plot(umap.x = df.umap$x, umap.y = df.umap$y, 
+                                      umap.cluster = df.umap$cluster, 
+                                      edge.x1 = df.ensemble.edges$x.origin, 
+                                      edge.y1 = df.ensemble.edges$y.origin, 
+                                      edge.x2 = df.ensemble.edges$x.destination, 
+                                      edge.y2 = df.ensemble.edges$y.destination, 
                                       edge.weights = df.ensemble.edges$geom.weights, 
-                                      node.x = df.umap.centers$x.center, node.y = df.umap.centers$y.center, 
+                                      node.x = df.umap.centers$x.center, 
+                                      node.y = df.umap.centers$y.center, 
                                       node.cluster = df.umap.centers$cluster) + 
   labs(subtitle = "Ensemble: Geometric Mean (all)")
 
-ensemble.mean.plot <- trajectory.Plot(umap.x = df.umap$x, umap.y = df.umap$y, umap.cluster = df.umap$cluster, 
-                                      edge.x1 = df.ensemble.edges$x.origin, edge.y1 = df.ensemble.edges$y.origin, 
-                                      edge.x2 = df.ensemble.edges$x.destination, edge.y2 = df.ensemble.edges$y.destination, 
+ensemble.mean.plot <- trajectory.Plot(umap.x = df.umap$x, umap.y = df.umap$y, 
+                                      umap.cluster = df.umap$cluster, 
+                                      edge.x1 = df.ensemble.edges$x.origin, 
+                                      edge.y1 = df.ensemble.edges$y.origin, 
+                                      edge.x2 = df.ensemble.edges$x.destination, 
+                                      edge.y2 = df.ensemble.edges$y.destination, 
                                       edge.weights = df.ensemble.edges$mean.weights, 
-                                      node.x = df.umap.centers$x.center, node.y = df.umap.centers$y.center, 
+                                      node.x = df.umap.centers$x.center, 
+                                      node.y = df.umap.centers$y.center, 
                                       node.cluster = df.umap.centers$cluster) + 
   labs(subtitle = "Ensemble: Arithmetic Mean (all)")
 
-ensemble.z.plot <- trajectory.Plot(umap.x = df.umap$x, umap.y = df.umap$y, umap.cluster = df.umap$cluster, 
-                                   edge.x1 = df.ensemble.edges$x.origin, edge.y1 = df.ensemble.edges$y.origin, 
-                                   edge.x2 = df.ensemble.edges$x.destination, edge.y2 = df.ensemble.edges$y.destination, 
+ensemble.z.plot <- trajectory.Plot(umap.x = df.umap$x, umap.y = df.umap$y,
+                                   umap.cluster = df.umap$cluster, 
+                                   edge.x1 = df.ensemble.edges$x.origin, 
+                                   edge.y1 = df.ensemble.edges$y.origin, 
+                                   edge.x2 = df.ensemble.edges$x.destination, 
+                                   edge.y2 = df.ensemble.edges$y.destination, 
                                    edge.weights = df.ensemble.edges$z.weights.scaled, 
-                                   node.x = df.umap.centers$x.center, node.y = df.umap.centers$y.center, 
+                                   node.x = df.umap.centers$x.center, 
+                                   node.y = df.umap.centers$y.center, 
                                    node.cluster = df.umap.centers$cluster) + 
   labs(subtitle = "Ensemble: Z scores (all)")
 
@@ -1872,11 +2474,10 @@ df.lin.dif$geom.dif <- apply(df.lin.dif[ , colnames(df.ens.adj.weights)], 1, fun
 lineage.term <- data.frame(node = df.lin.ratio$node, lineage.rank = rank(-df.lin.ratio$geom.ratio))
 ensemble.term <- data.frame(node = df.node.score$node, ensemble.rank =  rank(df.node.score$dif))
 
-
+# merge data
 df.term.final <- merge(lineage.term, ensemble.term, by = "node")
 df.term.final$mean.ratio <- apply(df.term.final[ , c("lineage.rank", "ensemble.rank")], 1, mean)
 
-# df.term.final
 
 ```
 
@@ -1962,14 +2563,6 @@ extendLineage <- function(current.lineage, w.sub, u.sub, tn.n, tn, tolerance.thr
 
 
 ```{r ensemble random walk }
-
-
-# which.root <- c(0,4,5)
-
-
-# a.cluster <- as.numeric(as.character(so.query@meta.data[["seurat_clusters"]]))
-# a.cluster <- data.frame(cluster = a.cluster[(a.cluster %in% which.root)])
-# clust.tally <- as.vector( table(a.cluster))
 
 # edge dataframe to adjacency matrix
 df.ensemble.edges$origin <- as.numeric(df.ensemble.edges$origin)
@@ -2062,14 +2655,15 @@ last.time <- i-1
 
 classification.threshold <- 1/length(u.nodes)
 df.ht.long$time.point <- as.numeric(gsub("t", "", df.ht.long$time))
+df.ht.long$cluster.num <- orderedFactor(as.numeric(as.character(gsub("c", "", df.ht.long$cluster))))
 plt.diffusion.simulation <- df.ht.long %>%
-  ggplot(aes(x = time.point, y = heat, color = cluster)) + 
+  ggplot(aes(x = time.point, y = heat, color = cluster.num)) + 
   geom_line(size = 1) + 
   theme_miko(legend = T) + 
   geom_hline(yintercept = classification.threshold, linetype = "dashed") + 
   ylab("State Frequency") + 
   xlab("Simulation Time") + 
-  labs(title = "Ensemble Network Diffusion", subtitle = "Initial condition: Equally-distributed states")
+  labs(title = "Ensemble Network Diffusion", subtitle = "Initial condition: Equally-distributed states", color = "Cluster")
 
 
 # get simluation end heats
@@ -2090,6 +2684,11 @@ plt.umap.heatrank <- ggplot() +
   geom_point(data = df.u.c, aes(x = x.center, y = y.center, size = rank(heat), fill = as.numeric(heat)), colour="black",pch=21) + 
   theme_miko(legend = T) + 
   labs(colour = "Cluster", title= "Terminal Heat", subtitle = "Diffusion Analysis", fill = "terminal heat", size = "heat rank")
+
+if (print.inline){
+  print(plt.umap.heatrank)
+  
+}
 
 
 df.links <- df.ht.end %>% dplyr::filter(heat > classification.threshold)
@@ -2253,13 +2852,14 @@ for (i in 1:length(ens.lineages)){
 }
 
 plt.trajectory.ens <- ggplot() +
-  geom_point(data = df.ens.umap, aes(x= x, y= y, color = cluster)) +
+  geom_point(data = df.ens.umap, aes(x= x, y= y, color = orderedFactor(cluster))) +
   theme_classic() +
   xlab("UMAP 1") +
   ylab("UMAP 2") + 
   geom_segment(data = df.ens.adj, aes(x = x.origin, y = y.origin, xend = x.destination, yend = y.destination), size = 1) +
   geom_point(data = df.ens.umap.centers, aes(x = x.center, y = y.center, fill = node.type ), pch = 21, size = 4) +
-  ggtitle(paste("Lineages (", toupper(alt.reduction), ")", sep = "")) 
+  ggtitle(paste("Lineages (", toupper(alt.reduction), ")", sep = "")) + 
+  labs(color = "Cluster")
 
 
 lineage.dimred$lineage <- factor(lineage.dimred$lineage , levels = names(ens.lineages))
@@ -2275,7 +2875,9 @@ plot.lineage.umap.ens <- ggplot() +
   ylab("UMAP 2") + 
   labs(title = "Lineage-Specific Pseudotimes", subtitle = "Ensemble")
 
-plt.ens.overview <- cowplot::plot_grid(plt.trajectory.ens, plot.lineage.umap.ens, rel_widths = c(2,3))
+plt.ens.overview <- cowplot::plot_grid(plt.trajectory.ens, 
+                                       plot.lineage.umap.ens, 
+                                       rel_widths = c(2,3))
 if (print.inline) {
   plt.ens.overview
 }
@@ -2449,6 +3051,7 @@ if (scPedigree.parameters$do.scPedigree && which.models$scPedigree){
     # prep pseudotimes
     df.sp.pt <- scPedigree.list[["lineage.umap"]]
     df.sp.pt <- df.sp.pt[df.sp.pt$lineage %in% names(sp.lineages)[i], ]
+    if (nrow(df.sp.pt) == 0) next
     
     df.pt.input <- data.frame(cell = colnames(so.query), pt = NA)
     df.pt.input <- merge(df.pt.input, df.sp.pt, by = "cell", all.x = T)
@@ -2688,23 +3291,6 @@ if (print.inline) {
 
 ```
 
-```{r URD}
-
-# library(URD)
-# pseudotimeDetermineLogistic()
-# https://github.com/farrellja/URD/blob/master/Analyses/QuickStart/URD-QuickStart-AxialMesoderm.md
-
-# Bias the transition matrix acording to pseudotime
-# axial.biased.tm <- as.matrix(pseudotimeWeightTransitionMatrix(axial, "pseudotime", logistic.params=axial.ptlogistic))
-
-# Simulate the biased random walks from each tip
-# axial.walks <- simulateRandomWalksFromTips(axial, tip.group.id="tip.clusters", root.cells=root.cells, transition.matrix = axial.biased.tm, n.per.tip = 25000, root.visits = 1, max.steps = 5000, verbose = F)
-
-# Process the biased random walks into visitation frequencies
-# axial <- processRandomWalksFromTips(axial, axial.walks, verbose = F)
-
-```
-
 
 ```{r gene importance correlation, fig.height=5, fig.width=5}
 
@@ -2729,6 +3315,623 @@ if (print.inline & !is.null(cor.res)) {
 
 
 ```
+
+```{r reembed data with top importance genes}
+
+# 
+# if (do.reprojection){
+# 
+#   
+#  df.repro.gene <- df.gene.importance
+#  candidate.genes <- df.repro.gene$gene
+#  df.repro.gene <- df.repro.gene %>% dplyr::select(-c("gene"))
+#  
+#  top.candidates <- c()
+#  for (i in 1:ncol(df.repro.gene)){
+#    top.candidates <- c(top.candidates, candidate.genes[which(df.repro.gene[ ,i] > 0.7)])
+#  }
+#  top.candidates <- unique(top.candidates)
+# 
+# # get neural dif markers
+# # marker.path <- paste0(data.path, "Reference_Datasets/VALID_NeuralDifferentiation_HH_Mm_040220_SYMBOLS.csv")
+# # df.markers <- read.csv(marker.path)
+# 
+# # df.markers.long <- pivot_longer(df.markers, colnames(df.markers))
+# # df.markers.long <- df.markers.long[complete.cases(df.markers.long), ]
+# 
+# # dif.genes <- df.markers.long$value
+# # dif.genes <- unique(dif.genes[dif.genes != ""])
+# 
+# if (which.species == "Mm"){
+#   top.candidates <- firstup(top.candidates)
+# } else  if (which.species == "Hs"){
+#   top.candidates <- toupper(top.candidates)
+# }
+# 
+# # rerun so processing with subset of genes
+# 
+# so.imp <- subset(so.query, features = top.candidates)
+# # DefaultAssay(so.imp) <- "RNA"
+# # so.imp <-NormalizeData(so.imp, verbose = FALSE)
+# # so.imp <- ScaleData(so.imp, verbose = FALSE, features = rownames(so.imp))
+# # so.imp <- FindVariableFeatures(so.imp, selection.method = "vst", nfeatures = 3000)
+# so.imp <- RunPCA(so.imp, features = rownames(so.imp))
+# 
+# 
+# so.imp <- FindNeighbors(so.imp)
+# so.imp <- FindClusters(so.imp)
+# 
+# so.imp <- RunUMAP(so.imp, n.components = 1, dims = 1:10)
+# 
+# so.imp <- RunICA(so.imp, nics = if (length(top.candidates)>30) 30 else length(top.candidates)-1)
+# 
+# # 
+# # cluster.UMAP(so.imp)
+# # cluster.UMAP(so.query)
+# 
+# }
+# 
+# hist(so.imp@reductions[["umap"]]@cell.embeddings)
+# 
+# df.umap <- data.frame(so.query@reductions[["umap"]]@cell.embeddings)
+# df.umap$cluster <- so.query@meta.data[["seurat_clusters"]]
+# colnames(df.umap) <- c("x","y", "cluster")
+# 
+# umap1 <-  so.imp@reductions[["umap"]]@cell.embeddings
+# 
+# pca.comp <- so.imp@reductions[["pca"]]@cell.embeddings
+# 
+#   plt.cur <- pseudotime.UMAP(
+#     x = df.umap$x,
+#     y = df.umap$y,
+#     pseudotime =umap1
+#   ) + labs(title = paste0("UMAP ", 1))
+#   
+#   print(plt.cur)
+# 
+# for (i in 1:10){
+#   df.umap$activity <- so.imp@reductions[["pca"]]@cell.embeddings[,i]
+#   # ica1 <- so.imp@reductions[["ica"]]@cell.embeddings[,5]
+#   plt.cur <- pseudotime.UMAP(
+#     x = df.umap$x,
+#     y = df.umap$y,
+#     pseudotime =df.umap$activity
+#   ) + labs(title = paste0("PCA ", i))
+#   
+#   print(plt.cur)
+#   
+# }
+#   
+#   so.high <- so.query
+#   DefaultAssay(so.high) <- "SCT"
+#   
+#   so.high <- FindNeighbors(so.high)
+#   so.high <- FindClusters(so.high, resolution = 10)
+#   
+#   df.umap <- data.frame(so.high@reductions[["umap"]]@cell.embeddings)
+# df.umap$cluster <- so.high@meta.data[["seurat_clusters"]]
+# colnames(df.umap) <- c("x","y", "cluster")
+#   
+# 
+# df.umap$activity <- so.imp@reductions[["pca"]]@cell.embeddings[,2]
+# # get centers
+#   df.uc <- getClusterCenters(df.umap, which.center = "median")
+#   
+#   df.umap.summary <- df.umap %>%
+#     group_by(cluster) %>%
+#     summarize(
+#       a.mean = mean(activity),
+#       x.center = median(x),
+#       y.center = median(y)
+#     )
+#   
+# 
+#   # df.umap.cur <- df.umap %>% dplyr::filter(cluster %in% c(0, 1))
+#   
+#   ggplot() + 
+#     geom_point(data = df.umap, aes(x = x, y = y, color = activity)) + 
+#     geom_point(data = df.umap.summary, aes(x = x.center, y = y.center, fill = orderedFactor(cluster)), size = 3) +
+#     labs(fill = "Cluster") + 
+#     viridis::scale_color_viridis() + 
+#     theme_miko(legend = F)
+ 
+```
+```{r VERSION 1}
+
+#  
+#   
+#   n.iterations <- 300
+#   
+#   n.neighbours <- 5
+#   n.prune <- 3 # value smaller than n.neighbors
+#   
+#   gradient.tolerance <- 1.1
+#   descent.method <- "max" # max or min descent
+#   
+#   df.umap.pathfinder <- df.umap.summary
+#   df.umap.pathfinder$cluster <- as.character(df.umap.pathfinder$cluster)
+#   
+#   cluster.path <- c()
+#   start.ind <- which.max(df.umap.pathfinder$a.mean)
+#   start.cluster <- as.character(df.umap.pathfinder$cluster[start.ind])
+#   cluster.path <- c(cluster.path, start.cluster)
+#   for (i in 1:n.iterations){
+# 
+#     
+#     if (i > 1){
+#       if (start.cluster == end.cluster) stop()
+#       start.cluster <- end.cluster
+#       start.ind <- which(df.umap.pathfinder$cluster %in% start.cluster)
+#     }
+#         end.cluster <- c()
+#     
+#     start.activity <- df.umap.pathfinder$a.mean[start.ind]
+#     
+#     start.x <- df.umap.pathfinder$x.center[start.ind]
+#     start.y <- df.umap.pathfinder$y.center[start.ind]
+#     
+#     df.umap.pathfinder$dist.x <- df.umap.pathfinder$x.center - start.x
+#     df.umap.pathfinder$dist.y <- df.umap.pathfinder$y.center - start.y
+#     df.umap.pathfinder$dist <- sqrt((df.umap.pathfinder$dist.x^2) + (df.umap.pathfinder$dist.y^2))
+#     
+#     df.umap.neighbors <- (df.umap.pathfinder %>% dplyr::arrange(df.umap.pathfinder$dist))[1:(n.neighbours+1), ]
+#     df.umap.neighbors <- df.umap.neighbors %>% dplyr::filter((cluster != start.cluster) & (a.mean < (start.activity*gradient.tolerance)))
+#     if (nrow(df.umap.neighbors) == 0) break
+#     
+#     if (descent.method == "max"){
+#       end.cluster <- as.character(df.umap.neighbors$cluster[which.max(df.umap.neighbors$a.mean)]) 
+#     } else if (descent.method == "min"){
+#       end.cluster <- as.character(df.umap.neighbors$cluster[which.min(df.umap.neighbors$a.mean)]) 
+#     }
+#     
+#     if (n.prune < n.neighbours){
+#       df.umap.neighbors.prune <- df.umap.neighbors %>% dplyr::arrange(dist)
+#       df.umap.neighbors.prune <- df.umap.neighbors.prune[c(n.prune+1):nrow(df.umap.neighbors.prune), ]
+#           clusters.considered <-  df.umap.neighbors.prune$cluster
+#     clusters.considered <- clusters.considered[!(clusters.considered %in% end.cluster)] 
+#     } else {
+#     clusters.considered <-  df.umap.neighbors$cluster
+#     clusters.considered <- clusters.considered[!(clusters.considered %in% end.cluster)]      
+#     }
+# 
+#     
+#     df.umap.pathfinder <- df.umap.pathfinder %>% dplyr::filter(!(cluster %in% cluster.path))
+#     cluster.path <- c(cluster.path, end.cluster)
+#     df.umap.pathfinder <- df.umap.pathfinder %>% dplyr::filter(!(cluster %in% clusters.considered))
+#     
+#     if (nrow(df.umap.pathfinder) == 0) break
+#   }
+#   
+#   
+# 
+# df.path <- NULL
+# for (i in 2:length(cluster.path)){
+#   
+#   start.ind <- which(df.umap.summary$cluster %in% cluster.path[i-1])
+#   end.ind <- which(df.umap.summary$cluster %in% cluster.path[i])
+#   
+#   df.path <- bind_rows(df.path, data.frame(x1 = df.umap.summary$x.center[start.ind],
+#              y1 = df.umap.summary$y.center[start.ind],
+#              x2 = df.umap.summary$x.center[end.ind],
+#              y2 = df.umap.summary$y.center[end.ind],
+#              x.cluster = cluster.path[i-1],
+#              y.cluster = cluster.path[i]))
+#   
+# }
+# 
+# 
+#   ggplot() + 
+#     geom_point(data = df.umap, aes(x = x, y = y, color = activity)) + 
+#     geom_point(data = df.umap.summary, aes(x = x.center, y = y.center, fill = orderedFactor(cluster)), size = 3) +
+#     labs(fill = "Cluster") + 
+#     geom_segment(data = df.path, aes(x = x1, y = y1, xend = x2, yend = y2), color = "red", size = 2) + 
+#     viridis::scale_color_viridis() + 
+#     theme_miko(legend = F)
+#   
+
+  
+```
+
+```{r VERSION 2}
+
+
+ 
+#   
+#   n.iterations <- 300
+#   
+#   n.neighbours <- 5
+#   n.prune <- 0 # value smaller than n.neighbors
+#   
+#   gradient.tolerance <- 2
+#   descent.method <- "min" # max or min descent
+#   
+#   df.umap.pathfinder <- df.hex
+#   df.umap.pathfinder$cluster <- as.character(df.umap.pathfinder$cluster)
+#   
+#  # filter
+# # df.umap.pathfinder$an <- df.umap.pathfinder$a.mean * df.umap.pathfinder$n
+# # sd.an <- 0.1*sd(df.umap.pathfinder$an )
+# # df.umap.pathfinder <- df.umap.pathfinder[abs(df.umap.pathfinder$an) > sd.an, ]
+# # 
+# # df.hex <- df.umap.pathfinder
+#   
+#   cluster.path <- c()
+#   start.ind <- which.max(df.umap.pathfinder$a.mean * df.umap.pathfinder$n)
+#   # start.ind <- which.max(df.umap.pathfinder$a.mean)
+#   start.cluster <- as.character(df.umap.pathfinder$cluster[start.ind])
+#   cluster.path <- c(cluster.path, start.cluster)
+#   for (i in 1:n.iterations){
+# 
+#     
+#     if (i > 1){
+#       if (start.cluster == end.cluster) stop()
+#       start.cluster <- end.cluster
+#       start.ind <- which(df.umap.pathfinder$cluster %in% start.cluster)
+#     }
+#         end.cluster <- c()
+#     
+#     start.activity <- df.umap.pathfinder$a.mean[start.ind]
+#     start.n <- df.umap.pathfinder$n[start.ind]
+#     
+#     start.x <- df.umap.pathfinder$x.center[start.ind]
+#     start.y <- df.umap.pathfinder$y.center[start.ind]
+#     
+#     df.umap.pathfinder$dist.x <- df.umap.pathfinder$x.center - start.x
+#     df.umap.pathfinder$dist.y <- df.umap.pathfinder$y.center - start.y
+#     df.umap.pathfinder$dist <- sqrt((df.umap.pathfinder$dist.x^2) + (df.umap.pathfinder$dist.y^2))
+#     
+#     df.umap.neighbors <- (df.umap.pathfinder %>% dplyr::arrange(df.umap.pathfinder$dist))[1:(n.neighbours+1), ]
+#     df.umap.neighbors <- df.umap.neighbors %>% dplyr::filter((cluster != start.cluster) & (a.mean < (start.activity*gradient.tolerance)))
+#     if (nrow(df.umap.neighbors) == 0) break
+#     
+#     
+#     a.i <- df.umap.neighbors$a.mean
+#     n.i <- df.umap.neighbors$n
+#     a.mean <- start.activity
+#     n.mean <- start.n
+#     d.i <- df.umap.neighbors$dist
+#     
+#     cur.dif <- (abs((a.mean*n.mean) - (a.i*n.i)))/d.i
+#     cur.dif[is.na(cur.dif)] <- mean(cur.dif, na.rm = T)
+#     
+#     
+#     if (descent.method == "max"){
+#       end.cluster <- as.character(df.umap.neighbors$cluster[which.max(cur.dif)]) 
+#       # end.cluster <- as.character(df.umap.neighbors$cluster[which.max((start.activity - df.umap.neighbors$a.mean))]) 
+#     } else if (descent.method == "min"){
+#       end.cluster <- as.character(df.umap.neighbors$cluster[which.min(cur.dif)])
+#       # end.cluster <- as.character(df.umap.neighbors$cluster[which.min((start.activity - df.umap.neighbors$a.mean))]) 
+#     }
+#     
+#     if (n.prune < n.neighbours){
+#       df.umap.neighbors.prune <- df.umap.neighbors %>% dplyr::arrange(dist)
+#       # df.umap.neighbors.prune <- df.umap.neighbors.prune[c(n.prune+1):nrow(df.umap.neighbors.prune), ]
+#       df.umap.neighbors.prune <- df.umap.neighbors.prune[1:(n.prune+1), ]
+#           clusters.considered <-  df.umap.neighbors.prune$cluster
+#     clusters.considered <- clusters.considered[!(clusters.considered %in% end.cluster)] 
+#     } else {
+#     clusters.considered <-  df.umap.neighbors$cluster
+#     clusters.considered <- clusters.considered[!(clusters.considered %in% end.cluster)]      
+#     }
+# 
+#     
+#     df.umap.pathfinder <- df.umap.pathfinder %>% dplyr::filter(!(cluster %in% cluster.path))
+#     cluster.path <- c(cluster.path, end.cluster)
+#     df.umap.pathfinder <- df.umap.pathfinder %>% dplyr::filter(!(cluster %in% clusters.considered))
+#     
+#     if (nrow(df.umap.pathfinder) == 0) break
+#   }
+#   
+#   
+# 
+# df.path <- NULL
+# for (i in 2:length(cluster.path)){
+#   
+#   start.ind <- which(df.hex$cluster %in% cluster.path[i-1])
+#   end.ind <- which(df.hex$cluster %in% cluster.path[i])
+#   
+#   df.path <- bind_rows(df.path, data.frame(x1 = df.hex$x.center[start.ind],
+#              y1 = df.hex$y.center[start.ind],
+#              x2 = df.hex$x.center[end.ind],
+#              y2 = df.hex$y.center[end.ind],
+#              x.cluster = cluster.path[i-1],
+#              y.cluster = cluster.path[i]))
+#   
+# }
+# 
+# 
+# df.path$dist <- log1p(sqrt((df.path$x1 - df.path$x2)^2 + (df.path$y1 - df.path$y2)^2))
+# hist(df.path$dist)
+# 
+# 
+# # prune disjoint paths
+# do.prune <- T
+# if (do.prune){
+# median.dist <- median(df.path$dist)
+# dist.thresh <- (2.5*sd(df.path$dist)) + median.dist
+# df.path <- df.path[df.path$dist < dist.thresh, ]
+# 
+# for (i in 1:nrow(df.path)){
+#   if (i == 1) {
+#     current.path <- 1
+#     df.path$path.member[i] <- current.path
+#   } else {
+#     if ((df.path$x1[i] == df.path$x2[i-1]) & (df.path$y1[i] == df.path$y2[i-1])){
+#       df.path$path.member[i] <- current.path
+#     } else {
+#       current.path <- current.path + 1
+#       df.path$path.member[i] <- current.path
+#     }
+#   }
+# }  
+# df.path.tally <- data.frame(table(df.path$path.member))
+# which.principle.path <- df.path.tally$Var[which.max(df.path.tally$Freq)]
+#   df.path <- df.path[df.path$path.member %in% which.principle.path, ]
+# }
+
+
+# 
+# 
+# 
+#   ggplot() + 
+#     geom_point(data = df.umap, aes(x = x, y = y, color = activity)) + 
+#     geom_point(data = df.hex, aes(x = x.center, y = y.center, size = n, fill = orderedFactor(cluster))) +
+#     labs(fill = "Cluster") + 
+#     geom_segment(data = df.path, aes(x = x1, y = y1, xend = x2, yend = y2), color = "red", size = 2) + 
+#     viridis::scale_color_viridis() + 
+#     theme_miko(legend = F)
+#   
+# 
+#     ggplot() + 
+#     geom_point(data = df.umap, aes(x = x, y = y, color = activity)) + 
+#       viridis::scale_color_viridis() + 
+#     geom_point(data = df.hex, aes(x = x.center, y = y.center, size = abs(n*a.mean))) 
+```
+```{r BEST}
+# 
+# # get hex
+#   so.query <- schex::make_hexbin(so.query, nbins = 20,
+#                                  dimension_reduction = "UMAP")
+#   # 
+# 
+# # df.umap$activity <- so.imp@reductions[["umap"]]@cell.embeddings
+# df.umap$activity <- so.imp@reductions[["pca"]]@cell.embeddings[,4]
+#   so.query@meta.data[["activity"]] <- df.umap$activity
+# 
+#   plt.sc <- schex::plot_hexbin_meta(
+#     so.query,
+#     col = "activity",
+#     action = "mean",
+#     no = 1,
+#     colors = NULL,
+#     title = NULL,
+#     xlab = NULL,
+#     ylab = NULL,
+#     na.rm = FALSE
+#   )
+# 
+#   df.hex <- plt.sc[["data"]]
+#   
+#   colnames(df.hex) <- c("x.center", "y.center", "n", "a.mean")
+# df.hex$cluster <- 1:nrow(df.hex)
+# 
+# 
+# library(e1071)
+# u.hex <- unique(df.hex$cluster)
+# 
+# # get distance matrices
+# hex.mat.euc <-  matrix(nrow = length(u.hex), ncol = length(u.hex))
+# hex.mat.act <- matrix(nrow = length(u.hex), ncol = length(u.hex))
+# for (i in 1:length(u.hex)){
+#   x.start <- df.hex$x.center[i]; y.start <- df.hex$y.center[i]
+#   act.start <- df.hex$a.mean[i]; n.start <- df.hex$n[i]
+#   for (j in 1:length(u.hex)){
+#   x.end <- df.hex$x.center[j]; y.end <- df.hex$y.center[j]    
+#   act.end <- df.hex$a.mean[j]; n.end <- df.hex$n[j]
+#   
+#   hex.mat.euc[i,j] <- sqrt((x.start-x.end)^2 + (y.start-y.end)^2)
+#   hex.mat.act[i,j] <- act.start - act.end
+#   }
+# }
+# 
+# # filter feasible connections
+# hex.mat.euc[hex.mat.euc == 0] <- NA
+# hex.mat.euc[hex.mat.euc > min(hex.mat.euc, na.rm = T)+1 ] <- Inf
+# rownames(hex.mat.euc) <- colnames(hex.mat.euc) <- rownames(hex.mat.act) <- colnames(hex.mat.act) <-u.hex
+# 
+# # get shorest paths
+# path.dist <- e1071::allShortestPaths(hex.mat.euc)
+# 
+# # construct paths nodes
+# get.path <- function(df.hex, cluster.path){
+#   df.path <- NULL
+#   for (i in 2:length(cluster.path)){
+#     
+#     start.ind <- which(df.hex$cluster %in% cluster.path[i-1])
+#     end.ind <- which(df.hex$cluster %in% cluster.path[i])
+#     
+#     df.path <- bind_rows(df.path, data.frame(x1 = df.hex$x.center[start.ind],
+#                                              y1 = df.hex$y.center[start.ind],
+#                                              x2 = df.hex$x.center[end.ind],
+#                                              y2 = df.hex$y.center[end.ind],
+#                                              x.cluster = cluster.path[i-1],
+#                                              y.cluster = cluster.path[i],
+#                          dist = sqrt((df.hex$x.center[start.ind] - df.hex$x.center[end.ind])^2 + 
+#                                        (df.hex$y.center[start.ind] - df.hex$y.center[end.ind])^2)))
+#     
+#   }
+#   return(df.path)
+# }
+# 
+# # construct path segments
+# df.all.paths <- NULL
+# 
+# u.hex.sample <- sample(u.hex, 20)
+# for (i in 1:length(u.hex.sample)){
+#   start.clust <- u.hex.sample[i]
+#   for (j in 1:length(u.hex)){
+#     end.clust <- u.hex[j]
+#     which.path <- paste0(start.clust, "-", end.clust)
+#     if (i == j) next
+#     df.path.cur <- get.path(df.hex, extractPath(path.dist, start.clust, end.clust))
+#     df.path.cur$path <- which.path
+#     df.all.paths <- bind_rows(df.all.paths, df.path.cur)
+#   }
+# }
+# 
+# # filter paths by distances
+# df.all.paths <- df.all.paths[df.all.paths$dist < 2*sd(df.all.paths$dist), ]
+# 
+# # get number of steps in path
+# df.all.paths <- df.all.paths %>%
+#   group_by(path) %>%
+#   mutate(n.steps = length(path))
+# 
+# # get cluster pair names and tally more frequently nodes
+# df.all.paths$xy <- paste0(df.all.paths$x.cluster, "-", df.all.paths$y.cluster)
+# df.all.paths.tally <- data.frame(table(df.all.paths$xy))
+# colnames(df.all.paths.tally) <- c("xy", "Freq")
+# 
+# # get top paths
+# df.all.paths.u <- unique(df.all.paths %>% dplyr::select(-c("path")))
+# df.all.paths.u <- merge(df.all.paths.u, df.all.paths.tally, by = "xy")
+# # df.all.paths.u <- df.all.paths.u %>% dplyr::filter(Freq > (median(Freq)+ (3*mad(Freq))))
+#  # df.all.paths.u <- df.all.paths.u %>% dplyr::filter(Freq > (median(Freq)+ (0*mad(Freq))))
+# 
+# # visualize top segments
+# ggplot() + 
+#   geom_point(data = df.umap, aes(x = x, y = y), color = "grey") + 
+#   geom_point(data = df.hex, aes(x = x.center, y = y.center, size = n, fill = orderedFactor(cluster))) +
+#   labs(fill = "Cluster") + 
+#   geom_segment(data = df.all.paths.u, aes(x = x1, y = y1, xend = x2, yend = y2, size = (Freq)/5, color = (Freq))) + 
+#   viridis::scale_color_viridis() + 
+#   theme_miko(legend = F)
+# 
+# # subset paths based on most frequented nodes
+# df.path.filtered <- df.all.paths[df.all.paths$xy %in% df.all.paths.u$xy, ]
+# df.path.filtered <- df.path.filtered %>%
+#   group_by(path) %>%
+#   mutate(n.steps.av = length(path))
+# df.path.filtered$keep.this <- df.path.filtered$n.steps == df.path.filtered$n.steps.av
+# df.path.filtered <- df.path.filtered %>% dplyr::filter(keep.this)
+# u.path.filtered <- unique(df.path.filtered$path)
+# 
+# 
+# # find highly correlated paths
+# df.path.cor <- NULL
+# for (i in 1:length(u.path.filtered)){
+#   
+#   path.current <- df.path.filtered[df.path.filtered$path %in% u.path.filtered[i], ]
+#   path.order <- c(path.current$x.cluster, path.current$y.cluster[nrow(path.current)])
+#   activity.order <- df.hex$a.mean[path.order]
+#   df.path.activity <- data.frame(x = path.order, y = activity.order)
+# 
+#   df.path.cor <- bind_rows(df.path.cor, data.frame(
+#     path =  u.path.filtered[i],
+#     n.steps = nrow(path.current),
+#     cor =  cor(path.order, activity.order,method =  "spearman")
+#   ))
+#  
+# 
+# }
+# df.path.cor <- df.path.cor[complete.cases(df.path.cor), ]
+# 
+# 
+# # filter top correlations
+# df.path.cor.top <- df.path.cor %>% 
+#   dplyr::filter(n.steps > 5) %>% 
+#   top_n(150, abs(cor)) %>%
+#   dplyr::filter((cor > 0.9) | (cor < -0.9))
+# 
+# # omit path redundancies and get pathway similarities (candidate for parallelization)
+# u.path.filtered.top <- unique(df.path.cor.top$path)
+# mat.path.red <- matrix(nrow = length(u.path.filtered.top), ncol = length(u.path.filtered.top))
+# mat.path.sim <- matrix(nrow = length(u.path.filtered.top), ncol = length(u.path.filtered.top))
+# 
+# omit.which <- c()
+# for (i in 1:length(u.path.filtered.top)){
+#   
+#   path.current.i <- df.path.filtered[df.path.filtered$path %in% u.path.filtered.top[i], ]
+#   path.order.i <- c(path.current.i$x.cluster, path.current.i$y.cluster[nrow(path.current.i)])
+#   
+#   for (j in 1:length(u.path.filtered.top)){
+#     
+#     path.current.j <- df.path.filtered[df.path.filtered$path %in% u.path.filtered.top[j], ]
+#     path.order.j <- c(path.current.j$x.cluster, path.current.j$y.cluster[nrow(path.current.j)])
+#     
+#     is.subset <- F
+#     f.agree <- 0
+#     if (length(path.order.i) > length(path.order.j)){
+#       is.subset <- all(path.order.j %in% path.order.i)
+#       f.agree <- sum(path.order.j %in% path.order.i)/length(path.order.j)
+#       if (is.subset) omit.which <- c(omit.which,u.path.filtered.top[j] )
+#     } else if (length(path.order.i) < length(path.order.j)) {
+#       is.subset <-all(path.order.i %in% path.order.j) 
+#       f.agree <- sum(path.order.i %in% path.order.j)/length(path.order.i)
+#       if (is.subset) omit.which <- c(omit.which,u.path.filtered.top[i] )
+#     } else  if (length(path.order.i) == length(path.order.j)){
+#       is.subset <-all(path.order.i %in% path.order.j) 
+#       f.agree <- sum(path.order.i %in% path.order.j)/length(path.order.i)      
+#     }
+#     
+#     mat.path.red[i, j] <- is.subset
+#     mat.path.sim[i, j] <- f.agree
+#     
+#   }
+#   
+# }
+# 
+
+
+```
+```{r get lineage clusters, fig.width=12, fig.height=4}
+# , fig.width=12, fig.height=4
+# library(dynamicTreeCut)
+# 
+# h <- hclust( dist(mat.path.sim), method = "complete", members = NULL)
+# h.cut <- cutreeDynamic(h, minClusterSize = nrow(mat.path.sim)/4, method = "hybrid")
+# df.path.cor.top$cluster <- h.cut
+# u.h.clust <- unique(h.cut)
+# # for (i in 1:length(h.cut)){
+# #   
+# # }
+# 
+# omit.which.u <- unique(omit.which)
+# 
+# df.path.filtered.top <- NULL
+# for (i in 1:length(u.h.clust)){
+#   df.path.cor.top.mem <- df.path.cor.top[df.path.cor.top$cluster %in% u.h.clust[i], ]
+#   df.path.filtered.top.mem <- df.path.filtered %>% dplyr::filter(path %in% df.path.cor.top.mem$path)
+#   df.path.filtered.top.mem$lin.clust <- u.h.clust[i]
+#   df.path.filtered.top <- bind_rows(df.path.filtered.top, df.path.filtered.top.mem)
+# }
+# # df.path.filtered.top <- df.path.filtered %>% dplyr::filter(path %in% df.path.cor.top$path)
+# df.path.filtered.top <- df.path.filtered.top %>% dplyr::filter(!(path %in% omit.which.u))
+# 
+# # final paths
+# u.path.final <- unique(df.path.filtered.top$path)
+# ggplot() + 
+#   geom_point(data = df.umap, aes(x = x, y = y, color = activity)) + 
+#   geom_point(data = df.hex, aes(x = x.center, y = y.center, size = n, fill = orderedFactor(cluster))) +
+#   labs(fill = "Cluster") + 
+#   geom_segment(data = df.path.filtered.top, aes(x = x1, y = y1, xend = x2, yend = y2), color = "red", size= 1) + 
+#   viridis::scale_color_viridis() + 
+#   facet_wrap(~lin.clust) +
+#   theme_miko(legend = F)
+# 
+# 
+# if (print.inline){
+#   pheatmap::pheatmap(mat.path.sim)
+# }
+
+
+```
+
+
+
+
+
+
 
 ```{r visualize top genes across algorithms, fig.height=4, fig.width=20}
 
@@ -2949,7 +4152,7 @@ for (i in 1:length(all.lineages)){
 ```
 
 
-```{r, fig.height=10, fig.width=14}
+```{r plt heatmaps, fig.height=10, fig.width=14}
 
 if (print.inline){
   print(plt.all.list)
@@ -3229,7 +4432,7 @@ if (nrow(df.imp.ped) > n.gene.length){
 }
 
 # get expression matrix
-e.mat <- getExpressionMatrix(so.query, which.assay = "RNA", which.data = "data")
+e.mat <- getExpressionMatrix(so.query, which.assay = DefaultAssay(so.query), which.data = "data")
 
 # get pedigree-specific data
 if (which.lin.tva == "scPedigree"){
@@ -3584,7 +4787,8 @@ for (i in 1:length(u.lineage)){
     sc.mat <- as.matrix(signal.characteristics)
     
     # cluster data
-    ce<-clusterMany(t(sc.mat), clusterFunction="pam", ks=2:n.cluster, minSizes=3, isCount = F,nFilterDims=c(100,500,1000),
+    ce<-clusterMany(t(sc.mat), clusterFunction="pam", ks=2:n.cluster, 
+                    minSizes=3, isCount = F,nFilterDims=c(100,500,1000),
                     reduceMethod=c("PCA"),nReducedDims=c(3, 10),run=TRUE)
     
     # find consensus clusters
@@ -4054,7 +5258,7 @@ for (i in 1:length(all.lineages)){
   }
 }
 
-plt.hm.mod.list
+# plt.hm.mod.list
 
 ```
 
