@@ -159,8 +159,6 @@ stopifnot(exists("input.type"))
 stopifnot(exists("input_set")) 
 
 try({
-  # stopifnot(exists("analysis.parameters$organism.include")) 
-   # if (length(analysis.parameters$organism.include) ==  1) 
  analysis.parameters$organism.include <- rep(analysis.parameters$organism.include, length(input_data))
 }, silent = T)
 
@@ -722,7 +720,7 @@ calc_mito_content_by_bc <- function(so, set_name, bc_info_flag, input.type = 1){
     barcodes <-unique(so@meta.data[["Barcode"]])
     
     # create dataframe to store mitochondrial content, stratified by cell type
-    df_by_bc <- data.frame()
+    df_by_bc <- NULL
     
     # for each cell type
     for (i in 1:length(barcodes)) {
@@ -731,13 +729,16 @@ calc_mito_content_by_bc <- function(so, set_name, bc_info_flag, input.type = 1){
       count.rna_by_bc <- as.vector(so$nCount_RNA[so$Barcode == barcodes[i]])
       n_cells <- length(percent.mt_by_bc)
       cur_length <- dim(df_by_bc)[1]
+      
       # get QC parameters for each cell sample
-      for (j in 1:n_cells) {
-        df_by_bc[cur_length + j, "barcode"] <- barcodes[i]
-        df_by_bc[cur_length + j, "percent.mt"] <- percent.mt_by_bc[j]
-        df_by_bc[cur_length + j, "count.feature"] <- count.feature_by_bc[j]
-        df_by_bc[cur_length + j, "count.rna"] <- count.rna_by_bc[j]
-      }
+      df_by_bc <- bind_rows(
+        df_by_bc,
+          data.frame(barcode = barcodes[i],
+                     percent.mt = percent.mt_by_bc,
+                     count.feature = count.feature_by_bc,
+                     count.rna = count.rna_by_bc)
+      )
+      
     }
   } else { # if no cell type information provided, pool everything together
     df_by_bc <- data.frame()
@@ -874,11 +875,14 @@ if (analysis.parameters$print.inline){
 # Run data normalization
 normalization_method_ps <- "SCT" # "NFS" or "SCT"
 
-enable.parallelization <- T
+enable.parallelization <- F
+conserve.memory <- F
+
 if (n.workers$normScale == 1) enable.parallelization <- F
 
 so<- scNormScale(so, gNames.list, normalization_method_ps, vars2regress = analysis.parameters$vars2regress,
-                 n.workers = n.workers$normScale,  max.memory = (max.memory*20480/20 * 1024^2), enable.parallelization = enable.parallelization)
+                 n.workers = n.workers$normScale,  max.memory = (max.memory*20480/20 * 1024^2), 
+                 enable.parallelization = enable.parallelization, conserve.memory = conserve.memory)
 
 # plot variable genes
 plt.variable_genes <- variableGenes.Plot(so, gNames.list, analysis.parameters$set_names)
