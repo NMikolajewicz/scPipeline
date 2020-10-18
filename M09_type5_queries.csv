@@ -11,3 +11,4 @@ IFNg.response,GO:0034341
 IFNa.response,GO:0035455
 IFNb.response,GO:0035456
 autophagy,GO:0006914
+gene.silencing.miRNA,GO:0035195
