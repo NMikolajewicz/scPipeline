@@ -67,15 +67,14 @@ which.input <- list(
   #   4: top N cluster markers
   #   5: M09_type5_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
-  query_input_format = 3,
-  do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
+  query_input_format = 5,
+  do.module = F, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
-  which.gene.set = c("R74.markers") # character (e.g., sex.specific)
+  which.gene.set = c("gene.silencing.miRNA") # character (e.g., sex.specific)
 )
-# which.gene.set = c("Gpnmb", "Cd68",  "Bnc2", "Ptgs2", "Unc5b", "Twist2", "Efs", "Plxnb3", "Gjb3", "Lancl3", "Gas1", "Pdpn", "Stc2")
-# GL261.CT2A.specific
-# "PRXD4", "LCP1"
+
+# 
 
 #############################
 
@@ -104,8 +103,7 @@ correlation.settings <- list(
 # Miscillaneus settings
 
 # cluster resolution
-cluster.resolution <- 1
-# cluster.resolution <- 0.2
+cluster.resolution <- 0.5
 
 # specify subgroup provided in M00_subgroups.csv; subgroup <- "no.subgroup" to include all data
 subset.df <- "no.subset"
@@ -117,6 +115,9 @@ which.species <- "Mm" # Option: Mm or Hs
 # input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
 # input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
+# input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+# input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
+# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 
@@ -125,14 +126,14 @@ print.inline <- F
 
 # n workers
 n.workers <- list(
-  gsea = 4
+  gsea = 12
 )
 
 # save PDF
 save.pdf <- T
 
 # downsample factor
-subsample_factor <- 1
+subsample_factor <- 0.5
 
 
 ```
@@ -195,8 +196,12 @@ if (which.input$query_input_format==0){
 } else if ((which.input$query_input_format==3) | (which.input$query_input_format==4)) {
   meta.module.flag <- meta.module.helper( which.input$do.module,T)
 } else if (which.input$query_input_format==5){
-  stopifnot(which.gene.set %in% names(gene.sets.type5))
-  markers_of_interest <- id2geneset(gene.sets.type5[[which.gene.set]], my.species = default.species) # REQUIRED if query_input_format == 1
+  stopifnot(which.gene.set %in% gene.sets.type5$term)
+  markers_of_interest <- id2geneset(gene.sets.type5$id[gene.sets.type5$term %in% which.gene.set ], 
+                                    my.species = which.species) # REQUIRED if query_input_format == 1
+   markers_of_interest <- as.data.frame(unique(markers_of_interest))
+   colnames(markers_of_interest) <- which.gene.set
+   
   meta.module.flag <- meta.module.helper( which.input$do.module,F)
 } else if (which.input$query_input_format==6){
   scMiko.geneSets <- scMiko::geneSets
@@ -276,10 +281,6 @@ if (which.input$query_input_format == 1){
   output.markers  <- m9.importMarkers(query.format = which.input$query_input_format, 
                                       input.file = input_file, 
                                       which.col = which.col,
-                                      which.species = which.species)
-} else if (which.input$query_input_format == 5){
-  output.markers  <- m9.importMarkers(query.format = 1, 
-                                      markers.of.interest = markers_of_interest,
                                       which.species = which.species)
 } else if (which.input$query_input_format == 0){
   
@@ -601,8 +602,8 @@ gNames <- gNames.list
 available_markers <- c()
 
 # check if point size adjustment is necessary
-if (ncol(so.query)> 10000) {
-  aps <- F 
+if (ncol(so.query)> 50000) {
+  aps <- F
 } else {
   aps <- T
 }
@@ -789,10 +790,6 @@ for (i in 1:length(available_markers)){
     print(plt.sgExp.all[[available_markers[i]]])
   }
 }
-
-# plt.sgExp.all
-
-plt.sgExp.all
 
 ```
 
@@ -1380,7 +1377,7 @@ for (i in 1:length(available_markers)){
     ncol = 2
   )
   
-  low.lq <- plt.sgExp.all[[i]]
+  low.lq <- plt.sgExp.all[[available_markers[i]]]
   lq <- cowplot::plot_grid(plotlist = list(top.lq, low.lq), ncol = 1, rel_heights = c(2,2))
   plt.gsea <-  plt.top.gsea[[available_markers[i]]] + theme_miko(legend = F) 
   mq <- cowplot::plot_grid(plotlist = list(lq,
@@ -1392,6 +1389,8 @@ for (i in 1:length(available_markers)){
   dash.list[[available_markers[i]]] <- mq
   
 }
+
+# mq
 
 ```
 
@@ -1521,7 +1520,7 @@ plt.dot.list <- list()
     }
   }, silent = T)
   
-
+ # plt.dot.list[["Dot.DEG"]]
 ```
 
 ```{r central log}
