@@ -49,7 +49,8 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # Query input
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 
 
 # specify reference genesets
@@ -58,7 +59,7 @@ which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM", 
 # which.references <- "brain.GBM.R103"
 
 # specify cluster resolution
-cluster.resolution <- 0.3 # OPTIONAL; range 0 to inf (default = 1)
+cluster.resolution <- 1 # OPTIONAL; range 0 to inf (default = 1)
 
 so.input.species <- "Mm" # eREQUIRED; Hs, Mm
 
@@ -136,107 +137,6 @@ rm(prep.list);
 invisible({gc()})
 
 ```
-
-```{r, fig.width = 15, fig.height = 15}
-# 
-# 
-# library(SingleCellSignalR)
-# 
-# data_test <- function (file, most.variables = 0, lower = 0, upper = 0, normalize = TRUE,
-#                        write = FALSE, verbose = TRUE, plot = FALSE)
-# {
-#   data<-as.matrix(file@assays[[DefaultAssay(file)]]@counts)
-#   stopifnot("matrix" %in% class(data))
-#   if (dir.exists("data") == FALSE & write == TRUE) {
-#     dir.create("data")
-#   }
-#   #data=file
-#   all.genes <- rownames(data)
-#   for (i in 1:ncol(data)) {
-#     if (is.character(data[, i]) == FALSE) {
-#       p = i - 1
-#       break
-#     }
-#   }
-#   if (sum (all.genes %in% c(mm2Hs$`Mouse gene name`, mm2Hs$`Gene name`)) ==
-#       0) {
-#     cat("Please convert gene ID's (Ensembl or NCBI ID) to official HUGO gene symbols",
-#         fill = TRUE)
-#     return()
-#   }
-#   genes = all.genes
-#   #data = data[, -c(1:p)]
-#   #rownames(data) = genes
-#   data = data[rowSums(data) > 0, ]
-#   data = data.frame(data[, apply(data, 2, function(x) quantile(x, 0.99)) > 0])
-#   if (normalize == TRUE) {
-#     cat("log-Normalization", fill = TRUE)
-#     q = apply(data, 2, quantile, 0.99)
-#     data.intermediate <- sweep(data, 2, q/median(q), "/")
-#     data = log1p(data.intermediate)
-#   }
-#   data = data[rowSums(data) > 0, ]
-#   data = data[rowSums(data) < quantile(rowSums(data), 1 -
-#                                          upper) & rowSums(data) > quantile(rowSums(data), lower), ]
-#   if (verbose == TRUE) {
-#     cat(paste(dim(data)[1], "genes"), fill = TRUE)
-#     cat(paste(dim(data)[2], "cells"), fill = TRUE)
-#     cat(paste("Zero rate = ", round(sum(data == 0) * 1000/prod(dim(data)))/10,
-#               "%", sep = ""), fill = TRUE)
-#   }
-#   if (write == TRUE) {
-#     fwrite(data.frame(data), "./data/data.txt", sep = "\t")
-#     fwrite(data.frame(rownames(data)), "./data/genes.txt",
-#            sep = "\t")
-#   }
-#   if (most.variables != 0) {
-#     m = apply(data, 1, mean)
-#     cv = apply(data, 1, sd)/m
-#     names(cv) = rownames(data)
-#     cv = cv[m > quantile(m, 0.5)]
-#     if (length(cv) < most.variables) {
-#       mv.genes = names(cv)
-#     }
-#     else {
-#       mv.genes = names(sort(cv, decreasing = TRUE))[1:most.variables]
-#     }
-#     mv.genes = names(sort(cv, decreasing = TRUE))[1:most.variables]
-#     res = list(data, data[mv.genes, ])
-#     names(res) = c("complete.dataset", "most.var.dataset")
-#   } else {
-#     res = data
-#   }
-#   return(res)
-# }
-# # Prepare the data for the analysis
-# small_so <- so.query
-# data = data_test(small_so, write = FALSE)
-# genes = rownames(data)
-# # Proceed to clustering
-# cluster <- as.character(small_so@meta.data[["seurat_clusters"]])
-# cluster <- as.integer(cluster) + 1
-# # clust = clustering(data = data,n = 10, method = "simlr")
-# # cluster = clust$cluster
-# # tsne = clust$`t-SNE`
-# # Cell classification
-# #my.markers = markers(c("immune", "tme", "melanoma", "bc"))
-# # class = cell_classifier(data=data, genes=genes, plot.details = TRUE)
-# # Cluster analysis
-# # clust.ana = cluster_analysis(data = data, genes = genes, cluster = cluster)
-# # Proceed to cell signaling
-# # debug(cell_signaling)
-# signal = cell_signaling(data = data, genes = genes, cluster = cluster,species = "mus musculus", logFC = log2(0.15), s.score = 0.5)
-# # Visualization
-# visualize(inter = signal)
-# visualize(inter = signal, show.in = c(1))
-# expression.plot(data = data, name = "LYPLA1", tsne = tsne)
-# expression.plot.2(data = data, name.1 = "LYPLA1", name.2 = "TRAM1", tsne = tsne)
-# # Create interface network
-# inter.net = inter_network(data = data, signal = signal, genes = genes, cluster = cluster)
-# # Show interactions downstream a specific receptor
-# intra = intra_network(goi = "S1PR1",data = data,genes = genes,cluster = cluster,coi="cluster 3",signal=signal)
-```
-
 
 
 ```{r analysis log}
@@ -1746,60 +1646,6 @@ for (i in 1:length(u.cl)){
 
 
 
-
-```{r plt.deg.mod.1}
-
-# Differential Module Scores
-# ===================================== 
-# 
-# differential analysis of annotation scores. Independent of earlier composite scoring (intended as indepenent annotation method).
-# 
-# Row {.tabset}
-# -------------------------------------
-# 
-# ### Differential Scores 1
-# 
-# Top annotation for each cluster is shown.
-# try({
-#   print(plt.deg.mod.1)
-# savePDF(file.name = paste0(output.path, "PDF/", "M05_differential_genesets_1.pdf"), plot.handle = plt.deg.mod.1, 
-#         fig.width = 7, fig.height = 5, save.flag = save.pdf)
-# }, silent = T)
-
-```
-
-
-
-```{r plt.deg.mod.2}
-
-### Differential Scores 2
-
-# Top N annotations are shown. 
-# try({
-# print(plt.deg.mod.2)
-# 
-# savePDF(file.name = paste0(output.path, "PDF/", "M05_differential_genesets_2.pdf"), plot.handle = plt.deg.mod.2, 
-#         fig.width = 7, fig.height = 5, save.flag = save.pdf)
-# }, silent = T)
-```
-
-
-
-```{r deg.mod.final}
-### DEG Table
-# try({
-# datatable(deg.mod.final,
-#           filter = 'top',
-#           extensions = 'Buttons',
-#           options = list(pageLength = 50,
-#                          dom = 'Bfrtip',
-#                          buttons = c('copy', 'csv', 'pdf')))
-# 
-# write.csv(deg.mod.final, file = paste0(output.path, "Tables/", "differential_genesets_statistics.csv"), 
-#           row.names = F) 
-# }, silent = T)
-
-```
 
 Differential Genes
 ===================================== 
