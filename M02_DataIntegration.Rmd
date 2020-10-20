@@ -44,7 +44,7 @@ invisible({lapply(packages2load, library, character.only = TRUE)})
 
 save.flag <- T
 
-save.filename <- "M02_neuroDif_sct_p1011_011020"
+save.filename <- "allGBM_181020"
 
 k.filter <-  200 # lower k.filter value (e.g., 50) if there is few cells. Default = 200
 
@@ -55,11 +55,11 @@ integration_method <- "CCA" # "CCA" for small datasets, "rPCA" for large dataset
 print.inline <- FALSE
 
 n.workers <- list(
-  import = 6,
-  integration = 4 #(limit to 1 for cluster)
+  import = 3,
+  integration = 1 #(limit to 1 for cluster)
 )
 
-  do.memory.limit <- T # specify whether to limit max memory (set T if local)
+  do.memory.limit <- F # specify whether to limit max memory (set T if local)
   max.memory <- 300 # numeric, in terms of Gb (set to 100 for cluster)
 
 
@@ -71,20 +71,62 @@ target.cluster.resolution <- 0.5
 subset.all <- 1
 
 input.data <- list(
-  p10.CGR8 = list(
-    file = "R71_M01_NM2_p10_CGR8_310820.Rdata",
-    cluster.resolution = 0.3,
+  p4.GBM = list(
+    file = "Module1_pilot4_GL261_CT2A_scaleAll_080120.Rdata",
+    cluster.resolution = 0.5,
     species = "Mm",
     subsample = subset.all,
-    grouping.field = "dataset",
-    groups ="pilot10.Mm"),
-  p11.DIV7 = list(
-    file = "R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
-    cluster.resolution = 0.2,
+    grouping.field = "batch",
+    groups ="p4.GBM"),
+  p6.GBM = list(
+    file = "M01_NM2_R1_test_300720.Rdata",
+    cluster.resolution = 0.5,
     species = "Mm",
     subsample = subset.all,
-    grouping.field = "dataset",
-    groups = "pilot11.Mm")
+    grouping.field = "batch",
+    groups = "p6.GBM"),
+  p7.GBM = list(
+    file = "Module1_p7_GBM_080720.Rdata",
+    cluster.resolution = 0.5,
+    species = "Mm",
+    subsample = subset.all,
+    grouping.field = "batch",
+    groups = "p7.GBM"),
+  p8.GL261 = list(
+    file = "Module1_p8_GL261_tumor_090720.Rdata",
+    cluster.resolution = 0.5,
+    species = "Mm",
+    subsample = subset.all,
+    grouping.field = "batch",
+    groups = "p8.GL261"),
+  p8.CT2A = list(
+    file = "Module1_p8_CT2A_tumor_090720.Rdata",
+    cluster.resolution = 0.5,
+    species = "Mm",
+    subsample = subset.all,
+    grouping.field = "batch",
+    groups = "p8.CT2A"),
+  p9.CT2A = list(
+    file = "Module1_p9_CT2A_250620.Rdata",
+    cluster.resolution = 0.5,
+    species = "Mm",
+    subsample = subset.all,
+    grouping.field = "batch",
+    groups = "p9.CT2A"),
+  p10.GBM = list(
+    file = "R70_M01_NM2_p10_mM_GBM_310820.Rdata",
+    cluster.resolution = 0.5,
+    species = "Mm",
+    subsample = subset.all,
+    grouping.field = "batch",
+    groups = "p10.GBM"),
+  p11.GL261 = list(
+    file = "R62_M01_NM2_p11_GL261_R1_FL_270820.Rdata",
+    cluster.resolution = 0.5,
+    species = "Mm",
+    subsample = subset.all,
+    grouping.field = "batch",
+    groups = "p11.GL261")
 )
 
 # save PDF
@@ -230,7 +272,10 @@ warning("Importing data...")
 input.files <- (as.vector(unlist(lapply(input.data, function(x) x$file))))
 input.files <- paste0(data.path, dir, input.files)
 
-# intitiate lists
+# check if files exist
+if (!all(file.exists(input.files))) stop("Not all input files exist\n")
+
+# initiate lists
 import.list <- list()
 
 # start cluster
@@ -240,7 +285,8 @@ doParallel::registerDoParallel(cl)
 
 
 # iterate through each input file
-import.list <- foreach(i = 1:length(input.files), .packages = c("scMiko"))  %dopar% {
+import.list <- foreach(i = 1:length(input.files), .packages = c("scMiko", "Seurat"))  %dopar% {
+# for (i in 1:length(input.files)){
   
   # get dataset name
   input.label <- input.labels[i]
@@ -284,6 +330,11 @@ import.list <- foreach(i = 1:length(input.files), .packages = c("scMiko"))  %dop
   if (input.data[[input.label]]$subsample < 1)  so <- downsampleSeurat(so, input.data[[input.label]]$subsample)
   
   # store results
+  # import.list[[i]] <- list(so = so,
+  #      gList = gNames.list,
+  #      gNames = names(gNames.list),
+  #      input.label = input.label
+  # )
   return(list(so = so,
        gList = gNames.list,
        gNames = names(gNames.list),
@@ -314,13 +365,15 @@ rm(import.list)
 
 
 
-```{r subset common set of genes}
+```{r subset common set of genes, fig.width = 12, fig.height=5}
 
 warning("Subsetting common genes...\n")
 
 gene.av.list <- list()
 
 gList.consolidate <- NULL
+
+gene.tally.list <- list()
 
 for (i in 1:length(so.list)){
   
@@ -343,18 +396,71 @@ for (i in 1:length(so.list)){
     so.list[[set.name]] <- subset(so.list[[set.name]], features = gene.rep[which.match])
   }
   
+  
+  gene.tally.list[[set.name]] <-   gene.rep[which.match]
+  
   so.list[[set.name]] <- ens2sym.so(object = so.list[[set.name]], gNames.list = gList[[set.name]])
   
-  # gList.consolidate <- c(gList.consolidate, gList[[set.name]])
   gList.consolidate <- bind_rows(gList.consolidate, data.frame(ens = gNames[[set.name]], sym = gList[[set.name]]))
   
   gene.av.list[[set.name]] <-  rownames(so.list[[set.name]])
   
 }
 
+# gene availability tally
+av.tally <- data.frame(table(unlist(gene.av.list)))
+colnames(av.tally) <- c("Gene", "N")
+
+# visualize availability
+plt.gene.av.tally <- av.tally %>%
+  dplyr::filter(N <= length(input.files)) %>%
+  ggplot(aes(x = N)) + 
+  geom_histogram(bins =  length(input.files), color = "black", fill = "grey") + 
+  geom_text(stat = 'count',aes(label =..count.., vjust = -0.2)) + 
+  theme_miko() + 
+  xlab( paste0("Gene Representation (","/",length(input.files), " datasets)" )) + 
+  ylab("Gene Count") + 
+  labs(title = "Gene representation across datasets", subtitle = "Histogram")
 
 # get intersecting set of genes
 gene.intersect <- Reduce(intersect, gene.av.list)
+
+df.common.genes$rep <- factor(df.common.genes$rep, levels = seq(1, length(gene.av.list)))
+plt.common.bar <- df.common.genes %>%
+  ggplot(aes(x = set, y = n, fill = rep)) + 
+  geom_bar(stat = "identity") + 
+  theme_miko(legend = T) + 
+  xlab("Dataset") + ylab( paste0("Gene Count" )) + 
+  labs(fill = paste0("Gene Rep.\n(","/",length(input.files), " datasets)" ),
+      subtitle = "Stacked counts") + 
+  ggthemes::scale_fill_gdocs()
+
+# convert list to df
+gene.av.df <- namedList2wideDF(gene.av.list)
+
+# merge plots
+plt.common.gene.plot <- cowplot::plot_grid(plt.gene.av.tally, plt.common.bar, ncol = 2, align = "hv", rel_widths = c(1.5, 2))
+if (print.inline){
+  print(plt.common.gene.plot)
+}
+
+df.common.genes <- NULL
+for (i in 1:length(gene.av.list)){
+    set.name <- names(gene.av.list)[i]
+  current.list <- gene.av.list[[set.name]]
+
+  
+  for (j in 1:length(input.files)){
+    current.tally <- as.character(av.tally$Gene[av.tally$N == j])
+    df.common.genes <- bind_rows(df.common.genes, 
+                                 data.frame(set = set.name,
+                                            rep = j,
+                                            n = sum(current.list %in%current.tally )
+                                   
+                                 ))
+  }
+}
+
 
 for (i in 1:length(so.list)){
   set.name <- names(so.list)[i]
@@ -368,6 +474,9 @@ gList.cu <- gList.cu[!duplicated(gList.cu$sym), ]
 gList.cu <- gList.cu[!duplicated(gList.cu$ens), ]
 gNames.list <- gList.cu$sym
 names(gNames.list) <- gList.cu$ens
+
+
+
 
 
 ```
@@ -551,19 +660,6 @@ stopifnot(length(all.cell.names) == length(unique(all.cell.names)))
 
 ```
 
-
-```{r drop scale}
-
-# drop scaled data to allow computational scaling
-# for (i in 1:length(so.list)){
-#   try({so.list[[i]]@assays[["RNA"]]@scale.data <- matrix(NA)}, silent = T)
-#   try({so.list[[i]]@assays[["SCT"]]@scale.data <- matrix(NA)}, silent = T)
-#   try({so.list[[i]]@assays[["integrated"]]@scale.data <- matrix(NA)}, silent = T) 
-# }
-# 
-# invisible({gc()})
-
-```
 
 ```{r integrate data}
 
@@ -1067,7 +1163,6 @@ try({
 
 ```
 
-
 Row
 -----------------------------------------------------------------------
 
@@ -1112,6 +1207,61 @@ try({
 ```
 
 
+Integrated Clusters
+===================================== 
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Gene Intersection
+```{r n common geneplot, fig.width = 12, fig.height =5}
+  print(plt.common.gene.plot)
+```
+
+```{r save common gene plot}
+
+try({
+  savePDF(file.name = paste0(output.path, "PDF/", "M02_gene_intersection.pdf"), 
+          plot.handle = plt.common.gene.plot, fig.width = 12, fig.height =5, save.flag = save.pdf)
+}, silent = T)
+
+```
+
+
+### Gene Intersection Tally Table
+
+```{r tally table}
+
+flex.asDT(av.tally)
+
+```
+```{r save tally table}
+
+try({
+  table.name <- "gene_intersection_tally_table.csv"
+  write.csv(av.tally, file = paste0(output.path, "Tables/", table.name), 
+            row.names = F)   
+}, silent = T)
+
+```
+
+### Gene Intersection Tally Table
+
+```{r list table}
+
+flex.asDT(gene.av.df)
+
+```
+
+```{r save tally table}
+
+try({
+  table.name <- "gene_intersection_table.csv"
+  write.csv(gene.av.df, file = paste0(output.path, "Tables/", table.name), 
+            row.names = F)   
+}, silent = T)
+
+```
 
 Integrated Clusters
 ===================================== 
