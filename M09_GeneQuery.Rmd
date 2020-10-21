@@ -117,8 +117,8 @@ which.species <- "Mm" # Option: Mm or Hs
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
 # input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
-# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
-input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 
 # print figures inline
@@ -133,7 +133,7 @@ n.workers <- list(
 save.pdf <- T
 
 # downsample factor
-subsample_factor <- 0.5
+subsample_factor <- 1
 
 
 ```
