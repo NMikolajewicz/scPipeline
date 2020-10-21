@@ -542,7 +542,7 @@ gNames.list <- gNames.list.list[[1]]
 
 ```
 
-```{r c8 - filter_data_by_subset}
+```{r c8 - filter_data_by_subset, include = FALSE}
 
 # define subset parameters
 subset.df <- data.frame(field = "Organism", subgroups = analysis.parameters$organism.include)
@@ -553,14 +553,14 @@ so <- subsetSeurat(so, subset.df)
 ```
 
 
-```{r c9 - subset barcodes}
+```{r c9 - subset barcodes, include = FALSE}
 
 so <- barcodeLabels(so, which.strata)
 
 ```
 
 
-```{r c10 - get_mt_content}
+```{r c10 - get_mt_content, include = FALSE}
 
 # MITOCHONDRIAL CONTENT
 so <- getMitoContent(so, gNames.list)
@@ -568,7 +568,7 @@ so <- getMitoContent(so, gNames.list)
 ```
 
 
-```{r c11 - barcode rankings, fig.width= 15, fig.height=5}
+```{r c11 - barcode rankings, fig.width= 15, fig.height=5, include = FALSE}
 
 # get metadata
 df.meta.qc <- so@meta.data
@@ -706,7 +706,7 @@ if (analysis.parameters$print.inline) {
 ```
 
 
-```{r c12 - Density plot of % mitochondrial genes, warning = FALSE}
+```{r c12 - Density plot of % mitochondrial genes, warning = FALSE, include = FALSE}
 
 # MITOCHONDRIAL CONTENT DISTRIBUTIONS
 
@@ -779,7 +779,7 @@ if (analysis.parameters$print.inline){
 ```
 
 
-```{r c13 - qc_violin_plots, fig.height= 5, fig.width = 12}
+```{r c13 - qc_violin_plots, fig.height= 5, fig.width = 12, include = FALSE}
 
 if (length(unique(so@meta.data[["subset_group"]]))> 1){
   df.qc <- data.frame(so@meta.data[["subset_group"]],  
@@ -821,7 +821,7 @@ if (analysis.parameters$print.inline){
 ```
 
 
-```{r c14 - QC scatterplots, fig.height= 5, fig.width = 12}
+```{r c14 - QC scatterplots, fig.height= 5, fig.width = 12, include = FALSE}
 
 # Generate QC scatterplots
 max.cells <- 40000
@@ -836,7 +836,7 @@ if (analysis.parameters$print.inline)  print(plt.QC_scatter)
 ```
 
 
-```{r c15 - filter_QC, fig.width = 5, fig.height = 5}
+```{r c15 - filter_QC, fig.width = 5, fig.height = 5, include = FALSE}
 
 if (length(analysis.parameters$set_names) == 2) {
   set.n <- NULL
@@ -870,7 +870,7 @@ if (analysis.parameters$print.inline){
 ```
 
 
-```{r c16 - normalize_data, warning = FALSE}
+```{r c16 - normalize_data, warning = FALSE, include = FALSE}
 
 # Run data normalization
 normalization_method_ps <- "SCT" # "NFS" or "SCT"
@@ -891,7 +891,7 @@ if (analysis.parameters$print.inline) print(plt.variable_genes)
 ```
 
 
-```{r c17 - per cell statistics}
+```{r c17 - per cell statistics, include = FALSE}
 
 # ptm <- proc.time()
 df_nCount <- data.frame(so@meta.data[["nCount_RNA"]], so@meta.data[["nCount_SCT"]])
