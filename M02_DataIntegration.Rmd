@@ -44,7 +44,7 @@ invisible({lapply(packages2load, library, character.only = TRUE)})
 
 save.flag <- T
 
-save.filename <- "allGBM_181020"
+save.filename <- "allGBM_201020"
 
 k.filter <-  200 # lower k.filter value (e.g., 50) if there is few cells. Default = 200
 
@@ -59,7 +59,7 @@ n.workers <- list(
   integration = 1 #(limit to 1 for cluster)
 )
 
-  do.memory.limit <- F # specify whether to limit max memory (set T if local)
+  do.memory.limit <- T # specify whether to limit max memory (set T if local)
   max.memory <- 300 # numeric, in terms of Gb (set to 100 for cluster)
 
 
@@ -78,13 +78,13 @@ input.data <- list(
     subsample = subset.all,
     grouping.field = "batch",
     groups ="p4.GBM"),
-  p6.GBM = list(
-    file = "M01_NM2_R1_test_300720.Rdata",
-    cluster.resolution = 0.5,
-    species = "Mm",
-    subsample = subset.all,
-    grouping.field = "batch",
-    groups = "p6.GBM"),
+  # p6.GBM = list(
+  #   file = "M01_NM2_R1_test_300720.Rdata",
+  #   cluster.resolution = 0.5,
+  #   species = "Mm",
+  #   subsample = subset.all,
+  #   grouping.field = "batch",
+  #   groups = "p6.GBM"),
   p7.GBM = list(
     file = "Module1_p7_GBM_080720.Rdata",
     cluster.resolution = 0.5,
@@ -425,6 +425,24 @@ plt.gene.av.tally <- av.tally %>%
 # get intersecting set of genes
 gene.intersect <- Reduce(intersect, gene.av.list)
 
+# get common genes
+df.common.genes <- NULL
+for (i in 1:length(gene.av.list)){
+    set.name <- names(gene.av.list)[i]
+  current.list <- gene.av.list[[set.name]]
+
+  
+  for (j in 1:length(input.files)){
+    current.tally <- as.character(av.tally$Gene[av.tally$N == j])
+    df.common.genes <- bind_rows(df.common.genes, 
+                                 data.frame(set = set.name,
+                                            rep = j,
+                                            n = sum(current.list %in%current.tally )
+                                   
+                                 ))
+  }
+}
+
 df.common.genes$rep <- factor(df.common.genes$rep, levels = seq(1, length(gene.av.list)))
 plt.common.bar <- df.common.genes %>%
   ggplot(aes(x = set, y = n, fill = rep)) + 
@@ -442,23 +460,6 @@ gene.av.df <- namedList2wideDF(gene.av.list)
 plt.common.gene.plot <- cowplot::plot_grid(plt.gene.av.tally, plt.common.bar, ncol = 2, align = "hv", rel_widths = c(1.5, 2))
 if (print.inline){
   print(plt.common.gene.plot)
-}
-
-df.common.genes <- NULL
-for (i in 1:length(gene.av.list)){
-    set.name <- names(gene.av.list)[i]
-  current.list <- gene.av.list[[set.name]]
-
-  
-  for (j in 1:length(input.files)){
-    current.tally <- as.character(av.tally$Gene[av.tally$N == j])
-    df.common.genes <- bind_rows(df.common.genes, 
-                                 data.frame(set = set.name,
-                                            rep = j,
-                                            n = sum(current.list %in%current.tally )
-                                   
-                                 ))
-  }
 }
 
 
@@ -1207,7 +1208,7 @@ try({
 ```
 
 
-Integrated Clusters
+Gene Intersection
 ===================================== 
 
 Row {.tabset}
@@ -1232,7 +1233,9 @@ try({
 
 ```{r tally table}
 
-flex.asDT(av.tally)
+try({
+ flex.asDT(av.tally) 
+}, silent = T)
 
 ```
 ```{r save tally table}
@@ -1245,15 +1248,17 @@ try({
 
 ```
 
-### Gene Intersection Tally Table
+### Gene Intersection Table
 
 ```{r list table}
 
-flex.asDT(gene.av.df)
+try({
+ flex.asDT(gene.av.df) 
+}, silent = T)
 
 ```
 
-```{r save tally table}
+```{r save list table}
 
 try({
   table.name <- "gene_intersection_table.csv"
