@@ -47,22 +47,24 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # Query input
 # input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
-input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
 # input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
-
+# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+# input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 
 # data prep parameters #########################################################
 
 # specify cluster resolution
-cluster.resolution <- 1
+cluster.resolution <- 0.5
 
 # Data subsampling
 subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify species
-which.species <- "Mm"
+which.species <- "Hs"
 
 # annotation databases #########################################################
 which.annotation.db <- "GO"    # Reactome, GO, Bader, msigdb
@@ -76,7 +78,7 @@ which.msigdb.subcollection <- "TFT"
 # DEG ANALYSIS #####################################################
 
 # Rapid marker finding (logical flag)
-quick_markers <- TRUE 
+quick_markers <- F 
 
 # which markers to return
 only.pos <- F# 
@@ -85,11 +87,12 @@ only.pos <- F#
 DEG.test <- "MAST" #options: wilcox, bimod, roc, t, poisson, negbinom, LR, MAST, DESeq2
 
 # vector specifying pairwise comparisons of interest (cluster id); set to NA for all comparisons
-which.clusters <- c(1,5)
+# which.clusters <- c(1,5)
+which.clusters <- NA
 
 
 # if which.clusters specified, evaluate all query-clusters pairs (T) or restrict analysis to queries only (F)
-all.cluster.query.pairs <- F  # options: T (recommended), F (recommended if specific pair)
+all.cluster.query.pairs <- T  # options: T (recommended), F (recommended if specific pair)
 
 # Misc. ############################################################
 do.schex <- T
@@ -102,12 +105,12 @@ max.paths <- 75 # recommended: 80
 
 # specify number of workers (for parallelization)
 n.workers <- list(
-  deg = 14,   # DEG analysis
-  gsea =  14 # GSEA analysis
+  deg = 3,   # DEG analysis
+  gsea = 6 # GSEA analysis
 )
 
-gsea.p.threshold <- 0.01
-gsea.NES.threshold <- 1.5
+gsea.p.threshold <- 0.05
+gsea.NES.threshold <- 1
 
 # set seed
 seed <- 1095
@@ -266,15 +269,18 @@ if (run.deg){
   doParallel::registerDoParallel(cl)
   
   deg.results <- list()
-  deg.results <- foreach(j = 1:nrow(all.pair.ordered.u), .packages = c("Seurat", "dplyr"))  %dopar% {
+  deg.results <- foreach(j = 1:nrow(all.pair.ordered.u), .packages = c("Seurat", "dplyr"), .errorhandling = 'remove')  %dopar% {
+    # for (j in 1:nrow(all.pair.ordered.u)){
     
+    # try({
+      
     clust.i.name <- paste0("c", all.pair.ordered.u$cluster.1[j])
     clust.j.name <- paste0("c", all.pair.ordered.u$cluster.2[j])
     which.cells.i <- cell.names[cluster.membership %in% all.pair.ordered.u$cluster.1[j]]
     which.cells.j <- cell.names[cluster.membership %in% all.pair.ordered.u$cluster.2[j]]
     
     deg.res <- NULL
-    try({
+    
       
       if (quick_markers == TRUE){
         deg.res <- FindMarkers(object = so.query, 
@@ -298,16 +304,16 @@ if (run.deg){
         deg.res <- deg.res %>% dplyr::filter(p_val_adj < p.threshold)
       }
       
-    }, silent = T)
+    # }, silent = T)
     
     if (!is.null(deg.res)){
       
-      try({
+      # try({
         pair.name <- paste0(clust.i.name, "-", clust.j.name)
         deg.res$pair <-pair.name
         deg.res <- bind_cols(data.frame(genes = rownames(deg.res)), deg.res)
         return(list(deg.res = deg.res, pair.name = pair.name, clust.i.name = clust.i.name, clust.j.name = clust.j.name))
-      }, silent = T)
+      # }, silent = T)
     } else {
       return(list(deg.res = NULL, pair.name = NULL, clust.i.name = NULL, clust.j.name = NULL))
     }
