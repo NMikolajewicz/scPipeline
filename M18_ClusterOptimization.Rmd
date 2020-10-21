@@ -54,20 +54,20 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # Query input
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
-input.file <- "R173_M02_NM2_M02_neuroDif_sct_p1011_011020.Rdata"
+# input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
 
 # Rapid marker finding (logical flag)
-quick_markers <- TRUE 
+quick_markers <- F 
 
 # specify cluster resolution
 # cluster_resolution <- c(0.01, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
-cluster_resolution <- c(0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5)
+cluster_resolution <- c(0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1)
 # cluster_resolution <- c(0.01, 0.15, 0.45, 0.7, 1)
 
 # log fold change threshold (0.5 recommended)
-lfc.threshold <- 1
+lfc.threshold <- 0.5
 
 # p.value threshold <- p.threshold
 p.threshold <- 0.01
@@ -88,8 +88,8 @@ subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify number of workers (for parallelization)
 n.workers <- list(
-  clustering = 7, # data clustering
-  deg = 16         # DEG analysis
+  clustering = 3, # data clustering
+  deg = 4         # DEG analysis
 )
 
 # which markers to return
@@ -844,6 +844,7 @@ for (i in 1:length(cluster_resolution)){
                                         show_rownames = F,
                                         show_colnames = F,
                                         annotation_col = col.ann,
+                                        border_color = NA,
                                         main = paste0("Resolution: ", as.character(cluster_resolution[i]), 
                                                       "\nx=cells, y=genes, z=scaled expression"))
   
@@ -986,7 +987,8 @@ for (i in 1:length(cluster_resolution)){
                                                 breaks = my.breaks,
                                                 color = my.col,
                                                 show_rownames = F,
-                                                main = "Scaled Expression\nx=clusters, y=genes, z=scaled expression")
+                                                main = "Scaled Expression\nx=clusters, y=genes, z=scaled expression",
+                                                border_color = NA)
   
   plt.heat.cluster.scaled <- ggplotify::as.ggplot(plt.heat.cluster.scaled)
   
