@@ -67,11 +67,11 @@ which.input <- list(
   #   4: top N cluster markers
   #   5: M09_type5_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
-  query_input_format = 5,
-  do.module = F, #options: T, F, NA; if NA, takes default, otherwise overides. 
+  query_input_format = 1,
+  do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
-  which.gene.set = c("gene.silencing.miRNA") # character (e.g., sex.specific)
+  which.gene.set = c("yamanaka") # character (e.g., sex.specific)
 )
 
 # 
@@ -115,9 +115,9 @@ which.species <- "Mm" # Option: Mm or Hs
 # input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
 # input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-# input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
 # input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
-input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 
@@ -1036,7 +1036,7 @@ score.results <- foreach(i = 1:length(enrich.groups), .packages = c("fgsea", "pl
     if(which.results$gsea.threshold == 1){
       gse.pathway.filtered <- gse.pathway[gse.pathway$padj < 0.1, ]
     } else if (which.results$gsea.threshold == 2){
-      gse.pathway.filtered <- gse.pathway[((gse.pathway$pval < 0.01) & (abs(gse.pathway$NES) > 1)), ]
+      gse.pathway.filtered <- gse.pathway[((gse.pathway$pval < 0.05) & (abs(gse.pathway$NES) > 0.8)), ]
     } else if (which.results$gsea.threshold == 3){
       gse.pathway.filtered <- gse.pathway %>% top_n(3, NES)
     }
@@ -1052,7 +1052,7 @@ score.results <- foreach(i = 1:length(enrich.groups), .packages = c("fgsea", "pl
     # sig figs for numerics
     gse.pathway.filtered$ES <- signif(gse.pathway.filtered$ES, 3)
     gse.pathway.filtered$NES <- signif(gse.pathway.filtered$NES, 3)
-    gse.pathway.filtered$pval <- signif(gse.pathway.filtered$pval, 3)
+    gse.pathway.filtered$pval <- gse.pathway.filtered$pval
     gse.pathway.filtered$padj <- signif(gse.pathway.filtered$padj, 3)
     
     # filter and rearrange columns
@@ -1083,27 +1083,38 @@ plt.top.gsea <- list()
 for (i in 1:length(available_markers)){
   
  current.paths <- gse.pathway.list[[available_markers[i]]]
+ current.paths <- current.paths %>% dplyr::arrange(-abs(NES))
+ current.paths <- current.paths[!duplicated(current.paths$set), ]
  
  if (is.null(current.paths)) next
- current.paths <- bind_rows(current.paths %>% dplyr::top_n(which.results$gsea.top.n , NES) %>% dplyr::arrange(-NES), 
-                            current.paths %>% dplyr::top_n(which.results$gsea.top.n , -NES) %>% dplyr::arrange(NES))
+ 
+ df.set1 <- current.paths %>% dplyr::filter(NES > 0) %>% dplyr::arrange(log10(pval))
+  df.set2 <- current.paths %>% dplyr::filter(NES < 0) %>% dplyr::arrange(log10(pval))
+ current.paths <- bind_rows(df.set1[1:which.results$gsea.top.n, ] %>% dplyr::arrange(-NES),
+                            df.set2[1:which.results$gsea.top.n, ] %>% dplyr::arrange(NES))
  
  
+ # current.paths <- bind_rows(current.paths %>% dplyr::top_n(which.results$gsea.top.n , NES) %>% dplyr::arrange(-NES), 
+                            # current.paths %>% dplyr::top_n(which.results$gsea.top.n , -NES) %>% dplyr::arrange(NES))
+
  current.paths$pathway <- stringr::str_trunc(current.paths$pathway, 40)
  
  plt.top.gsea[[available_markers[i]]] <- current.paths %>%
-   ggplot(aes(x = reorder(pathway, NES), y = NES, size = -log10(pval), fill = -log10(pval))) + 
+   ggplot(aes(x = reorder(pathway, -log10(pval) * sign(NES)), y = -log10(pval) * sign(NES), size = abs(NES), fill = abs(NES))) + 
    geom_point(pch = 21) + 
    coord_flip() + 
-   xlab("Pathways") + ylab("NES") + 
-   labs(title = "GSEA", subtitle = paste0(available_markers[i], " corr. ranking")) + 
+   xlab("Pathways") + ylab("-log(p)") + 
+   labs(title = "GSEA", subtitle = paste0(available_markers[i], " corr. ranking"), caption = "x-axis = -log(p), color = |NEs|, size = |NEs|") + 
    geom_hline(yintercept = 0, linetype = "dashed") + 
-   viridis::scale_fill_viridis(option = "B")
+   viridis::scale_fill_viridis(option = "B", limits = c(min(abs(current.paths$NES)),max(abs(current.paths$NES))))
+ 
  
  if (print.inline){
    plt.top.gsea[[available_markers[i]]]
  }
 }
+
+# plt.top.gsea[[available_markers[2]]]
 
 ```
 
@@ -1274,7 +1285,9 @@ if (grouping_var != "seurat_clusters"){
 # fitered correlation matrix
   if (class(cor.mat.sub) == "matrix") {
     plt.heat <- ggplotify::as.ggplot(pheatmap::pheatmap(cor.mat.sub, 
-                                                        main = "Query x Gene Correlations\nx=query, y=genes, z=correlation"))
+                                                        main = "Query x Gene Correlations\nx=query, y=genes, z=correlation",
+                                                         border_color = NA, silent = T))
+                                    
   } else {
     plt.heat <- NULL
   }
