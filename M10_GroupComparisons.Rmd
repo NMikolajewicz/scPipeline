@@ -53,7 +53,8 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 # input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
-input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
 # input.file <- "Module1_pilot6_invitroGBM_updatedBarcodes_290220.Rdata"
 # input.file <- "Module2_Renca_cell_nuc_sci_T12_4000ds_Celsius_integrated_240220.Rdata"
 
@@ -61,7 +62,7 @@ input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 cluster.resolution <- c(0.5)
 
 # subsample factor (for downsampling)
-subsample_factor <- 0.5
+subsample_factor <- 1
 
 which.species <- "Mm"
 
@@ -72,8 +73,11 @@ group.field <- "Barcode"
 # group.list <- list(GL261 = "GL261",
 #                    CT2A = "CT2A")
 
-group.list <- list(WT = "WT",
-                   C68 = "C68")
+group.list <- list(GL261 = "GL261",
+                   CT2A = "CT2A")
+
+# group.list <- list(WT = "WT",
+#                    C68 = "C68")
 
 
 # group.list <- list(WT = "WT",
@@ -83,8 +87,9 @@ group.list <- list(WT = "WT",
 # specify which group is reference/control group (NA if unspecified)
 # which.reference <- NA 
 # which.reference <- "ctrl.0238"
-# which.reference <- "GL261"
-which.reference <- "WT" # specify whcih group to use as reference (e.g., DEG compared to what?)
+which.reference <- "GL261"
+
+# which.reference <- "WT" # specify whcih group to use as reference (e.g., DEG compared to what?)
 
 # compare groups flag
 # if F, direct comparison of groups. If T, pairwise comparison of groups within clusters. 
@@ -111,7 +116,7 @@ save.pdf <- T
 
 species <- which.species
 if (!exists("which.reference")) which.reference <- NA
-if (compare.within.clusters.flag == F) cluster.resolution <- 0
+# if (compare.within.clusters.flag == F) cluster.resolution <- 0
 
 df.log <- initiateLog("10, Group Comparison")
 df.log <- addLogEntry("Input File", input.file, df.log, "input.file")
@@ -123,7 +128,7 @@ df.log <- addLogEntry("old field names", unlist(group.list), df.log, "unlist(gro
 df.log <- addLogEntry("LFC threshold", lfc.threshold, df.log, "lfc.threshold")
 df.log <- addLogEntry("p-value threshold", p.threshold, df.log, "p.threshold")
 df.log <- addLogEntry("Positive marker flag", only.pos, df.log, "only.pos")
-df.log <- addLogEntry("Compare groups within clusters", compare.within.clusters.flag, df.log, "compare.within.clusters.flag")
+# df.log <- addLogEntry("Compare groups within clusters", compare.within.clusters.flag, df.log, "compare.within.clusters.flag")
 df.log <- addLogEntry("Reference group", which.reference, df.log, "which.reference")
 df.log <- addLogEntry("Print flag", print.inline, df.log, "print.inline")
 
@@ -265,11 +270,11 @@ comparison.group <- group.order[2]
 
 ```{r, warning = FALSE, message = FALSE}
 
-so.query.2 <- so.query
+so.query <- so.query
 
 # Visualization
-p1.dim <- DimPlot(so.query.2, reduction = "umap", group.by = "group.query") + xlab("UMAP 1") + ylab("UMAP 2")
-p2.dim <- DimPlot(so.query.2, reduction = "umap", label = TRUE) + xlab("UMAP 1") + ylab("UMAP 2")
+p1.dim <- DimPlot(so.query, reduction = "umap", group.by = "group.query") + xlab("UMAP 1") + ylab("UMAP 2")
+p2.dim <- DimPlot(so.query, reduction = "umap", label = TRUE) + xlab("UMAP 1") + ylab("UMAP 2")
 
 if (print.inline){
   cowplot::plot_grid(p1.dim, p2.dim)
@@ -282,14 +287,14 @@ if (print.inline){
 ```{r get conserved markers}
 
 # get unique clusters
-u.clusters <- as.numeric(as.character(unique((so.query.2@meta.data[["seurat_clusters"]]))))
+u.clusters <- as.numeric(as.character(unique((so.query@meta.data[["seurat_clusters"]]))))
 u.clusters <- u.clusters[order(u.clusters)]
 
 # initiate results list
 conserved.markers.list <- list()
 
 which.assay.cons <- "RNA"
-if (!(which.assay.cons %in% names(so.query.2@assays))) which.assay.cons <- DefaultAssay(so.query.2)
+if (!(which.assay.cons %in% names(so.query@assays))) which.assay.cons <- DefaultAssay(so.query)
 
 # oncly get conserved markers if multiple clusters available
 if (length(u.clusters) > 1){
@@ -298,11 +303,11 @@ if (length(u.clusters) > 1){
   for (i in 1:length(u.clusters)){
     
     # check if any subgroups have fewer than 3 cells - if yes, skip to next cluster
-    n.cell.cur <-  as.vector(table(so.query.2@meta.data[["group.query"]][so.query.2@meta.data[["seurat_clusters"]] %in% u.clusters[i]])) 
+    n.cell.cur <-  as.vector(table(so.query@meta.data[["group.query"]][so.query@meta.data[["seurat_clusters"]] %in% u.clusters[i]])) 
     if (any(n.cell.cur < 3)) next
     
     # find DEG that are conserved across groups
-    conserved.markers.list[[paste("c", as.character(u.clusters[i]), sep = "")]] <- FindConservedMarkers(so.query.2, 
+    conserved.markers.list[[paste("c", as.character(u.clusters[i]), sep = "")]] <- FindConservedMarkers(so.query, 
                                                                                                         ident.1 = u.clusters[i], 
                                                                                                         grouping.var = "group.query", 
                                                                                                         verbose = FALSE,
@@ -449,10 +454,10 @@ results.conserved <- cleanForaOutput(results.conserved, my.entrez = my.entrez)
 ```{r conserved dash, fig.width= 14, fig.height=5}
 
 
-df.umap <- data.frame(so.query.2@reductions[["umap"]]@cell.embeddings)
+df.umap <- data.frame(so.query@reductions[["umap"]]@cell.embeddings)
 colnames(df.umap) <- c("x", "y")
-df.umap$cluster <- so.query.2@meta.data[["seurat_clusters"]]
-df.umap$group <- so.query.2@meta.data[["group.query"]]
+df.umap$cluster <- so.query@meta.data[["seurat_clusters"]]
+df.umap$group <- so.query@meta.data[["group.query"]]
 
 cc.nc.list <- list()
 for (i in 1:length(plt.cmarkers.scatter)){
@@ -538,18 +543,18 @@ for (i in 1:length(plt.cmarkers.scatter)){
 ```{r differential expression (between clusters), fig.height=8, fig.width=10, warning = FALSE, message = FALSE}
 
 # create seurat copy - label identities
-so.query.3 <- so.query.2
-so.query.3$cluster.group <- paste(Idents(so.query.3), so.query.3@meta.data[["group.query"]], sep = "_")
-so.query.3$cluster.orig <- Idents(so.query.3)
-Idents(so.query.3) <- "cluster.group"
+so.query <- so.query
+so.query$cluster.group <- paste(Idents(so.query), so.query@meta.data[["group.query"]], sep = "_")
+so.query$cluster.orig <- Idents(so.query)
+Idents(so.query) <- "cluster.group"
 
 # get cluster group averages
-e.mat <- getExpressionMatrix(so = so.query.3, which.data = "data")
-u.cg <- as.character(unique(Idents(so.query.3)))
+e.mat <- getExpressionMatrix(so = so.query, which.data = "data")
+u.cg <- as.character(unique(Idents(so.query)))
 
 cg.mat <- matrix(nrow = nrow(e.mat), ncol = length(u.cg))
 for (i in 1:length(u.cg)){
-  which.match <- Idents(so.query.3) %in% u.cg[i]
+  which.match <- Idents(so.query) %in% u.cg[i]
   if (sum(which.match) < 3) next
   cg.mat[ ,i] <- log(rowMeans(expm1(x = e.mat[, which.match])) + 1)
 }
@@ -558,19 +563,19 @@ rownames(cg.mat) <- rownames(e.mat)
 rm(e.mat); invisible({gc()})
 
 # get unique clusters
-u.clusters <- as.numeric(as.character(unique((so.query.3@meta.data[["seurat_clusters"]]))))
+u.clusters <- as.numeric(as.character(unique((so.query@meta.data[["seurat_clusters"]]))))
 u.clusters <- u.clusters[order(u.clusters)]
 
 # get unique groups
-levels.groups <- as.character(levels(so.query.3@meta.data[["group.query"]]))
-u.groups <- unique(so.query.3@meta.data[["group.query"]])
+levels.groups <- as.character(levels(so.query@meta.data[["group.query"]]))
+u.groups <- unique(so.query@meta.data[["group.query"]])
 u.groups <- levels.groups[levels.groups %in% u.groups]
-so.query.3@meta.data[["group.query"]] <- factor(so.query.3@meta.data[["group.query"]], levels = u.groups)
+so.query@meta.data[["group.query"]] <- factor(so.query@meta.data[["group.query"]], levels = u.groups)
 stopifnot(length(u.groups) == 2)
 
 
 which.assay.deg <- "SCT"
-if (!(which.assay.deg %in% names(so.query.3@assays))) which.assay.deg <- DefaultAssay(so.query.3)
+if (!(which.assay.deg %in% names(so.query@assays))) which.assay.deg <- DefaultAssay(so.query)
 
 df.deg.list <- list()
 df.deg.mat <- matrix(nrow = nrow(cg.mat), ncol = length(u.clusters)) 
@@ -578,7 +583,7 @@ df.deg.master <- NULL
 for (i in 1:length(u.clusters)){
   
   # check if any subgroups have fewer than 3 cells - if yes, skip to next cluster
-  n.cell.cur <-  as.vector(table(so.query.3@meta.data[["group.query"]][so.query.3@meta.data[["seurat_clusters"]] %in% u.clusters[i]])) 
+  n.cell.cur <-  as.vector(table(so.query@meta.data[["group.query"]][so.query@meta.data[["seurat_clusters"]] %in% u.clusters[i]])) 
   if (any(n.cell.cur < 3)) next
   
   # specify group names
@@ -588,7 +593,7 @@ for (i in 1:length(u.clusters)){
   
   # find group-wise differences (stratified by cluster)
   # Note logFC = Group 1 - Group 2
-  df.deg <- FindMarkers(so.query.3,
+  df.deg <- FindMarkers(so.query,
                         assay = which.assay.deg,
                         ident.1 = group1,
                         ident.2 = group2,
@@ -624,7 +629,7 @@ colnames(df.deg.mat) <- as.character(u.clusters)
 
 which.x <- reference.group
 which.y <- comparison.group
-u.clusters <- as.numeric(as.character(unique((so.query.2@meta.data[["seurat_clusters"]]))))
+u.clusters <- as.numeric(as.character(unique((so.query@meta.data[["seurat_clusters"]]))))
 u.clusters <- u.clusters[order(u.clusters)]
 plt.pairwise.list <- list()
 
@@ -666,7 +671,7 @@ for (i in 1:length(u.clusters)){
   colors.to.label <- c(rep("tomato", nrow(df.deg.filtered.top)), rep("skyblue", nrow(df.deg.filtered.bottom)))
   
   # get average expression profile
-  sub.pop <- subset(so.query.2, idents = which.cluster)
+  sub.pop <- subset(so.query, idents = which.cluster)
   Idents(sub.pop) <- "group.query"
   sub.pop <- rmDuplicateGenes(sub.pop)
   avg.sub.pop <- log1p(AverageExpression(sub.pop, verbose = FALSE)[[1]])
@@ -710,7 +715,7 @@ for (i in 1:length(u.clusters)){
 
 ```{r symbol2entrez}
 
-my.symbol <- rownames(so.query.3)
+my.symbol <- rownames(so.query)
 my.entrez <- sym2entrez(my.symbol, my.species = which.species )
 my.entrez <- my.entrez[complete.cases(my.entrez), ]
 
@@ -781,16 +786,16 @@ if (print.inline){
 ```{r pooled group DEG}
 
 # set correct ID
-cur.id <- Idents(so.query.3)
-Idents(so.query.3) <- so.query.3@meta.data[["group.query"]]
+cur.id <- Idents(so.query)
+Idents(so.query) <- so.query@meta.data[["group.query"]]
 
 # get cluster group averages
-e.mat <- getExpressionMatrix(so = so.query.3, which.data = "data")
-u.cg <- as.character(unique(Idents(so.query.3)))
+e.mat <- getExpressionMatrix(so = so.query, which.data = "data")
+u.cg <- as.character(unique(Idents(so.query)))
 
 dif.mat <- matrix(nrow = nrow(e.mat), ncol = length(u.cg))
 for (i in 1:length(u.cg)){
-  which.match <- Idents(so.query.3) %in% u.cg[i]
+  which.match <- Idents(so.query) %in% u.cg[i]
   if (sum(which.match) < 3) next
   dif.mat[ ,i] <- log(rowMeans(expm1(x = e.mat[, which.match])) + 1)
 }
@@ -802,7 +807,7 @@ dif.mat$gene <- rownames(dif.mat)
 dif.mat$logfc <- dif.mat[ , comparison.group] -  dif.mat[ , reference.group]
 
 # deg master for group comparison
-df.deg.pool <- FindMarkers(so.query.3,
+df.deg.pool <- FindMarkers(so.query,
                            assay = which.assay.deg,
                            ident.1 = comparison.group,
                            ident.2 = reference.group,
@@ -865,8 +870,8 @@ SubGeneNames=colnames(datExpr)
 datExpr.orig.noz <- datExpr
 
 # split into two groups
-de.orig.1 <- datExpr.orig.noz[rownames(datExpr.orig.noz) %in% colnames(so.query.3)[grepl(reference.group, so.query.3@active.ident)], ]
-de.orig.2 <- datExpr.orig.noz[rownames(datExpr.orig.noz) %in% colnames(so.query.3)[grepl(comparison.group, so.query.3@active.ident)], ]
+de.orig.1 <- datExpr.orig.noz[rownames(datExpr.orig.noz) %in% colnames(so.query)[grepl(reference.group, so.query@active.ident)], ]
+de.orig.2 <- datExpr.orig.noz[rownames(datExpr.orig.noz) %in% colnames(so.query)[grepl(comparison.group, so.query@active.ident)], ]
 
 
 # ensure sample sizes are balanced across groups
@@ -965,9 +970,9 @@ runGSEA.dev <- function(gene, value, species, db = "GO", my.entrez = NULL, my.pa
 ```{r schex hex bins, warning = FALSE, message = FALSE, fig.width = 14, fig.height=5, include = FALSE}
 
 library(schex)
-so.query.4 <- make_hexbin(so.query.3, 20, dimension_reduction = "UMAP")
-cID <- so.query.4@misc$hexbin[[1]]
-out <- so.query.4@misc$hexbin[[2]]
+so.query <- make_hexbin(so.query, 20, dimension_reduction = "UMAP")
+cID <- so.query@misc$hexbin[[1]]
+out <- so.query@misc$hexbin[[2]]
 
 # specfiy genesets ###########################################################
 gene.names <- rownames(exp.mat)
@@ -980,8 +985,8 @@ be.mat.comp <- matrix(nrow = length(gene.names), ncol = length(u.bin))
 
 gene.group.bin <- list()
 
-which.ref <- so.query.4@meta.data[["group.query"]] %in% reference.group
-which.comp <- so.query.4@meta.data[["group.query"]] %in% comparison.group
+which.ref <- so.query@meta.data[["group.query"]] %in% reference.group
+which.comp <- so.query@meta.data[["group.query"]] %in% comparison.group
 
 df.group.gene.comp <- NULL
 # for (i in 1:length(gene.names)){
@@ -991,7 +996,7 @@ cl <- parallel::makeCluster(n.enrich)
 doParallel::registerDoParallel(cl)
 
 
-# single.exp <- prepDataFun(so.query.4,DefaultAssay(so.query.4),"data", gene.names[i])
+# single.exp <- prepDataFun(so.query,DefaultAssay(so.query),"data", gene.names[i])
 e.mat.sub <- exp.mat
 e.mat.sub <- e.mat.sub[!duplicated(rownames(e.mat.sub)), ]
 
@@ -1505,11 +1510,11 @@ df.ME.all$id <- rownames(df.ME.all)
 df.ME.all.long <-pivot_longer(df.ME.all, ME.names)
 df.ME.all.long <- df.ME.all.long %>%  filter(!(name %in% "MEgrey")) 
 
-df.meta <- so.query.3@meta.data
+df.meta <- so.query@meta.data
 df.meta$id <- rownames(df.meta)
 df.meta.sub <- df.meta[ ,c("cluster.group", "id", "cluster.orig")]
 df.meta.sub$cluster.group <- gsub("[0-9]*_", "", df.meta.sub$cluster.group ) # introduced here
-so.query.3@meta.data$cg <- df.meta.sub$cluster.group
+so.query@meta.data$cg <- df.meta.sub$cluster.group
 
 # merge ME activity and module identities
 df.ME.all.long.merge <- merge(df.ME.all.long, df.meta.sub, by = "id")
@@ -1574,7 +1579,7 @@ if (print.inline){
 ```{r ME differential expression, fig.height = 4, fig.width=12}
 
 # get unique groups
-u.groups <- unique(as.character(levels((so.query.3@meta.data[["group.query"]]))))
+u.groups <- unique(as.character(levels((so.query@meta.data[["group.query"]]))))
 
 # get ME activity for each group and merge
 df.ME.sum.1 <- df.ME.sum[  grepl(reference.group, df.ME.sum$cluster.group), ]
@@ -2062,16 +2067,16 @@ difNetworkGraph <- function(w.mat, w.1, w.2, module.genes, z.all, z.sub, connect
 # get matrices to visualize #####################################################
 if (!exists("ag.mat")){
   ag.mat <- aggGroupExpression(
-    so.query.3,
-    which.data = "data",  which.assay = DefaultAssay(so.query.3),
+    so.query,
+    which.data = "data",  which.assay = DefaultAssay(so.query),
     which.center = "mean",  which.group = "cg"
   )
 }
 
 if (!exists("sd.mat")){
   sd.mat <- aggGroupExpression(
-    so.query.3,
-    which.data = "data",  which.assay = DefaultAssay(so.query.3),
+    so.query,
+    which.data = "data",  which.assay = DefaultAssay(so.query),
     which.center = "sd",   which.group = "cg"
   )
 }
@@ -2096,7 +2101,7 @@ df.ma <- df.ME.all.long.merge
 df.ma$module <- gsub("ME", "", df.ma$name)
 
 # get umap #####################################################################
-df.umap <- data.frame(so.query.3@reductions[["umap"]]@cell.embeddings)
+df.umap <- data.frame(so.query@reductions[["umap"]]@cell.embeddings)
 colnames(df.umap) <- c("x", "y")
 df.umap$cells <- rownames(df.umap)
 
@@ -2616,7 +2621,7 @@ if (print.inline){
 exp.mat.all <- getExpressionMatrix(so.query, which.data = which.data, only.variable = T)
 
 # map cell id to group
-df.idMap <- data.frame(group = so.query.3@meta.data[["group.query"]], cell.id = colnames(so.query.3))
+df.idMap <- data.frame(group = so.query@meta.data[["group.query"]], cell.id = colnames(so.query))
 u.group <- as.character(unique(df.idMap$group))
 idMap.list <- list()
 for (i in 1:length(u.group)) idMap.list[[u.group[i]]] <- as.character(df.idMap$cell.id[df.idMap$group == u.group[i]])
