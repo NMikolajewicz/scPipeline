@@ -832,7 +832,7 @@ for (i in 1:length(cluster_resolution)){
   exp.mat.filtered[exp.mat.filtered > scale.lim] <- scale.lim
   exp.mat.filtered[exp.mat.filtered < (-1*scale.lim)] <- (-1*scale.lim)
   my.breaks <- seq((-1*scale.lim), scale.lim, by = 0.05)
-  my.col <- colorRampPalette(c(scales::muted("blue"), "white",scales::muted("red")))(length(my.breaks))
+  my.col <- colorRampPalette(c(scales::muted("blue"), "white",scales::muted("red")))(50)
   
   # get cell annotations
   col.ann <- data.frame(cluster = so.query_small@meta.data[[cur.cluster.name]], row.names = colnames(so.query_small))
@@ -981,7 +981,7 @@ for (i in 1:length(cluster_resolution)){
   df.s4plt[df.s4plt < (-1*scale.lim)] <- (-1*scale.lim)
   
   my.breaks <- seq((-1*scale.lim), scale.lim, by = 0.2)
-  my.col <- colorRampPalette(c(scales::muted("blue"), "white",scales::muted("red")))(length(my.breaks))
+  my.col <- colorRampPalette(c(scales::muted("blue"), "white",scales::muted("red")))(50)
   
   plt.heat.cluster.scaled <- pheatmap::pheatmap(df.s4plt,
                                                 breaks = my.breaks,
