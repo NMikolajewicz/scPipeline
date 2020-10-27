@@ -1,0 +1,141 @@
+---
+title: "Export Expression Matrix"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+
+knitr::knit_engines$set(python = reticulate::eng_python)
+# knitr::knit_meta(class=NULL, clean = TRUE)
+rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
+
+# initiate timer
+start.time <- proc.time()
+
+packages2load <- c("Seurat", "scater", "scMiko", "reticulate", "destiny", "foreach", "doParallel",  "clusterExperiment", 
+                   "plyr", "dplyr", "tidyr", "reshape2", "tidyverse", "RColorBrewer", "ggplot2", "gridExtra", 
+                   "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", "ggrepel", "scales", "ggformula",
+                   "tidymodels", "viridis", "future", "diffusr", "markovchain", "Tempora", "s2a", "glue")
+
+# load packages
+invisible({lapply(packages2load, library, character.only = TRUE)})
+
+```
+
+
+
+```{r parameter specification}
+
+
+
+# Query input
+input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
+
+output.file <- "placeholder.csv"
+
+
+# Data subsampling
+subsample_factor <- 0.5 # OPTIONAL; range 0 to 1 (default = 1)
+
+# specify cluster resolution
+cluster.resolution <- 0.5
+
+# subset data
+subset.df <- NA
+
+which.species <-  "Mm"
+
+
+# specify comparison parameters
+comparison.parameters <- list(
+  which.field = "Barcode",
+  reference = "WT",
+  barcode.list = list(
+    WT = "WT", 
+    C50 = "C50",
+    C68 = "C68", 
+    C15 = "C15", 
+    C2 = "C2",
+    C76  = "C76"
+  )
+)
+
+# n workers for various computations
+n.workers <- list(
+  random.forest = 16,
+  hvg = 2
+)
+
+
+```
+
+
+
+```{r load data, warning = FALSE}
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed_Datasets/"
+
+
+if (!exists("data.path") & !exists("user")) {
+  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+}
+
+# load data
+warning("Importing data...")
+if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
+load(paste(data.path, dir.preprocessed, input.file, sep = ""))
+
+
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
+
+if (!(exists("subset.df"))) subset.df <- "no.subset"
+
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                         species = which.species, resolution= cluster.resolution, subset = subset.df, 
+                         subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
+                         terms2drop = c("ica", "tsne", "nmf", "gsva", "deg"), rmv.pattern = "so", 
+                         scale.reprocessed = T, neighbors.reprocessed = T, keep.default.assay.only = F)
+
+# unpack results
+if (exists("so")) try({rm(so)}, silent = T)
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+rm(prep.list)
+invisible({gc()})
+
+
+# assert factor order
+u.clust.meta <- unique(as.numeric(as.character(so.query@meta.data[["seurat_clusters"]])))
+so.query@meta.data[["seurat_clusters"]] <- factor(so.query@meta.data[["seurat_clusters"]], 
+                                                  levels = u.clust.meta[order(u.clust.meta)])
+Idents(so.query) <- so.query@meta.data[["seurat_clusters"]]
+
+```
+
+
+
+```{r get and save expression matrix}
+
+# expression matrix
+e.mat <- aggGroupExpression(so.query, which.center = "mean", do.parallel = F)
+cluster.order <- colnames(e.mat)[2:ncol(e.mat)]
+cluster.order <- as.numeric(as.character(gsub("c", "", cluster.order)))
+e.mat.2 <- signif(e.mat[ ,colnames(e.mat)[2:ncol(e.mat)][order(cluster.order)]], 3)
+rownames(e.mat.2) <- e.mat$genes
+
+if (!(grepl("csv", output.file))){
+  output.file <- paste0(output.file, ".csv")
+}
+
+write.csv(e.mat.2, file = output.file, 
+          row.names = T)
+```
