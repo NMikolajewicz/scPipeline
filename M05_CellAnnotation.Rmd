@@ -49,17 +49,17 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # Query input
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
+input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 # input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 
  # "neural.dif.HH", 
 # specify reference genesets
 # "MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat",, , "neural.dif.HH"
-which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm",   "VastDB", "cycling.seurat", "brain.GBM.R103","immune.Monaco")
+which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm",   "VastDB", "cycling.seurat", "brain.GBM.R103","immune.Monaco", "invitro.GBM")
 # which.references <- "brain.GBM.R103"
 
 # specify cluster resolution
-cluster.resolution <- 1 # OPTIONAL; range 0 to inf (default = 1)
+cluster.resolution <- 0.5 # OPTIONAL; range 0 to inf (default = 1)
 
 so.input.species <- "Mm" # eREQUIRED; Hs, Mm
 
@@ -122,7 +122,6 @@ if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "integration.anchors")
 
 # prep seurat object
-# debug(prepSeurat2)
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
                              species = so.input.species, resolution= cluster.resolution, subset.data = NULL, 
                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
@@ -148,6 +147,11 @@ df.log <- addLogEntry("Default Assay", current.assay, df.log, "current.assay")
 df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
 df.log <- addLogEntry("Subsample Factor", subsample_factor, df.log, "subsample_factor")
 df.log <- addLogEntry("Input species", so.input.species, df.log, "so.input.species")
+
+df.log <- addLogEntry("Minimum gene set size", min.geneset.size, df.log, "min.geneset.size")
+df.log <- addLogEntry("n workers, scoring", n.workers$scoring, df.log, "scoring")
+df.log <- addLogEntry("n workers, deg", n.workers$deg, df.log, "deg")
+
 df.log <- addLogEntry("PDF saved", save.pdf, df.log, "save.pdf")
 
 ```
