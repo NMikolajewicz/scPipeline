@@ -16,3 +16,6 @@ p7.mesoMarker,p7_mesoMarkers_250620.csv,Gene_Sets/,,F
 p7.mesoMarker.HH,HHtestMeso_200716.csv,Gene_Sets/,,F
 neftel.genes,VALID_GBM_meta_module_genes_SYMBOL.csv,Reference_Datasets/,,F
 neftel.modules,VALID_GBM_meta_module_genes_SYMBOL.csv,Reference_Datasets/,,T
+cancerSEA,VALID_CancerSEA_HS_270320.csv,Reference_Datasets/,,T
+immune.Monaco,VALID_Monaco2019_ImmuneSubsets_071020.csv,Reference_Datasets/,,T
+GBM,VALID_GBM_meta_module_genes_SYMBOL.csv,Reference_Datasets/,,T
