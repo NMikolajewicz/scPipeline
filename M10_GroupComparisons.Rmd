@@ -32,12 +32,9 @@ start.time <- proc.time()
 packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", 
                    "DT", "flexdashboard", "ggpmisc", "future", "foreach", "doParallel",
                    "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "ggplot2", "reactome.db",
-                   "RColorBrewer", "cowplot", "WGCNA", "viridis", "ggnewscale", "igraph", "ggnetwork", "caret", "ROCR", "Metrics", "topGO")
+                   "RColorBrewer", "cowplot", "WGCNA", "viridis", "ggnewscale", "igraph", "ggnetwork", "caret", "ROCR", "Metrics", "topGO",
+                   "glmnet", "sjPlot")
 
-# library(caret)
-# library(topGO)
-# library(ROCR) 
-# library(Metrics)
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE))
 
@@ -47,61 +44,62 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 ```{r parameter specification}
 
 
-# query input
+# query input ##################################################################
 # input.file <- "Module1_invivo_EMT6_screen_metaDAta_270320.Rdata"
-# input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 # input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
-input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
+# input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
+# input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "Module1_pilot6_invitroGBM_updatedBarcodes_290220.Rdata"
 # input.file <- "Module2_Renca_cell_nuc_sci_T12_4000ds_Celsius_integrated_240220.Rdata"
 
-
-cluster.resolution <- c(0.5)
-
-# subsample factor (for downsampling)
+# general analysis parameters ##################################################
+cluster.resolution <- c(1)
 subsample_factor <- 1
+which.species <- "Hs"
 
-which.species <- "Mm"
-
-# grouping (list specifying group compositions); supports indirect matching 
+# grouping #####################################################################
+# (list specifying group compositions); supports indirect matching 
 # group.field <- "batch" # batch used when using intergration dataset
 group.field <- "Barcode"
 
 # group.list <- list(GL261 = "GL261",
-#                    CT2A = "CT2A")
+                   # CT2A = "CT2A")
 
-group.list <- list(GL261 = "GL261",
-                   CT2A = "CT2A")
 
+group.list <- list(all.0231 = "0231",
+                   all.0238 = "0238")
 # group.list <- list(WT = "WT",
-#                    C68 = "C68")
-
-
-# group.list <- list(WT = "WT",
-#                    C68 = "C68")
-
+#                    C2 = "C2")
 
 # specify which group is reference/control group (NA if unspecified)
 # which.reference <- NA 
-# which.reference <- "ctrl.0238"
-which.reference <- "GL261"
-
+which.reference <- "all.0231"
+# which.reference <- "GL261"
 # which.reference <- "WT" # specify whcih group to use as reference (e.g., DEG compared to what?)
 
-# compare groups flag
-# if F, direct comparison of groups. If T, pairwise comparison of groups within clusters. 
-# note that if F, cluster resolution is ignored and forced to 0
-compare.within.clusters.flag <- T
 
-# DEG thresholds
+# Network topology parameters ##################################################
+sim.type <- "bin" #option: bin vs single - expression binned or not prior to taking correlations - binning recommeneded for large overlapping samples
+TOM.type <- "signed"
+which.network <- "signed"       # 'signed', 'unsigned', or 'signed hybrid'
+which.cor <- "spearman"         # correlation method (Recommended: spearman)
+min.cluster.size <- 10          # minimal number of genes per module
+which.metanet <- "total"    # "consensus" or "differential" or "total" or "mean"
+pct.threshold <- 0.1            # min expressing fraction threhsold
+
+
+# DEG thresholds ###############################################################
 lfc.threshold <- 0.25
 p.threshold <- 0.05
 deg.min.pct <- 0.1
 only.pos <- F # 
+  do.pca.correction <- F
 
+  
 # print inline flag
 print.inline <- F
 save.pdf <- T
@@ -116,8 +114,6 @@ save.pdf <- T
 
 species <- which.species
 if (!exists("which.reference")) which.reference <- NA
-# if (compare.within.clusters.flag == F) cluster.resolution <- 0
-
 df.log <- initiateLog("10, Group Comparison")
 df.log <- addLogEntry("Input File", input.file, df.log, "input.file")
 df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
@@ -128,7 +124,9 @@ df.log <- addLogEntry("old field names", unlist(group.list), df.log, "unlist(gro
 df.log <- addLogEntry("LFC threshold", lfc.threshold, df.log, "lfc.threshold")
 df.log <- addLogEntry("p-value threshold", p.threshold, df.log, "p.threshold")
 df.log <- addLogEntry("Positive marker flag", only.pos, df.log, "only.pos")
-# df.log <- addLogEntry("Compare groups within clusters", compare.within.clusters.flag, df.log, "compare.within.clusters.flag")
+df.log <- addLogEntry("PCA-based matrix correction", do.pca.correction, df.log, "do.pca.correction")
+df.log <- addLogEntry("Min module size", min.cluster.size, df.log, "min.cluster.size")
+
 df.log <- addLogEntry("Reference group", which.reference, df.log, "which.reference")
 df.log <- addLogEntry("Print flag", print.inline, df.log, "print.inline")
 
@@ -344,13 +342,13 @@ if (length(conserved.markers.list)>0){
     cur.cons.markers <- cur.cons.markers[cur.cons.markers$minimump_p_val < 0.05, ]
     cur.cons.markers$gene <- rownames(cur.cons.markers)
     
-    x.var.name <- paste(reference.group, "_avg_logFC", sep = "")
-    y.var.name <- paste(comparison.group, "_avg_logFC", sep = "")
+    x.var.name <- paste(reference.group, "_avg_log2FC", sep = "")
+    y.var.name <- paste(comparison.group, "_avg_log2FC", sep = "")
     
     cur.genes <- cur.cons.markers
     cur.genes$gene.type <- sign(cur.genes[ , x.var.name] * cur.genes[ , y.var.name])
     nonconserved.genes[[which.cluster]] <- cur.genes$gene[cur.genes$gene.type == -1]
-    conserved.genes[[which.cluster]] <- cur.genes$gene[cur.genes$gene.type == 1]
+    conserved.genes[[which.cluster]] <- cur.genes$gene[(cur.genes$gene.type == 1) & (cur.genes[ ,x.var.name] > 0)]
     
     plt.cmarkers.scatter[[which.cluster]] <- cur.cons.markers %>%
       dplyr::arrange(-minimump_p_val) %>%
@@ -535,6 +533,7 @@ for (i in 1:length(plt.cmarkers.scatter)){
 }
 
 # cc.nc.list
+# plt.cc.nc
 
 ```
 
@@ -543,7 +542,7 @@ for (i in 1:length(plt.cmarkers.scatter)){
 ```{r differential expression (between clusters), fig.height=8, fig.width=10, warning = FALSE, message = FALSE}
 
 # create seurat copy - label identities
-so.query <- so.query
+# so.query <- so.query
 so.query$cluster.group <- paste(Idents(so.query), so.query@meta.data[["group.query"]], sep = "_")
 so.query$cluster.orig <- Idents(so.query)
 Idents(so.query) <- "cluster.group"
@@ -604,7 +603,7 @@ for (i in 1:length(u.clusters)){
   
   
   
-  df.deg[ ,c("p_val","avg_logFC","pct.1", "pct.2","p_val_adj")] <- signif(df.deg[ ,c("p_val","avg_logFC","pct.1", "pct.2","p_val_adj")], 3)
+  df.deg[ ,c("p_val","avg_log2FC","pct.1", "pct.2","p_val_adj")] <- signif(df.deg[ ,c("p_val","avg_log2FC","pct.1", "pct.2","p_val_adj")], 3)
   
   df.deg$group.1 <- group1
   df.deg$group.2 <- group2
@@ -632,6 +631,7 @@ which.y <- comparison.group
 u.clusters <- as.numeric(as.character(unique((so.query@meta.data[["seurat_clusters"]]))))
 u.clusters <- u.clusters[order(u.clusters)]
 plt.pairwise.list <- list()
+Idents(so.query) <- "seurat_clusters"
 
 for (i in 1:length(u.clusters)){
   
@@ -650,7 +650,7 @@ for (i in 1:length(u.clusters)){
   # ranked by signed lop p 
   df.deg.adj <- df.deg.adj[complete.cases(df.deg.adj),]
   df.deg.adj$logp <- -log10(df.deg.adj$p_val_adj)
-  df.deg.adj$logp <- df.deg.adj$logp * sign(df.deg.adj$avg_logFC)
+  df.deg.adj$logp <- df.deg.adj$logp * sign(df.deg.adj$avg_log2FC)
   
   # get top genes
   df.deg.filtered.top <- df.deg.adj %>% 
@@ -680,8 +680,8 @@ for (i in 1:length(u.clusters)){
   
   # specify gene coloring
   avg.sub.pop$color <- "grey90"
-  avg.sub.pop$color[avg.sub.pop$gene %in% df.deg.adj$gene[df.deg.adj$avg_logFC > 0]] <- "tomato"
-  avg.sub.pop$color[avg.sub.pop$gene %in% df.deg.adj$gene[df.deg.adj$avg_logFC < 0]] <- "skyblue"
+  avg.sub.pop$color[avg.sub.pop$gene %in% df.deg.adj$gene[df.deg.adj$avg_log2FC > 0]] <- "tomato"
+  avg.sub.pop$color[avg.sub.pop$gene %in% df.deg.adj$gene[df.deg.adj$avg_log2FC < 0]] <- "skyblue"
   
   avg.sub.pop$dif <- abs(avg.sub.pop$y - avg.sub.pop$x)
   avg.sub.pop <- avg.sub.pop[complete.cases(avg.sub.pop$dif) , ]
@@ -709,6 +709,8 @@ for (i in 1:length(u.clusters)){
   }
   
 }
+
+# plt.pairwise.list
 
 ```
 
@@ -816,7 +818,7 @@ df.deg.pool <- FindMarkers(so.query,
                            logfc.threshold = 0.1,
                            verbose = F)
 
-df.deg.pool[ ,c("p_val","avg_logFC","pct.1", "pct.2","p_val_adj")] <- signif(df.deg.pool[ ,c("p_val","avg_logFC","pct.1", "pct.2","p_val_adj")], 3)
+df.deg.pool[ ,c("p_val","avg_log2FC","pct.1", "pct.2","p_val_adj")] <- signif(df.deg.pool[ ,c("p_val","avg_log2FC","pct.1", "pct.2","p_val_adj")], 3)
 
 df.deg.pool$group.1 <- comparison.group
 df.deg.pool$group.2 <- reference.group
@@ -826,15 +828,26 @@ df.deg.pool$group.2 <- reference.group
 ```{r filter expression matrix and calculate similary matrix (for network analysis), warning = FALSE, message=FALSE}
 
 
-sim.type <- "bin" #option: bin vs single
+
 
 # entire matrix
 which.data <- "data"
 exp.mat.complete <- getExpressionMatrix(so.query, which.data = which.data)
 
-# pct expressing
+# pct expression exceeds threshold (in both datasets)
+exp.mat.g1 <- exp.mat.complete[ ,so.query@meta.data[["group.query"]] %in% reference.group]
+exp.mat.g2 <- exp.mat.complete[ ,so.query@meta.data[["group.query"]] %in% comparison.group]
 pct.rep <- apply(exp.mat.complete, 1, function(x) mean(x>0))
-which.rep <- names(pct.rep)[pct.rep > 0.1]
+pct.rep.g1 <- apply(exp.mat.g1, 1, function(x) mean(x>0))
+pct.rep.g2 <- apply(exp.mat.g2, 1, function(x) mean(x>0))
+df.pct.rep <- data.frame(pct.rep.g1, pct.rep.g2); colnames(df.pct.rep) <- c("x", "y")
+# df.pct.rep$xy <- df.pct.rep$x * df.pct.rep$y
+df.pct.rep$minxy <- pmin(df.pct.rep$x, df.pct.rep$y)
+# which.rep <- rownames(df.pct.rep)[df.pct.rep$minxy > pct.threshold]
+which.rep <- names(pct.rep)[pct.rep > pct.threshold]
+
+# if (length(which.rep) < 1000) which.rep <- rownames((df.pct.rep %>% dplyr::top_n(1000, xy)))
+
 
 # variable gene only matrix
 use.var <- F
@@ -845,14 +858,19 @@ if (use.var){
 }
 
 # max var n
+max.var.n <- 8000
 if (DefaultAssay(so.query) == "SCT"){
-  max.var.n <- 8000
   df.var <- so.query@assays[["SCT"]]@meta.features
   df.var$genes <- rownames(df.var)
   top.var.df <- df.var %>% top_n(max.var.n, (sct.residual_variance))
   top.var <- top.var.df$genes
   exp.mat <- exp.mat[rownames(exp.mat) %in% unique(top.var), ]
   exp.mat <- exp.mat[rownames(exp.mat) %in% unique(which.rep), ]
+} else if (DefaultAssay(so.query) == "RNA"){
+  df.var <- so.query@assays[["RNA"]]@meta.features
+   top.var.df <- df.var %>% top_n(max.var.n, (vst.variance.standardized))
+   top.var <- rownames(top.var.df)
+   exp.mat <- exp.mat[rownames(exp.mat) %in% unique(which.rep), ]
 }
 
 
@@ -1085,18 +1103,46 @@ if (print.inline){
 ```{r compute correlations, include = FALSE}
 
 # specify network parameters
-TOM.type <- "signed"
-which.network <- "signed" # 'signed', 'unsighed', or 'signed hybrid'
-which.cor <- "spearman"
+
+
+
+  applyCorrection <- function(dat){
+    require(sva)
+    mod=matrix(1,nrow=dim(t(dat))[1],ncol=1)
+    colnames(mod)="Intercept"
+    nsv=num.sv(dat,mod = mod, method = "be")
+    dat.correct = sva_network(dat, nsv)   
+    
+    list(
+      dat.correct = dat.correct,
+      nsv = nsv
+    )
+  }
+  
+  q_normalize <- function(dat){
+    n = nrow(dat)
+    p = ncol(dat)
+    rank.dat =  dat # matrix for ranking
+    for (i in 1:p){
+      rank.dat[,i] = rank(dat[,i])
+    }
+    U = rank.dat/(n+1)
+    qnorm(U)
+  }
+
 
 n.workers <- list(cor = 10)
 if (sim.type == "single"){
   # get similarity matrices ######################################################
-  
-  
+  # 
+  #  if (do.pca.correction){
+  #   ap.all <- applyCorrection(t(datExpr.noz)); datExpr.noz <- t(q_normalize(ap.all$dat.correct)); rm(ap.all)
+  #   ap.1 <- applyCorrection(t(de.1)); de.1 <- t(q_normalize(ap.1$dat.correct)); rm(ap.1)
+  #   ap.2 <- applyCorrection(t(de.2)); de.2 <- t(q_normalize(ap.2$dat.correct)); rm(ap.2)    
+  # } 
   
   s.mat <- parCor(mat = datExpr.noz, method = which.cor, do.par = T, n.workers = n.workers$cor)
-  a.mat <-  sim2adj(s.mat, soft.power = 2, network.type = which.network)
+  # a.mat <-  sim2adj(s.mat, soft.power = 2, network.type = which.network)
   s.1 <- parCor(mat = de.1, method = which.cor, do.par = T, n.workers = n.workers$cor)
   s.2 <- parCor(mat = de.2, method = which.cor, do.par = T, n.workers = n.workers$cor)
   
@@ -1105,13 +1151,25 @@ if (sim.type == "single"){
   s.1[is.na(s.1)] <- 0
   s.2[is.na(s.2)] <- 0
 } else if (sim.type == "bin"){
+
   
   datExpr.noz.bin <- t(be.mat); rownames(datExpr.noz.bin) <- paste0("v", seq(1,nrow(datExpr.noz.bin)))
   de.1.bin <-  t(be.mat.ref); rownames(de.1.bin) <- paste0("v", seq(1,nrow(de.1.bin)))
   de.2.bin <-  t(be.mat.comp); rownames(de.2.bin) <- paste0("v", seq(1,nrow(de.2.bin)))
   
+  # clean empties
+  if (do.pca.correction){
+    de.1.bin <- de.1.bin[complete.cases(de.1.bin), ]
+    de.2.bin <- de.2.bin[complete.cases(de.2.bin), ]
+    
+    ap.all <- applyCorrection(t(datExpr.noz.bin)); datExpr.noz.bin <- t(q_normalize(ap.all$dat.correct)); rm(ap.all)
+    ap.1 <- applyCorrection(t(de.1.bin)); de.1.bin <- t(q_normalize(ap.1$dat.correct)); rm(ap.1)
+    ap.2 <- applyCorrection(t(de.2.bin)); de.2.bin <- t(q_normalize(ap.2$dat.correct)); rm(ap.2)    
+  }
+  
+  
   s.mat <- parCor(mat = datExpr.noz.bin, method = which.cor, do.par = T, n.workers = n.workers$cor)
-  a.mat <-  sim2adj(s.mat, soft.power = 2, network.type = which.network)
+  # a.mat <-  sim2adj(s.mat, soft.power = 2, network.type = which.network)
   s.1 <- parCor(mat = de.1.bin, method = which.cor, do.par = T, n.workers = n.workers$cor)
   s.2 <- parCor(mat = de.2.bin, method = which.cor, do.par = T, n.workers = n.workers$cor)
   
@@ -1128,7 +1186,7 @@ if (sim.type == "single"){
 ```{r get soft power, fig.width=10, fig.height=7}
 
 sft <- getSoftThreshold2(s.mat, power =c(seq(1,20, by = 1)), 
-                         network.type = which.network, rescale.adjacency = F, n.cores = 4, nBreaks = 16)
+                         network.type = which.network, rescale.adjacency = F, n.cores = 4, nBreaks = 10)
 
 if (print.inline){
   cowplot::plot_grid(plotlist = sft$distribution.plot, ncol = 5)
@@ -1144,6 +1202,23 @@ if (print.inline){
 
 ```
 
+
+```{r bias similarity matrix}
+
+bias.similarity  <- F
+
+if (bias.similarity){
+  # since group-wise comparison involves splitting data into smaller partitions, we're going to introduce a bias that attempts to stabilize the data
+  n.ref <- sum(so.query@meta.data[["group.query"]] %in% reference.group)
+  n.comp <- sum(so.query@meta.data[["group.query"]] %in% comparison.group)
+  
+  s.1 <- (s.1 * (n.ref/(n.ref + n.comp))) + (s.mat * (n.comp/(n.ref + n.comp)))
+  s.2 <- (s.2 * (n.ref/(n.ref + n.comp))) + (s.mat * (n.comp/(n.ref + n.comp)))  
+}
+
+```
+
+
 ```{r calculate network connectivity, include = FALSE}
 
 # get soft power
@@ -1154,8 +1229,6 @@ if (sum(sft.opt$r2 < -0.9) > 0){
   best.power <- sft[["powerEstimate"]]
 }
 if (is.na(best.power)) best.power <- 1
-
-TOM.type = "signed"
 
 # run WCGNA ####################################################################
 output.all <- runWGCNA(e.mat = datExpr.noz, s.mat = s.mat, cor.metric = which.cor, 
@@ -1200,6 +1273,8 @@ d.2 <- output.2[["d.mat"]]
 # scale TOM matrices
 w.1 <- scaleTOM(query.TOM = w.1, reference.TOM = w.2, reference.percentile = 0.95)
 
+reference.percentile = 0.95
+
 # recompute the distance matrix
 d.mat <- 1-w.mat
 d.1 <- 1-w.1
@@ -1210,6 +1285,20 @@ w.co <- pmin(w.1, w.2) # component-wise parallel minimum of TOMs
 w.dis <- pmax(w.1, w.2)
 d.co <- 1-w.co
 d.dis <- 1-w.dis
+
+pprod <- function(..., na.rm = FALSE) {
+  plus_na_rm <- function(x, y) ifelse(is.na(x), 0, x) * ifelse(is.na(y), 0, y)
+  Reduce(if(na.rm) plus_na_rm else '*', list(...))
+}
+
+peuc <- function(..., na.rm = T) {
+  plus_na_rm <- function(x, y) sqrt((x^2) + (y^2))
+  Reduce(if(na.rm) plus_na_rm else '*', list(...))
+}
+
+w.mean <- peuc(w.1, w.2)
+w.mean <- w.mean/max(w.mean, na.rm = T)
+d.mean <- 1-w.mean
 
 ```
 
@@ -1275,29 +1364,38 @@ geneTree.co <- dist2hclust(d.co)
 geneTree.1 <- dist2hclust(d.1)
 geneTree.2 <- dist2hclust(d.2)
 geneTree.dif <- dist2hclust(d.dis)
+geneTree.mean <- dist2hclust(d.mean)
 
 if (print.inline){
-  par(mfrow = c(1,5))
+  par(mfrow = c(1,6))
   plot(geneTree.all, xlab = "", sub = "", main = "All", labels = F, hang = 0.04)
   plot(geneTree.co, xlab = "", sub = "", main = "Consensus", labels = F, hang = 0.04)
   plot(geneTree.1, xlab = "", sub = "", main = paste0("Group 1: ", reference.group), labels = F, hang = 0.04)
   plot(geneTree.2, xlab = "", sub = "", main = paste0("Group 2: ", comparison.group), labels = F, hang = 0.04)
   plot(geneTree.dif, xlab = "", sub = "", main = paste0("Differential"), labels = F, hang = 0.04)
+  plot(geneTree.mean, xlab = "", sub = "", main = paste0("pmean"), labels = F, hang = 0.04)
 }
 ```
 
 ```{r specfiy which meta network to evaluate}
 
-which.metanet <- "consensus" # "consensus" or "differential"
-
+# specify how to combine networks
 if (which.metanet == "consensus"){
   w.co <- w.co
-  d.co <- d.co
+  d.co <- 1-w.co  
   geneTree.co <- geneTree.co
 } else if (which.metanet== "differential"){
   w.co <- w.dis
-  d.co <- d.dis  
+  d.co <- 1-w.co    
   geneTree.co <- geneTree.dif
+} else if (which.metanet == "total"){
+  w.co <- w.mat
+  d.co <- 1-w.co  
+  geneTree.co <- geneTree.all  
+} else if (which.metanet == "mean"){
+  w.co <- w.mean
+  d.co <- 1-w.co   
+  geneTree.co <- geneTree.mean
 }
 ```
 
@@ -1305,11 +1403,23 @@ if (which.metanet == "consensus"){
 
 ```{r dendro cuts, message=FALSE, warning=FALSE}
 
+pam.resp.dend <- F
+cut.height <- NULL
+
+
 # determine number of modules based on refrence dataset
-p2h <- capture.output(mColorh.1 <- optimalDS(tree = geneTree.1, d.mat = d.1, genes  = rownames(a.1), minClusterSize  = 5, method = "hybrid", cut.height = NULL))
-p2h <- capture.output(mColorh.2 <- optimalDS(tree = geneTree.2, d.mat = d.2, genes  = rownames(a.2), minClusterSize  = 5, method = "hybrid", cut.height = NULL))
-p2h <- capture.output(mColorh.all <- optimalDS(tree = geneTree.all, d.mat= d.mat, genes  = rownames(a.mat), minClusterSize  = 5, method = "hybrid", cut.height = NULL))
-p2h <- capture.output(mColorh.co <- optimalDS(tree = geneTree.co, d.mat= d.co, genes  = rownames(a.mat), minClusterSize  = 5, method = "hybrid", cut.height = NULL))
+p2h <- capture.output(mColorh.1 <- optimalDS(tree = geneTree.1, d.mat = d.1, 
+                                             genes  = rownames(a.1), minClusterSize  = min.cluster.size, 
+                                             method = "hybrid", cut.height = cut.height, pam.respects.dendro = pam.resp.dend))
+p2h <- capture.output(mColorh.2 <- optimalDS(tree = geneTree.2, d.mat = d.2, 
+                                             genes  = rownames(a.2), minClusterSize  = min.cluster.size, 
+                                             method = "hybrid", cut.height = cut.height, pam.respects.dendro = pam.resp.dend))
+p2h <- capture.output(mColorh.all <- optimalDS(tree = geneTree.all, d.mat= d.mat, 
+                                               genes  = rownames(a.mat), minClusterSize  = min.cluster.size, 
+                                               method = "hybrid", cut.height = cut.height, pam.respects.dendro = pam.resp.dend))
+p2h <- capture.output(mColorh.co <- optimalDS(tree = geneTree.co, d.mat= d.co, 
+                                              genes  = rownames(a.mat), minClusterSize  = min.cluster.size, 
+                                              method = "hybrid", cut.height = cut.height, pam.respects.dendro = pam.resp.dend))
 
 # select modules based off best clustering above
 which.deepcut <- "ds.4"
@@ -1336,8 +1446,6 @@ if (print.inline){
 
 modules.COA <- modules.coa
 modules.ALL <- modules.all
-# harmonize module labels across datasets
-# modules.all <- modules.ALL
 modules.coa <- modules.COA
 modules.1b = as.vector(matchLabels(modules.1a,  modules.coa))
 modules.2b = as.vector(matchLabels(modules.2a,  modules.coa))
@@ -1369,12 +1477,8 @@ module.sets <- list(all = unique(modules.all),
 module.sets.v2 <- list(all = unique(modules.all),
                        consensus = unique(modules.cob))
 
-
-
 if (print.inline){
-  # fig.width=15, fig.height=4
   ggVennDiagram::ggVennDiagram(module.sets) + ggtitle("Network Preservations")
-  # ggVennDiagram::ggVennDiagram(module.sets.v2) + ggtitle("Network Preservations")
 }
 
 # get robust consensus modules (all else set to grey)
@@ -1397,9 +1501,7 @@ df.map.all <- data.frame(module = modules.consensus, genes = mColorh.all[ ,"gene
 
 ```{r matrix distributions, fig.width=15, fig.height=4}
 
-
 if (print.inline){
-  # fig.width=15, fig.height=4
   par(mfrow = c(1,4))
   hist(datExpr.noz, main = "Expression", xlab = "Expression")
   hist(s.mat[s.mat != 1], main = "Similarity (correlation)", xlab = "Similarity")
@@ -1423,9 +1525,6 @@ if (print.inline){
                       guideHang=0.05, main="Gene dendrogram and module colors (Group 2 -> Group 2)")
   plotDendroAndColors(geneTree.2, modules.cob, "Modules", dendroLabels=FALSE, hang=0.03, addGuide=TRUE,
                       guideHang=0.05, main="Gene dendrogram and module colors (Group 2 -> consensus)")
-  
-  
-  
 }
 
 
@@ -1434,15 +1533,6 @@ if (print.inline){
 ```{r eigenGenes}
 
 library(irlba)
-
-modules.union <- c()
-for (i in 1:length(modules.1b)){
-  if(modules.1b[i] == modules.2b[i]){
-    modules.union[i] <- modules.1b[i] 
-  } else {
-    modules.union[i] <- "grey"
-  }
-}
 
 # ME activity of group 1
 which.module.membership <- modules.consensus
@@ -1818,7 +1908,8 @@ colnames(model.anova)[colnames(model.anova) %in% "Pr(>Chi)"] <- "pVal"
 # model.anova$pVal <- model.anova$pVal + 1e-20
 model.anova$pVal.log <- -log10(model.anova$pVal)
 
-
+model.anova$padj <- p.adjust(model.anova$pVal, method = "BH", n = length(model.anova$pVal))
+importance.order <- (model.anova %>% dplyr::arrange(-var.exp))$term
 
 plt.var.exp <- model.anova %>%
   ggplot(aes(reorder(terms, var.exp), var.exp, fill = pVal.log)) + 
@@ -1859,28 +1950,93 @@ results.co.hub.p <- NULL;
 results.co.hub.bh <- NULL;
 ```
 
+```{r}
+
+  getTopTOM <- function(w.mat, module.genes){
+    w.mat.cur <- w.mat[rownames(w.mat) %in% module.genes, colnames(w.mat) %in% module.genes]
+    diag(w.mat.cur) <- NA
+    w.s <- (w.mat.cur - median(w.mat.cur, na.rm = T) ) /mad(w.mat.cur, na.rm = T)
+    mat.log <- apply(w.s, 1, function(x) x >2 )
+    mat.log[is.na(mat.log)] <- F
+    mat.row <- apply(mat.log, 1, function(x) any(x, na.rm = T))
+    top.w.genes <- rownames(w.s)[mat.row]    
+    return(top.w.genes)
+  }
+
+```
+
+
+```{r get hub genes}
+# get ME names
+df.me <- ME.all
+colnames(df.me) <- gsub("ME", "", colnames(df.me))
+module.names <- colnames(df.me)
+df.me$cells <- rownames(df.me)
+
+
+plt.hub.list <- list()
+hub.list <- list()
+for (i in 1:length(module.names)){
+  module.genes <- rownames(a.mat)[which.module.membership %in% module.names[i]]
+  wc <- w.mat[rownames(w.mat) %in% module.genes, colnames(w.mat) %in% module.genes]
+  df.wc <- getConnectivity(wc, rownames(wc) )
+  
+  hub.genes <- df.wc$genes[(df.wc$wi - median(df.wc$wi))/mad(df.wc$wi) > 2] 
+  df.wc$is.hub <- "grey"
+  df.wc$is.hub[df.wc$genes %in% hub.genes] <- "tomato"
+  
+  plt.hub <- df.wc %>%
+    ggplot(aes(x = rank(wi), y = wi, label = genes)) +
+    geom_text(size = 2, color = df.wc$is.hub) +
+    theme_miko() +
+    xlab("Hub Gene Rank") +
+    ylab("Connectivity") +
+    labs(title = "Network Hub Genes", subtitle = module.names[i])
+  
+  hub.list[[module.names[i]]] <- hub.genes
+  plt.hub.list[[module.names[i]]] <- plt.hub
+  
+}
+
+# 
+# plt.hub.list
+  
+```
+
 
 ```{r go enrich, warning=FALSE, message=FALSE}
 
 # run go enrichment
 all.genes <- colnames(de.1)
 
-
+# get genes
 module.list.all <- getModuleGenes(modules.all, SubGeneNames, add.prefix = F)
 module.list.co <- getModuleGenes(modules.cob, SubGeneNames, add.prefix = F)
 
-my.symbol <- rownames(a.mat)
+# get mapping
+my.symbol <- rownames(w.mat)
 my.entrez <- sym2entrez(my.symbol, my.species =which.species )
 my.entrez <- my.entrez[complete.cases(my.entrez), ]
-pathways.go <- getAnnotationPathways(query.genes = my.entrez$ENTREZID, db = c("GO"), ontology = "BP", species =  which.species)
-
 g2e.list <- my.entrez$ENTREZID
 names(g2e.list) <- my.entrez$SYMBOL
 
-gene.universe <- unique(rownames(so.query))
+# get annotations
+pathways.go <- getAnnotationPathways(query.genes = my.entrez$ENTREZID, db = c("GO"), ontology = c("BP", "CC", "MF"), species =  which.species)
+
+# get all unique entrez
+all.entrez <- unlist(unique(pathways.go))
+all.hub <- unlist(hub.list)
+
+gene.universe <- unique(rownames(w.mat))
 gene.universe <- unique(g2e.list[gene.universe])
+gene.universe <- gene.universe[gene.universe %in% all.entrez]
+
+hub.universe <- unique(g2e.list[all.hub])
+pathways.hub <- getAnnotationPathways(query.genes = hub.universe, db = c("GO"), ontology = c("BP", "CC", "MF"), species =  which.species)
+hub.universe <- hub.universe[hub.universe %in% unlist(unique(pathways.hub))]
 
 # res.h.list <- list()
+# GOenrichmentAnalysis()
 
 n.enrich <- 16
 cl <- parallel::makeCluster(n.enrich)
@@ -1888,13 +2044,29 @@ doParallel::registerDoParallel(cl)
 
 res.h.list <- list()
 res.h.list <- foreach(i = 1:length(module.list.co), .packages = c("dplyr", "fgsea"))  %dopar% {
+  # for (i in 1:length(module.list.co)){
   
-  warning(paste0("progress: ", round(100*i/length(module.list.co)), "%\n"))
-  current.genes <- unique(g2e.list[module.list.co[[i]]])
+  # warning(paste0("progress: ", round(100*i/length(module.list.co)), "%\n"))
+  mod.name.current <- names(module.list.co)[i]
   
-  res.hyper <-  fora(pathways = pathways.go, genes = current.genes, universe = gene.universe, minSize = 2, maxSize = Inf)
+  current.genes <- module.list.co[[mod.name.current]]
+  current.hub <- hub.list[[mod.name.current]]
+  # current.genes <-  getTopTOM(w.mat, current.genes)
+  
+  current.genes <- unique(g2e.list[current.genes])
+  current.genes <- current.genes[current.genes %in% gene.universe]
+  current.hub <- unique(g2e.list[current.hub])
+  current.hub <- current.hub[current.hub %in% hub.universe]
+  
+  # gene.universe2 <- c(gene.universe[!(gene.universe %in% current.genes)], current.hub)
+  
+  res.hyper <-  fora(pathways = pathways.go, genes = current.genes, universe = gene.universe, minSize = 1, maxSize = Inf)
+  res.hub <-  fora(pathways = pathways.hub, genes = current.hub, universe = hub.universe, minSize = 1, maxSize = Inf)
 
-  return(res.hyper)
+  return(list(
+    res.hyper = res.hyper,
+    res.hub = res.hub
+  ))
   
 }
 
@@ -1905,15 +2077,18 @@ stopCluster(cl)
 results.co.p <- results.co.bh <- NULL
 for (i in 1:length(res.h.list)){
   
-  df.enrich.cur <- res.h.list[[i]]
-  df.enrich.cur$module <- names(res.h.list)[i]
-  results.co.p <- bind_rows(results.co.p,
-                            (df.enrich.cur[df.enrich.cur$pval< 0.05]))
-  results.co.bh <- bind_rows(results.co.bh,
-                             (df.enrich.cur[df.enrich.cur$padj< 0.1]))
+  df.enrich.cur <- res.h.list[[i]]$res.hyper
+  df.enrich.hub.cur <- res.h.list[[i]]$res.hub
+  df.enrich.cur$module <- df.enrich.hub.cur$module <- names(res.h.list)[i]
+  df.enrich.cur$which.module.genes <- "all"
+  df.enrich.hub.cur$which.module.genes <- "hub"
   
+  results.co.p <- bind_rows(results.co.p, (df.enrich.cur[df.enrich.cur$pval< 0.05]))
+  results.co.p <- bind_rows(results.co.p, (df.enrich.hub.cur[df.enrich.hub.cur$pval< 0.05]))
+  results.co.bh <- bind_rows(results.co.bh, (df.enrich.cur[df.enrich.cur$padj< 0.1]))
+  results.co.bh <- bind_rows(results.co.bh, (df.enrich.hub.cur[df.enrich.hub.cur$padj< 0.1]))
 }
-rm(res.h.list)
+# rm(res.h.list)
 
 results.co.p <- cleanForaOutput(results.co.p, my.entrez = my.entrez)
 results.co.bh <- cleanForaOutput(results.co.bh, my.entrez = my.entrez)
@@ -2042,26 +2217,26 @@ difNetworkGraph <- function(w.mat, w.1, w.2, module.genes, z.all, z.sub, connect
                 "no.change" = "grey80", 
                 "down.regulated" =  "skyblue")
   # create plot ################################################################
-  
+  # alpha = scMiko::rescaleValues(weight, 0.3, 1)
   plt.graph <- g.mat %>%
     ggplot(aes(x = x, y = y, xend = xend, yend = yend)) +
-    geom_edges(aes(color = delta.link, size =2*weight/max(weight, na.rm = T), alpha = weight/max(weight, na.rm = T))) + 
+    geom_edges(aes(color = delta.link, size = scMiko::rescaleValues(weight, 0.1, 1))) + 
     scale_colour_gradient2("Delta\nConnectivity",low = "skyblue", mid = "grey80", 
                            high = "tomato" , midpoint = 0,na.value = "transparent", limits = c(-default.cor.dif.limit, default.cor.dif.limit)) +
     new_scale("color") +
-    geom_nodes(aes(fill = (node.type), size = 10*wi/max(wi, na.rm = T)), shape = 21, color = "grey60") +
+    geom_nodes(aes(fill = (node.type), size =  10*scMiko::rescaleValues(wi, 0.1, 1)), shape = 21, color = "grey60") +
     scale_fill_manual(name = "Delta\nExpression", values =col.node) +
     geom_nodetext(aes(label = name), size = 3) + scale_size_identity() +
     theme_blank() +  guides(alpha=FALSE) + 
     labs(caption = "node size = hub connectivity; linkage width = gene-gene connectivity")
-  
+
   return(plt.graph)
 }
 
 ```
 
 
-```{r dash all, fig.height = 8, fig.width=18, warning = FALSE, message=FALSE}
+```{r dash all, fig.height = 10, fig.width=18, warning = FALSE, message=FALSE}
 
 
 # get matrices to visualize #####################################################
@@ -2084,6 +2259,8 @@ if (!exists("sd.mat")){
 # scale similarity matrix
 sn.1 <- s.1
 sn.2 <- scaleTOM(query.TOM = s.2, reference.TOM = s.1, reference.percentile = 0.95)
+# sn.1 <- s.1
+# sn.2 <- s.2
 
 
 ag.mat <- ag.mat[ag.mat$genes %in% rownames(a.mat), ]
@@ -2104,6 +2281,7 @@ df.ma$module <- gsub("ME", "", df.ma$name)
 df.umap <- data.frame(so.query@reductions[["umap"]]@cell.embeddings)
 colnames(df.umap) <- c("x", "y")
 df.umap$cells <- rownames(df.umap)
+df.umap$cells <- gsub("\\.", "-", df.umap$cells)
 
 plt.cluster.umap <- cluster.UMAP(so.query) + theme_miko(legend = T)
 
@@ -2112,6 +2290,7 @@ df.me <- ME.all
 colnames(df.me) <- gsub("ME", "", colnames(df.me))
 module.names <- colnames(df.me)
 df.me$cells <- rownames(df.me)
+df.me$cells <- gsub("\\.", "-", df.me$cells)
 
 # merge
 df.umap <- merge(df.umap, df.me,by = "cells")
@@ -2120,25 +2299,46 @@ dash.list <- list()
 for (i in 1:length(module.names)){
   # for (i in 1:10){
   
+  if (module.names[i] == "grey") next
+  
   n.genes <-sum(which.module.membership %in% module.names[i]) 
   
   # get top GO enrichements ####################################################
   results.co.p.cur <- results.co.p[results.co.p$module %in% module.names[i], ]
-  results.co.p.cur <- results.co.p.cur[ ,c("pathway", "pval", "padj", "set")]
   results.co.p.cur <- (results.co.p.cur %>% dplyr::arrange(pval))[1:10, ]
   
+  for (j in 1:nrow(results.co.p.cur)){
+    if (!is.null(unlist(results.co.p.cur$set[j]))){
+      current.gene.set <- gsub(" ", "", unlist(strsplit(unlist(results.co.p.cur$set[j]), ",")))
+      if (length(current.gene.set) > 5){
+        current.gene.set <- paste0(paste(current.gene.set[1:5], collapse = ", "), "...") 
+      } else {
+        current.gene.set <- paste(current.gene.set, collapse = ", ")
+      }
+      results.co.p.cur$set[j] <- current.gene.set      
+    } else {
+      results.co.p.cur$set[j] <- ""
+    }
+  }
+  
+  results.co.p.cur$hub.set <- "black"
+  results.co.p.cur$hub.set[results.co.p.cur$which.module.genes %in% "hub"] <- "tomato"
+  
   results.co.p.cur$path.trun <- stringr::str_trunc(results.co.p.cur$pathway, 40)
+  results.co.p.cur$path.trun <- paste0(results.co.p.cur$path.trun, " (", results.co.p.cur$overlap, "/", results.co.p.cur$size, ")")
+   results.co.p.cur$path.trun <- paste0( results.co.p.cur$path.trun,"\n",results.co.p.cur$set)
   results.co.p.cur <- results.co.p.cur[!is.na(results.co.p.cur$pathway), ]
   plt.module.go <- results.co.p.cur %>%
     ggplot(aes(x = -log10(pval), y = reorder(path.trun, -log1p(pval)), fill = -log1p(pval))) + 
-    geom_bar(stat = "identity", color = "black") + 
+    geom_bar(stat = "identity", color =  results.co.p.cur$hub.set) + 
     geom_point(aes(x = -log10(padj), y = reorder(path.trun, -log1p(pval)))) + 
     theme_miko(legend = T) + 
     viridis::scale_fill_viridis() + 
     geom_vline(xintercept = -log10(0.05), linetype = "dashed") +
      geom_vline(xintercept = -log10(0.2), linetype = "dashed", color = "grey") + ylab("") + 
     xlab("-log(p)") + labs(title = "Module Enrichment", subtitle = "GO Ontology", 
-                           fill = "-log(p)", caption = "bar: p, dot: p adjusted.\nblack line: -log(0.05), grey line: -log(0.20).")
+                           fill = "-log(p)", 
+                           caption = "bar: p, dot: p adjusted.\nblack line: -log(0.05), grey line: -log(0.20).\nblack border = all genes; red border = hub genes.")
   
   
   # differential ME activity ###################################################
@@ -2166,6 +2366,11 @@ for (i in 1:length(module.names)){
   df.ma.sum.wide$sig.lab[df.ma.sum.wide$pval < 0.001] <- "***"
   lab.position = -(max(df.ma.sub$value) * 0.05)
   
+    
+  # 
+  ve.group.discrimination <- signif(model.anova$var.exp[model.anova$terms %in% module.names[i]] , 3) * 100
+  p.group.discrimination <- signif(model.anova$padj[model.anova$terms %in% module.names[i]] , 3)
+  
   df.ma.sub$cluster.group <- factor(df.ma.sub$cluster.group, levels = c(reference.group, comparison.group))
   plt.me.dif <- ggplot(df.ma.sub, aes(x = cluster.orig, y = value, fill = cluster.group))+
     geom_split_violin(trim = T, alpha = .5)+
@@ -2178,8 +2383,10 @@ for (i in 1:length(module.names)){
                  geom = "crossbar",
                  width = 0.25,
                  position = position_dodge(width = .25)) + 
-    labs(title = "EigenModule Activity", subtitle = "Stratified by clusters", fill = "Group",
-         caption = "Dashed lines: Group means\nwilcoxon test: p<0.05*, p<0.01**, p<0.001***") 
+    labs(title = "EigenModule Activity", subtitle = paste0(reference.group , " vs. ", 
+                                                           comparison.group, ", ",
+                                                           ve.group.discrimination, "% variance explained, q = ", p.group.discrimination),
+         fill = "Group", caption = "Dashed lines: Group means\nwilcoxon test: p<0.05*, p<0.01**, p<0.001***") 
   
   
   
@@ -2189,6 +2396,7 @@ for (i in 1:length(module.names)){
   z.mat.sub <- z.mat[z.mat$genes %in%  module.genes, ]
   z.mat.all <- z.mat.sub
   z.mat.sub <- z.mat.sub %>% dplyr::arrange(-dif)
+
   
   n.all <- nrow(z.mat.sub)
   mean.z <- mean(z.mat.sub$dif, na.rm = T)
@@ -2200,7 +2408,6 @@ for (i in 1:length(module.names)){
   }
   n.sub <- nrow(z.mat.sub)
   
-  
   max.min <- min(z.mat.sub$dif, na.rm = T)
   max.max <- max(z.mat.sub$dif, na.rm = T)
   ribbon.range <- c(-1.96, 1.96)
@@ -2208,16 +2415,21 @@ for (i in 1:length(module.names)){
   if (max.max < 0) ribbon.range[2] <- 0
   df.ribbon <- data.frame (xmin=ribbon.range[1], xmax=ribbon.range[2], ymin=-Inf, ymax=Inf)
   
+  z.mat.sub$is.hub <- "black"
+  z.mat.sub$is.hub[z.mat.sub$genes %in% hub.list[[module.names[i]]]] <- "tomato"
+  
+  
+  
   plt.mod.gene.dif <- z.mat.sub %>%
     ggplot(aes(x = dif, y = reorder(genes, dif), fill = abs(dif))) + 
     geom_rect(data = df.ribbon, alpha=0.1, aes(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax), inherit.aes = FALSE) + 
-    geom_segment(aes(xend = 0, yend  = reorder(genes, dif))) + 
+    geom_segment(aes(xend = 0, yend  = reorder(genes, dif)), color = z.mat.sub$is.hub) + 
     geom_point(pch=21, aes(size = abs(avg.exp))) + 
     theme_miko(legend = T) + 
     xlab("Delta Expression (z)") + ylab("") +
     labs(title = "Differential Expression", 
          subtitle = paste0(comparison.group, "-", reference.group, " (", n.sub, "/", n.all, " shown)"), fill = "|z|", size =  "Mean\nExpression",
-         caption = "Dashed red line: mean(z)\nGrey area: p>0.05") + 
+         caption = "Dashed red line: mean(z)\nGrey area: p>0.05\nRed stem: hub gene") + 
     geom_vline(xintercept = 0) + 
     geom_vline(xintercept = mean.z, linetype = "dashed",color = "red") + 
     viridis::scale_fill_viridis(option ="B")   
@@ -2226,9 +2438,15 @@ for (i in 1:length(module.names)){
   
   is.success <- F
   
+  if (length(module.genes) < 6) {
+    cq <- 0.5
+  } else {
+    cq <- 0.75
+  }
+
   try({
-  pltNet <- difNetworkGraph(w.co, sn.1, sn.2, module.genes = module.genes, z.all = z.mat.all, z.sub = z.mat.sub, connectivity.quantile = 0.8)
-  pltNet <- pltNet +theme(legend.position="bottom", legend.box = "vertical")    
+  pltNet <- difNetworkGraph(w.co, sn.1, sn.2, module.genes = module.genes, z.all = z.mat.all, z.sub = z.mat.sub, connectivity.quantile = cq)
+  pltNet <- pltNet + theme_void() + theme(legend.position="bottom", legend.box = "vertical") 
   is.success <- T
   }, silent = T)
 
@@ -2250,6 +2468,7 @@ for (i in 1:length(module.names)){
   plt.middle <- cowplot::plot_grid(plt.module.go, plt.me.dif, ncol = 1)
   plt.right <- plt.mod.gene.dif
   plt.rr <- pltNet
+  # plt.rr <- cowplot::plot_grid(plt.hub, pltNet, ncol = 1, rel_heights = c(2,4))
   plt.all <- cowplot::plot_grid(plt.left, plt.middle, plt.right,plt.rr,  ncol = 4, rel_widths = c(1, 1.5, 1, 1), align = "hv")
   
   if (print.inline){
@@ -2260,49 +2479,380 @@ for (i in 1:length(module.names)){
   dash.list[[module.names[i]]] <- plt.all
 }
 
-
-
+dash.list <- dash.list[importance.order]
 
 if (print.inline){
   print(plt.all)
-  dash.list
+  # dash.list[1:10]
+}
+
+  
+```
+
+
+```{r  compositional changes, fig.height = 8, fig.width=10}
+
+
+df.meta <- so.query@meta.data
+df.umap <- data.frame(so.query@reductions[["umap"]]@cell.embeddings); colnames(df.umap) <- c("x","y")
+df.umap$group <- df.meta$group.query; df.umap$cluster <- df.meta$seurat_clusters
+
+df.meta.comp <- df.meta %>%
+  group_by(seurat_clusters, group.query) %>%
+  tally()
+
+df.meta.comp <- df.meta.comp %>%
+  group_by(group.query) %>%
+  mutate(f = n/sum(n))
+
+df.meta.comp <- df.meta.comp %>%
+  group_by(seurat_clusters) %>%
+  mutate(f.norm = f/sum(f))
+
+
+
+df.propr.test <- NULL
+u.clust <- as.character(unique(df.meta.comp$seurat_clusters))
+for (i in 1:length(u.clust)){
+  
+  df.meta.comp.cur <- df.meta.comp[df.meta.comp$seurat_clusters %in% u.clust[i], ]
+  
+  n.all <- sum(df.meta.comp.cur$n, na.rm = T)
+  n1 <- df.meta.comp.cur$n[df.meta.comp.cur$group.query %in% reference.group]
+  n2 <- df.meta.comp.cur$n[df.meta.comp.cur$group.query %in% comparison.group]
+  
+  if (length(n1) == 0) n1 <- df.meta.comp.cur$n[df.meta.comp.cur$group.query %in% reference.group] <- 0
+  if (length(n2) == 0) n2 <- df.meta.comp.cur$n[df.meta.comp.cur$group.query %in% comparison.group] <- 0
+
+  p1 <- df.meta.comp.cur$f.norm[df.meta.comp.cur$group.query %in% reference.group]
+  p2 <- df.meta.comp.cur$f.norm[df.meta.comp.cur$group.query %in% comparison.group]
+  
+ if (length(p1) == 0) p1 <- df.meta.comp.cur$f.norm[df.meta.comp.cur$group.query %in% reference.group] <- 0
+  if (length(p2) == 0) p2 <- df.meta.comp.cur$f.norm[df.meta.comp.cur$group.query %in% comparison.group] <- 0
+  
+  f1 <- n1/(n1+n2)
+f2 <- n2/(n1+n2)
+  
+  s1 <- sqrt(p1*(1-p1)/n.all)
+  s2 <- sqrt(p2*(1-p2)/n.all)
+  sp <- sqrt((s1^2) + (s2^2))
+  z <- (p1-p2)/sp
+  pval <- signif(2*pnorm(-abs(z)), 3)
+
+  df.propr.test <- bind_rows(df.propr.test, 
+                             data.frame(
+                               cluster = u.clust[i],
+                               n1 = n1,
+                               n2 = n2,
+                               f1 = f1, 
+                               f2 = f2,
+                               n.all = n.all,
+                               prop1 = p1,
+                               prop2 = p2,
+                               prop.dif = p2 - p1,
+                               z = z,
+                               p = pval
+                             ))
+  
+}
+
+df.propr.test$q <- p.adjust(df.propr.test$p, method = "BH")
+df.propr.test$sig <- ""
+df.propr.test$sig[df.propr.test$q < 0.05] <- "*"
+df.propr.test$sig[df.propr.test$q < 0.01] <- "**"
+df.propr.test$sig[df.propr.test$q < 0.001] <- "***"
+
+df.umap <- merge(df.umap, df.propr.test, by = "cluster")
+
+
+plt.bar.comp <- df.meta.comp %>%
+  ggplot(aes(x = seurat_clusters, y = f.norm, fill = group.query)) + 
+  geom_bar(stat = "identity") + 
+  ggthemes::scale_fill_ptol() + 
+  theme_miko(legend = T) + 
+  xlab("Cluster") + ylab("Relative Contribution") + 
+  labs(fill = "Group") + 
+  geom_hline(yintercept = 0.5, linetype = "dashed") + 
+  geom_text(data = df.propr.test, aes(x = cluster, y = -0.05, label = sig), inherit.aes = F) + 
+  geom_text(data = df.propr.test, aes(x = cluster, y = 0.95, label = signif(prop1, 2)), size = 2, inherit.aes = F) + 
+  geom_text(data = df.propr.test, aes(x = cluster, y = 0.05, label = signif(prop2, 2)), size = 2, inherit.aes = F)  + 
+  labs(title = "Relative Composition", subtitle = paste0(reference.group , " vs. ", comparison.group))
+
+df.propr.test$is.sig <- "grey"
+df.propr.test$is.sig[df.propr.test$q < 0.05] <- "pink"
+df.propr.test$dif.rank <- rank(df.propr.test$prop.dif)
+df.propr.test <- df.propr.test %>% dplyr::arrange(dif.rank)
+
+low.high.threshold <- 0.25
+df.r1 <- data.frame(xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = -low.high.threshold)
+df.r2 <- data.frame(xmin = -Inf, xmax = Inf, ymin = -low.high.threshold, ymax = low.high.threshold)
+df.r3 <- data.frame(xmin = -Inf, xmax = Inf, ymin = low.high.threshold, ymax = Inf)
+plt.dot.comp <- df.propr.test %>%
+  ggplot(aes(x = dif.rank, y = prop.dif, label = cluster)) + 
+  geom_rect(data = df.r1, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), inherit.aes = F, fill = scales::muted("blue"), alpha = 0.2) + 
+  geom_rect(data = df.r2, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), inherit.aes = F, fill = "grey", alpha = 0.2) + 
+  geom_rect(data = df.r3, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), inherit.aes = F, fill = scales::muted("red"), alpha = 0.2) + 
+  geom_point(size = 5, shape = 21,  aes(fill =prop.dif)) + 
+  geom_text(size = 2) + 
+  geom_hline(yintercept = c(0), linetype = "dashed") + 
+  theme_miko(legend = T) + 
+  scale_fill_gradient2( low = scales::muted("blue"), mid = "grey90", high = scales::muted("red")) + 
+  labs(title = "Differences", subtitle = paste0("Red: ", comparison.group , " > ", reference.group, "; Blue: ", reference.group , " > ", comparison.group), fill =  "Composition\nChange") + 
+  ylab(paste0("Composition Difference (", comparison.group,  "-", reference.group, ")")) + 
+  xlab("Rank") 
+
+
+# scDC 
+
+plt.umap.comp1 <- cluster.UMAP(so.query) + theme_miko(legend = F) + labs(title = "UMAP", subtitle = "stratified by clusters")
+
+
+
+plt.umap.comp2 <- df.umap %>%
+  ggplot(aes(x = x, y = y, color = prop.dif)) + 
+  geom_point(size = autoPointSize(nrow(df.umap))) + 
+  scale_color_gradient2( low = scales::muted("blue"), mid = "grey90", high = scales::muted("red")) + 
+  theme_miko(legend = T) + labs(title = "UMAP", subtitle = paste0("Red: ", comparison.group , " > ", reference.group, "; Blue: ", reference.group , " > ", comparison.group), color = "Composition\nChange") + 
+  xlab("UMAP 1") + ylab("UMAP 2")
+
+
+p1.comp <- cowplot::plot_grid(plt.umap.comp1, plt.umap.comp2, ncol = 2, rel_widths = c(0.85, 1), align = "h")
+p2.comp <- cowplot::plot_grid(plt.bar.comp, plt.dot.comp, ncol = 2, rel_widths = c(2,1), align = "h")
+
+plt.compositional.analysis <- cowplot::plot_grid(p1.comp, p2.comp, ncol = 1, align = "hv")
+
+if (print.inline){
+  print(plt.compositional.analysis)
 }
 
 ```
 
 
 
+
+```{r prep ma data,  fig.width = 12, fig.height = 8}
+
+df.ma.sum2 <- df.ma %>%
+  group_by(cluster.group, cluster.orig, module) %>%
+  summarize(x = mean(value))
+colnames(df.ma.sum2) <- c("group", "cluster", "module", "x")
+
+df.ma.sum2 <- merge(df.ma.sum2, df.propr.test, by = "cluster")
+
+colnames(df.meta.comp) <- c("cluster", "group", "n", "f", "f.norm")
+df.ma.sum3 <- merge(df.ma.sum2, df.meta.comp, by = c("cluster", "group"))
+
+df.ma.sum3$pgroup <- "constant"
+df.ma.sum3$pgroup[df.ma.sum3$prop.dif > low.high.threshold] <- "up"
+df.ma.sum3$pgroup[df.ma.sum3$prop.dif < -low.high.threshold] <- "down"
+df.ma.sum3$pgroup <- factor(df.ma.sum3$pgroup, levels = c("down", "constant", "up"))
+df.ma.sum3$module <- factor(df.ma.sum3$module, levels = c(importance.order))
+
+# df.ma.sum3 %>%
+#   ggplot(aes(x = group, y = x, fill = pgroup)) + 
+#   geom_boxplot() + 
+#    theme_miko(legend = T) + facet_wrap(~module, scales = "free_y")
+
+
+# df.ma.sum3 %>%
+#   dplyr::filter(group == comparison.group) %>%
+#   ggplot(aes(x = x, y = prop.dif)) + 
+#     geom_smooth() + 
+#   geom_text(aes(label = cluster)) + 
+#    theme_miko(legend = T) + facet_wrap(~module, scales = "free")
+
+# aes(color = group, fill  = group)
+# colnames(df.ma.sum3)
+```
+
+
+```{r prep glmnet data}
+
+df.ma.slim <- df.ma.sum3[ ,c("cluster","group", "module","x", "prop.dif", "pgroup", "n.all")]
+
+df.ma1 <- df.ma.slim[df.ma.slim$group %in% reference.group, ]
+df.ma2 <- df.ma.slim[df.ma.slim$group %in% comparison.group, ]
+colnames(df.ma1) <- c("cluster","group1", "module","x1", "prop.dif", "pgroup", "n")
+colnames(df.ma2) <- c("cluster","group2", "module","x2", "prop.dif", "pgroup", "n")
+
+df.ma.merge <- merge(df.ma1, df.ma2, by = c("cluster","module", "prop.dif", "pgroup", "n"))
+df.ma.merge$x.dif <- df.ma.merge$x2 - df.ma.merge$x1
+
+df.ma.merge1 <- df.ma.merge[ ,c("cluster", "module","n", "x1", "prop.dif")]
+df.ma.merge1$module <- paste0(df.ma.merge1$module, ".ACT")
+df.ma.merge1.wide <- pivot_wider(df.ma.merge1, names_from = "module", values_from = "x1")
+
+df.ma.merge2 <- df.ma.merge[ ,c("cluster", "module","n", "x.dif", "prop.dif")]
+df.ma.merge2$module <- paste0(df.ma.merge2$module, ".DIF")
+df.ma.merge2.wide <- pivot_wider(df.ma.merge2, names_from = "module", values_from = "x.dif")
+
+df.ma.merge.f <- df.ma.merge1.wide
+
+dmmf.weights <- df.ma.merge.f$n
+dmmf.y <- df.ma.merge.f$prop.dif
+df.ma.merge.f <- df.ma.merge.f %>% dplyr::select(-c("n", "prop.dif", "cluster"))
+df.ma.merge.f$y <- dmmf.y
+
+
+```
+
+
+```{r glmnet helpder function}
+
+
+
+glmnetPlots <- function(dfmms, which.s, m.weights, d.weights){
+  
+  fit = glmnet(x = as.matrix(dfmms %>% dplyr::select(-c("y"))), 
+               y = dfmms$y, 
+               weights = m.weights, 
+               lambda=which.s)
+  
+  # get model coefficients #######################################################
+  coef.names <- rownames(coef(fit, s = which.s, exact = FALSE))
+  coef.apprx = as.numeric(coef(fit, s = which.s, exact = FALSE))
+  sig.coef <- coef.names[which((coef.apprx > 0) | (coef.apprx < 0))]
+  sig.coef <- sig.coef[sig.coef != "(Intercept)"]
+  
+  glm.model <- stats::glm(y ~  . , data = dfmms[ ,c(sig.coef, "y")],
+                          family = gaussian, weights = d.weights)
+
+  # Module predictions ###########################################################
+  df.res <- data.frame(x = dfmms$y, 
+                       y.net = predict(fit, as.matrix(dfmms %>% dplyr::select(-y)), s = which.s), 
+                       weight = d.weights)
+  colnames(df.res) <- c("x",  "y.net", "weight")
+  
+  plt.model.performance <- df.res %>%
+    ggplot() + 
+    geom_smooth(aes(x = x, y = y.net), method = "lm", color = scales::muted("red")) +
+    geom_point(aes(x = x, y = y.net, size = weight), color = scales::muted("red")) + 
+    geom_abline(slope = 1) + theme_miko(legend = T) + 
+    xlab("Observed") + ylab("Predicted") + 
+    labs(title = "Model Performance", subtitle = "Compositional Differences", size = "N Cells")
+  
+  plt.model.coef <- sjPlot::plot_model(glm.model, colors = "gs") +
+    xlab("Model Coefficients") + ylab("Coefficient Name") + labs(title = "Model Coefficients", subtitle = "Compositional Differences") +
+    theme_miko(legend = T) + geom_hline(yintercept = 0, linetype = "dashed")
+  
+  plt.cv.fit <- df.cv.fit %>%
+    ggplot(aes(x = log(lambda), y = cv)) + 
+    geom_point() + 
+    xlab("log(Lambda)") + 
+    ylab("Error, MSE") + 
+    labs(title = "Lambda Optimization", subtitle = paste0("GLMnet cross-validation; lambda = ", signif(which.s, 3))) + 
+    theme_miko(legend = T) + 
+    geom_vline(xintercept = log(which.s))
+  
+  
+  plt.mod.perform.sum <- cowplot::plot_grid(plt.cv.fit, plt.model.performance, plt.model.coef, ncol = 3)
+  
+  return(plt.mod.perform.sum)
+  
+}
+
+```
+
+```{r glmnet regression, fig.width = 12, fig.height = 4, warning = FALSE, message  = FALSE, include = FALSE}
+
+
+cl <- parallel::makeCluster(12)
+doParallel::registerDoParallel(cl)
+
+df.ma.merge.scaled <- as.data.frame(apply(df.ma.merge.f, 2, function(x) scale(x)))
+
+# cross-validation #############################################################
+model.weights <- NULL; # dmmf.weights
+cvfit = cv.glmnet(x = as.matrix(df.ma.merge.scaled %>% dplyr::select(-c("y"))), 
+                  y = df.ma.merge.scaled$y, 
+                  weights = model.weights , #dmmf.weights
+                  type.measure = "default", 
+                  parallel = T,
+                  relax = F,
+                  lambda = exp(seq(-10, 0, by = 0.2)),
+                  nfolds = 100)
+
+# stop workers
+parallel::stopCluster(cl)
+
+df.cv.fit <- data.frame(
+  lambda = cvfit[["lambda"]], 
+  cv = cvfit[["cvm"]],
+  cv.up = cvfit[["cvup"]],
+  cv.down = cvfit[["cvlo"]]
+)
+
+# fit glmnet model #############################################################
+which.s1 <- df.cv.fit$lambda[which.min((df.cv.fit$cv))]
+
+min.cv <- min(df.cv.fit$cv)
+max.cv <- max(df.cv.fit$cv)
+cv.threshold <- min.cv + ((max.cv - min.cv)/10)
+which.s2 <- df.cv.fit$lambda[which.min(abs(df.cv.fit$cv - cv.threshold))]
+
+
+which.s3 <- cvfit[["lambda.1se"]]
+
+plt.mod.perform.sum1 <- plt.mod.perform.sum2 <- plt.mod.perform.sum3 <- plt.mod.perform.sum4 <- plt.mod.perform.sum5 <- NULL
+
+try({
+  plt.mod.perform.sum1 <- glmnetPlots(dfmms = df.ma.merge.scaled, which.s =  which.s1, m.weights = model.weights, d.weights = dmmf.weights)
+}, silent = T)
+try({
+  plt.mod.perform.sum2 <- glmnetPlots(dfmms = df.ma.merge.scaled,which.s = which.s2, m.weights = model.weights, d.weights = dmmf.weights)
+}, silent = T)
+try({
+  plt.mod.perform.sum3 <- glmnetPlots(dfmms = df.ma.merge.scaled,which.s = exp(-6), m.weights = model.weights, d.weights = dmmf.weights)
+}, silent = T)
+try({
+  plt.mod.perform.sum4 <- glmnetPlots(dfmms = df.ma.merge.scaled,which.s = exp(-10), m.weights = model.weights, d.weights = dmmf.weights)
+}, silent = T)
+
+try({
+  plt.mod.perform.sum5 <- glmnetPlots(dfmms = df.ma.merge.scaled,which.s = which.s3, m.weights = model.weights, d.weights = dmmf.weights)
+}, silent = T)
+
+if (print.inline){
+  print(plt.mod.perform.sum1)
+  print(plt.mod.perform.sum2)
+  print(plt.mod.perform.sum3)
+  print(plt.mod.perform.sum4)
+  print(plt.mod.perform.sum5)
+}
+
+```
+
+
+```{r}
+
+# deg.genes.pool <- unique(c(rownames(df.deg.pool), rownames(a.mat)))
+# 
+# # ag.mat
+# ag.mat.clust <- aggGroupExpression(
+#   so.query,
+#   which.data = "data",
+#   which.assay = DefaultAssay(so.query),
+#   which.center = "mean",
+#   which.group = "seurat_clusters",
+#   do.parallel = F
+# )
+# 
+# ag.mc.sub <- ag.mat.clust[ag.mat.clust$genes %in% deg.genes.pool, ]
+# rownames(ag.mc.sub) <- ag.mat.clust$genes
+# ag.mc.sub <- ag.mc.sub %>% dplyr::select(-c("genes")) 
+# ag.mc.sub.t <- t(ag.mc.sub)
+# ag.mc.sub.t$cluster <- as.numeric(gsub("c", "", rownames(ag.mc.sub.t)))
+# 
+# ag.mc.sub.t.merge <- merge(ag.mc.sub.t, df.propr.test, by = "cluster")
+
+```
+
+
 ```{r get module genes}
 
-module.list.1 <- getModuleGenes(modules.1b, SubGeneNames, add.prefix = F)
-module.list.2 <- getModuleGenes(modules.2b, SubGeneNames, add.prefix = F)
 module.list.co <- getModuleGenes(modules.cob, SubGeneNames, add.prefix = F)
 module.list.all <- getModuleGenes(modules.all, SubGeneNames, add.prefix = F)
 
-# get genes that are common to both network modules
-module.union.list <- list()
-common.modules <- intersect(modules.1b, modules.2b)
-module.u1.list <- list()
-module.u2.list <- list()
-for (i in 1:length(common.modules)){
-  common.genes <- intersect(module.list.1[[common.modules[i]]], module.list.2[[common.modules[i]]])
-  set.1 <- setdiff(module.list.1[[common.modules[i]]], module.list.2[[common.modules[i]]])
-  set.2 <- setdiff(module.list.2[[common.modules[i]]], module.list.1[[common.modules[i]]])
-  module.union.list[[common.modules[i]]] <- common.genes
-  module.u1.list[[common.modules[i]]] <- set.1
-  module.u2.list[[common.modules[i]]] <- set.2
-}
-
-
-
-if (print.inline) {
-  table(modules.1b)
-  table(modules.2b)
-}
-
-# convert list to wide df (for export)
-module.df.1 <- namedList2wideDF(module.list.1)
-module.df.2 <- namedList2wideDF(module.list.2)
 module.df.co <- namedList2wideDF(module.list.co)
 module.df.all <- namedList2wideDF(module.list.all)
 
@@ -2326,19 +2876,19 @@ df.delta.con.deg$wi.x.norm <- df.delta.con.deg$wi.x
 df.delta.con.deg$wi.y.norm <- df.delta.con.deg$wi.y
 df.delta.con.deg$delta.rank <- df.delta.con.deg$wi.y.norm - df.delta.con.deg$wi.x.norm
 
-df.delta.con.deg$composite.score <- (((df.delta.con.deg$avg_logFC - mean(df.delta.con.deg$avg_logFC)) / sd(df.delta.con.deg$avg_logFC))  + ((df.delta.con.deg$delta.rank - mean(df.delta.con.deg$delta.rank)) / sd(df.delta.con.deg$delta.rank))) / 2
+df.delta.con.deg$composite.score <- (((df.delta.con.deg$avg_log2FC - mean(df.delta.con.deg$avg_log2FC)) / sd(df.delta.con.deg$avg_log2FC))  + ((df.delta.con.deg$delta.rank - mean(df.delta.con.deg$delta.rank)) / sd(df.delta.con.deg$delta.rank))) / 2
 rank.limit <- max(c(abs(min(df.delta.con.deg$composite.score)), abs(max(df.delta.con.deg$composite.score))))
 
 label.top.n <-15
-top.delta <- c(top_n(df.delta.con.deg, label.top.n, avg_logFC)$genes,
-               top_n(df.delta.con.deg, label.top.n, -avg_logFC)$genes,
+top.delta <- c(top_n(df.delta.con.deg, label.top.n, avg_log2FC)$genes,
+               top_n(df.delta.con.deg, label.top.n, -avg_log2FC)$genes,
                top_n(df.delta.con.deg, label.top.n, delta.rank)$genes,
                top_n(df.delta.con.deg, label.top.n, -delta.rank)$genes,
                top_n(df.con.deg, label.top.n, wi)$genes)
 top.delta <- unique(top.delta)
 
 plt.2 <- df.delta.con.deg %>%
-  ggplot(aes(x = avg_logFC, y = delta.rank,color = composite.score,  size = -log1p(p_val_adj) * 0.5, text = genes)) +
+  ggplot(aes(x = avg_log2FC, y = delta.rank,color = composite.score,  size = -log1p(p_val_adj) * 0.5, text = genes)) +
   geom_point(alpha = 0.5) +
   xlab("log FC") +
   ylab(paste0("Delta Rank Connectivity (", comparison.group, "-", reference.group, ")")) +
@@ -2349,7 +2899,7 @@ plt.2 <- df.delta.con.deg %>%
   theme_classic() +
   scale_colour_gradientn("CS", colours=c("skyblue", "grey90", "tomato"),na.value = "transparent",
                          values=c(rescaleValues(c(min(df.delta.con.deg$composite.score), 0, max(df.delta.con.deg$composite.score))))) +
-  ggrepel::geom_text_repel(aes(avg_logFC, delta.rank,
+  ggrepel::geom_text_repel(aes(avg_log2FC, delta.rank,
                                label =ifelse(genes %in% top.delta ,as.character(genes),'')), size = 2.5, color = "black") 
 
 
@@ -2357,16 +2907,16 @@ df.delta.con.deg$mean.rank <- (df.delta.con.deg$wi.x.norm + df.delta.con.deg$wi.
 
 # df.con.deg$logp <- 
 plt.3 <- df.con.deg %>%
-  ggplot(aes(x = avg_logFC, y = rank(wi) ,color =avg_logFC, size = -log1p(p_val_adj) , text = genes)) +
+  ggplot(aes(x = avg_log2FC, y = rank(wi) ,color =avg_log2FC, size = -log1p(p_val_adj) , text = genes)) +
   geom_point(alpha = 0.5) +
   ylab("Connectivity Rank") +
   theme_classic() +
   geom_vline(xintercept = 0 , linetype = "dashed") +
   labs(title = "DEG Rank Plot", subtitle = "Ranked by Network Connectivity", size = "-log(p)") + 
   xlab(paste0("logFC (", comparison.group, "-", reference.group, ")")) +
-  ggrepel::geom_text_repel(aes(avg_logFC, rank(wi), label =ifelse(genes %in% top.delta ,as.character(genes),'')), size = 2.5, color = "black") +
+  ggrepel::geom_text_repel(aes(avg_log2FC, rank(wi), label =ifelse(genes %in% top.delta ,as.character(genes),'')), size = 2.5, color = "black") +
   scale_colour_gradientn("logFC", colours=c("skyblue", "grey90", "tomato"),na.value = "transparent",
-                         values=c(rescaleValues(c(min(df.con.deg$avg_logFC), 0, max(df.con.deg$avg_logFC)))))
+                         values=c(rescaleValues(c(min(df.con.deg$avg_log2FC), 0, max(df.con.deg$avg_log2FC)))))
 
 df.delta.con.deg$top.connect <- F
 df.delta.con.deg$top.connect[df.delta.con.deg$mean.rank >  nrow(df.delta.con.deg)-20] <- T
@@ -2397,7 +2947,7 @@ plt.overview.1 <- df.delta.con.deg %>%
 # Distribution of expression differences
 plt.overview.2 <- df.delta.con.deg %>%
   ggplot() + 
-  geom_density(aes(avg_logFC, fill = "logFC"), alpha = 0.5) + 
+  geom_density(aes(avg_log2FC, fill = "logFC"), alpha = 0.5) + 
   geom_density(aes(pct.1 - pct.2, fill = "deltaFraction"), alpha = 0.5) + 
   theme_classic() + 
   xlab(paste0("logFC (", comparison.group , "-", reference.group , ")")) + 
@@ -2637,8 +3187,8 @@ exp.mat.sub <- exp.mat.all[ ,sample.ind]
 top.n.deg <- 30
 df.deg.enr <- df.deg.pool
 df.deg.enr$genes <- rownames(df.deg.enr)
-deg.top <- top_n(df.deg.enr, top.n.deg, (avg_logFC))$genes
-deg.bottom <- top_n(df.deg.enr, top.n.deg, -(avg_logFC))$genes
+deg.top <- top_n(df.deg.enr, top.n.deg, (avg_log2FC))$genes
+deg.bottom <- top_n(df.deg.enr, top.n.deg, -(avg_log2FC))$genes
 deg.genes <- c(deg.top, deg.bottom)
 
 
@@ -2678,7 +3228,9 @@ try({
   run.id <-  updateCentralLog(Module = "M10", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
   clog.update.success <-  T
 }, silent = F)
-if (is.null(run.id))  {
+
+
+if (!(clog.update.success)){
   warning("Central log update was unsuccessful :(\n")
   run.id <- paste("M10_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
 }
@@ -2735,6 +3287,20 @@ Within-cluster group-wise differential-differential expression analyses.
 Row {.tabset}
 -------------------------------------
 
+```{r plt overall deg, fig.width = 12, fig.height = 5}
+
+try({
+  plot.name <- paste0("M10_overall_deg", ".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+          plot.handle =  plt.bin.deg.ann, 
+          fig.width = 12, fig.height = 5, save.flag = save.pdf)
+  print(plt.bin.deg.ann)
+  
+}, silent = T)
+
+```
+
+
 ```{r paired, warning = FALSE, message = FALSE, fig.width = 7, fig.height = 6}
 
 paired_out <- NULL
@@ -2776,7 +3342,7 @@ for (i in 1:length(plt.pairwise.list)){
 Between-Cluster (DEG)
 ===================================== 
 
-Cluster vs. rest-of-population differential expression analyses. 
+Cluster vs. rest-of-population differential expression analyses. Enrichments shown for upregulated genes (i.e., logFC > 0) only. 
 
 Row {.tabset}
 -------------------------------------
@@ -3207,14 +3773,12 @@ dash_out <- lapply(seq_along(dash.list), function(i) {
   
 })
 
-# dash.list[[18]]
 ```
 
 `r paste(knitr::knit(text = paste(dash_out, collapse = '\n')))`
 
 
 ```{r save dash}
-
 
 for (i in 1:length(dash.list)){
   s1 <- names(dash.list)[i]
@@ -3226,6 +3790,116 @@ for (i in 1:length(dash.list)){
 
 ```
 
+
+Compositional Analysis
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Differential Composition
+
+```{r plot comp,fig.height = 8, fig.width=10}
+
+print(plt.compositional.analysis)
+
+plot.name <- paste0("M10_compositional_analysis" , ".pdf")
+savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+        plot.handle =  plt.compositional.analysis, 
+        fig.width = 10, fig.height = 8, save.flag = save.pdf)
+```
+
+### GLMnet Regression (v1)
+
+Prediction of compositional difference using module eigengene activities as model covariates. lambda  = minimum lambda. 
+
+```{r plotplt.mod.perform.sum1,fig.height = 4, fig.width=12}
+
+try({
+
+  plot.name <- paste0("M10_glmnet_regression_v1" , ".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name),
+          plot.handle =  plt.mod.perform.sum1,
+          fig.width = 12, fig.height = 4, save.flag = save.pdf)
+}, silent = T)
+
+ print(plt.mod.perform.sum1)  
+
+```
+
+
+### GLMnet Regression (v2)
+
+Prediction of compositional difference using module eigengene activities as model covariates. lambda = 10% above minimal lambda.
+
+```{r plotplt.mod.perform.sum2,fig.height = 4, fig.width=12}
+
+try({
+  plot.name <- paste0("M10_glmnet_regression_v2" , ".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name),
+          plot.handle =  plt.mod.perform.sum2,
+          fig.width = 12, fig.height = 4, save.flag = save.pdf)
+}, silent = T)
+
+  print(plt.mod.perform.sum2)
+
+```
+
+
+### GLMnet Regression (v3)
+
+Prediction of compositional difference using module eigengene activities as model covariates. lambda = exp(-6).
+
+```{r plotplt.mod.perform.sum30,fig.height = 4, fig.width=12}
+
+try({
+  plot.name <- paste0("M10_glmnet_regression_v3" , ".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name),
+          plot.handle =  plt.mod.perform.sum3,
+          fig.width = 12, fig.height = 4, save.flag = save.pdf)
+}, silent = T)
+
+  print(plt.mod.perform.sum3)
+
+```
+
+### GLMnet Regression (v4)
+
+Prediction of compositional difference using module eigengene activities as model covariates. lambda = exp(-10). 
+
+```{r plotplt.mod.perform.sum40,fig.height = 4, fig.width=12}
+
+try({
+
+
+  plot.name <- paste0("M10_glmnet_regression_v4" , ".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name),
+          plot.handle =  plt.mod.perform.sum4,
+          fig.width = 12, fig.height = 4, save.flag = save.pdf)
+}, silent = T)
+
+  print(plt.mod.perform.sum4)
+
+```
+
+### GLMnet Regression (v5)
+
+Prediction of compositional difference using module eigengene activities as model covariates. lambda = 1 se within minimal lambda. 
+
+```{r plotplt.mod.perform.sum50,fig.height = 4, fig.width=12}
+
+try({
+
+
+  plot.name <- paste0("M10_glmnet_regression_v5" , ".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name),
+          plot.handle =  plt.mod.perform.sum5,
+          fig.width = 12, fig.height = 4, save.flag = save.pdf)
+}, silent = T)
+
+  print(plt.mod.perform.sum5)
+
+```
 
 Network Enrichment
 ===================================== 
@@ -3354,9 +4028,9 @@ Row {.tabset}
 ```{r}
 
 df.module.list <- list(all = module.df.all,
-                       consensus = module.df.co,
-                       group.1 = module.df.1,
-                       group.2 = module.df.2
+                       consensus = module.df.co
+                       # group.1 = module.df.1,
+                       # group.2 = module.df.2
                        # hub.genes = df.topGenesKME
                        )
 
@@ -3387,6 +4061,9 @@ df.log <- addLogEntry("N genes in network", length(SubGeneNames), df.log, "lengt
 df.log <- addLogEntry("TOM Type", TOM.type, df.log, "TOM.type")
 
 df.log <- addLogEntry("Network Type", which.network, df.log, "which.network")
+
+df.log <- addLogEntry("N Genes Considered", nrow(w.mat), df.log, "")
+
 
 df.log <- addLogEntry("Correlation Type", which.cor, df.log, "which.cor")
 
