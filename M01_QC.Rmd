@@ -28,7 +28,7 @@ invisible({gc()})
 start.time <- proc.time()
 
 # list of packages to load
-packages2load <- c('viridis', 'scMiko', 'ggpubr', 'dplyr', 'WGCNA', 'cowplot', 'schex', 'Seurat', 'sctransform', 'plyr', 'tidyr', 'reshape2', 'Matrix', 'RColorBrewer', 'ggplot2', 'gridExtra', 'DT', 'flexdashboard', 'future', 'gplots')
+packages2load <- c('viridis', 'scMiko', 'ggpubr', 'dplyr', 'WGCNA', 'cowplot', 'schex', 'Seurat', 'sctransform', 'plyr', 'tidyr', 'reshape2', 'Matrix', 'RColorBrewer', 'ggplot2', 'gridExtra', 'DT', 'flexdashboard', 'future', 'gplots', 'reticulate')
 
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE))
@@ -41,16 +41,17 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # specify parameters
 analysis.parameters <- analysisParameters(
   which.data = c("pilot12.Hs"),
-  which.strata = c("Meso"),
+  which.strata = c("LM.trouble"),
   organism.filter.flag = F,                             
   organism.include = c("Hs"),
   save.flag = T,                                                              # OPTIONAL; logical (default = T)  # save results
-  save.filename = "p12_Meso_061020.Rdata", # note that prefix containing module number and run ID is appended to save file. 
+  save.filename = "p12_LungTrouble_061020.Rdata", # note that prefix containing module number and run ID is appended to save file. 
   save.directory = "Preprocessed_Datasets/",
   cluster.resolution = 1,
-  gene.upperlimit = 9000, #9000
-  gene.lowerlimit = 200,  #200
-  mt.upperlimit = 60,   #60
+  gene.upperlimit = Inf, #9000
+  gene.lowerlimit = 0,  #200
+  mt.upperlimit = 100,   #60
+  unmatched.rate.filter.flag = F,
   vars2regress = c("percent.mt"), # optional: "dataset" (for linear batchcorrection)
   do.additional.reduction = F
 )
