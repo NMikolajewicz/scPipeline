@@ -55,7 +55,7 @@ input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
  # "neural.dif.HH", 
 # specify reference genesets
 # "MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat",, , "neural.dif.HH"
-which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm",   "VastDB", "cycling.seurat", "brain.GBM.R103","immune.Monaco", "invitro.GBM")
+which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm",   "VastDB", "cycling.seurat", "brain.GBM.R103","immune.Monaco", "invitro.GBM", "Zeisel2018_brainDev")
 # which.references <- "brain.GBM.R103"
 
 # specify cluster resolution
