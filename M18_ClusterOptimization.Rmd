@@ -33,13 +33,7 @@ packages2load <- c("scMiko", "Seurat", "sctransform", "clustree",
                    "plyr", "dplyr", "tidyr", "reshape2", "RColorBrewer", "ggplot2", "gridExtra", 
                    "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", 
                    "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "readxl", "MAST", 
-                   "future", "cluster", "doParallel", "parallel", "foreach")
-
-library(treemap)
-library(data.tree)
-library(DiagrammeR)
- library(igraph)
-library(dendextend)
+                   "future", "cluster", "doParallel", "parallel", "foreach", "treemap", "data.tree", "DiagrammeR", "igraph", "dendextend")
 
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE))
@@ -53,8 +47,9 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 
 # Query input
+input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
 # input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
 
@@ -84,12 +79,12 @@ cluster.tree.markers <- NA
 which.species <- "Mm"
 
 # Data subsampling
-subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 0.2 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify number of workers (for parallelization)
 n.workers <- list(
-  clustering = 3, # data clustering
-  deg = 4         # DEG analysis
+  clustering = 2, # data clustering
+  deg = 2         # DEG analysis
 )
 
 # which markers to return
@@ -683,7 +678,7 @@ get.topmarkers <- function(query.markers, n_top_markers = 10, cluster_res_label 
   
   top_markers <- query.markers %>% 
     dplyr::group_by(cluster) %>% 
-    dplyr::arrange(desc(avg_logFC)) 
+    dplyr::arrange(desc(avg_log2FC)) 
   
   top_markers_filter <- top_markers[ , c("cluster", "gene")]
   
@@ -699,12 +694,12 @@ get.topmarkers <- function(query.markers, n_top_markers = 10, cluster_res_label 
   top_markers$cluster <- paste("c", as.character(top_markers$cluster), sep = "")
   top_markers$p_val <- signif( top_markers$p_val, 3)
   top_markers$p_val_adj <- signif( top_markers$p_val_adj, 3)
-  top_markers$avg_logFC <- signif( top_markers$avg_logFC, 3)
+  top_markers$avg_log2FC <- signif( top_markers$avg_log2FC, 3)
   
   top_markers_50 <- query.markers %>% 
     dplyr::group_by(cluster) %>% 
-    dplyr::arrange(desc(avg_logFC)) %>%
-    dplyr::top_n(n = 50, wt = avg_logFC)
+    dplyr::arrange(desc(avg_log2FC)) %>%
+    dplyr::top_n(n = 50, wt = avg_log2FC)
   
   top_markers_50 <- top_markers_50[ , c("cluster", "gene")]
   
@@ -722,8 +717,8 @@ get.topmarkers <- function(query.markers, n_top_markers = 10, cluster_res_label 
   
   top5_markers <- query.markers %>% 
     dplyr::group_by(cluster) %>% 
-    dplyr::arrange(desc(avg_logFC)) %>%
-    dplyr::top_n(n = 50, wt = avg_logFC)
+    dplyr::arrange(desc(avg_log2FC)) %>%
+    dplyr::top_n(n = 50, wt = avg_log2FC)
   
   
   # assign outputs to list and return
