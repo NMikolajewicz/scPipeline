@@ -22,3 +22,4 @@ immuneSubtype,Hs,VALID_Thorsson2018_tumorImmuneSubtypes_260420.csv
 brain.GBM.R103,Mm,VALID_R103_brain_gbm_panel_160920.csv
 immune.Monaco,Hs,VALID_Monaco2019_ImmuneSubsets_071020.csv
 invitro.GBM,Mm,VALID_invitro_GBM_CT2A_GL261_NM_271020.csv
+Zeisel2018_brainDev,Mm,VALID_Zeisel2018_brainDevelopment_061120.csv
