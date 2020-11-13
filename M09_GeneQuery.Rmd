@@ -67,14 +67,13 @@ which.input <- list(
   #   4: top N cluster markers
   #   5: M09_type5_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
-  query_input_format = 1,
+  query_input_format = 0,
   do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
-  which.gene.set = c("yamanaka") # character (e.g., sex.specific)
+  which.gene.set =c('CD34', 'CDX2', 'SOX11', 'SOX4', 'ZDHHC17', 'TGFBR2', 'LRP6', 'SMAD1', 'PLA2G12A', 'TADA2B', 'PHB2', 'DOT1L', 'SUPT20H', 'GYPA', 'SPN', 'KDR', 'CDX4', 'CRKL', 'PRKCA', 'CDH1', 'HOXA9', 'AKR1A1') # character (e.g., sex.specific)
 )
 
-# 
 
 #############################
 
@@ -103,23 +102,26 @@ correlation.settings <- list(
 # Miscillaneus settings
 
 # cluster resolution
-cluster.resolution <- 0.5
+cluster.resolution <- 0.3
 
 # specify subgroup provided in M00_subgroups.csv; subgroup <- "no.subgroup" to include all data
 subset.df <- "no.subset"
 # subset.df <- data.frame(field = "Barcode", subgroups = "C68")
 
-which.species <- "Mm" # Option: Mm or Hs
+which.species <- "Hs" # Option: Mm or Hs
 
 # input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
 # input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
 # input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
-input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+# input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
 # input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
 # input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
+# input.file <- "Module1_p7_mesoderm_110620.Rdata"
+# input.file <- "Module1_m27_p7_mesoderm_070420.Rdata"
+input.file <- "Module1_p7_mesoderm_update_170620.Rdata"
 
 # print figures inline
 print.inline <- F
@@ -434,14 +436,14 @@ if (which.input$query_input_format == 3){
   
   # filter by threshold
   deg.gene.sig <- deg.gene[ (deg.gene$p_val_adj<p.threshold) & 
-                              (abs(deg.gene$avg_logFC)>lfc.threshold) & 
+                              (abs(deg.gene$avg_log2FC)>lfc.threshold) & 
                               (deg.gene$pct.1 > pct.threshold) & 
                               (deg.gene$pct.2 > pct.threshold), ]
   
   # subset and label (up vs down), merge after
-  deg.gene.sig.up <- deg.gene.sig[deg.gene.sig$avg_logFC>0, ]
+  deg.gene.sig.up <- deg.gene.sig[deg.gene.sig$avg_log2FC>0, ]
   deg.gene.sig.up$cluster <- as.character(paste("c", deg.gene.sig.up$cluster, ".up", sep = ""))
-  deg.gene.sig.down <- deg.gene.sig[deg.gene.sig$avg_logFC<0, ]
+  deg.gene.sig.down <- deg.gene.sig[deg.gene.sig$avg_log2FC<0, ]
   deg.gene.sig.down$cluster <- as.character(paste("c", deg.gene.sig.down$cluster, ".down", sep = ""))
   deg.gene.sig.all <- bind_rows(deg.gene.sig.up, deg.gene.sig.down)
   
@@ -604,8 +606,10 @@ available_markers <- c()
 # check if point size adjustment is necessary
 if (ncol(so.query)> 50000) {
   aps <- F
+  pt.size <- autoPointSize(ncol(so.query))
 } else {
   aps <- T
+  pt.size <- 1
 }
 
 if (class(markers_of_interest) == "data.frame") markers_of_interest <- as.vector(markers_of_interest[,1])
@@ -652,16 +656,36 @@ for (i in c(1:(length(markers_of_interest)))) {
                                                                    type = "data")
     } else {
 
-      all_plts[[length(all_plts)+1]] <- scExpression.UMAP(
-      so.query,
-      cur.marker,
-      x.label = "UMAP 1",
-      y.label = "",
-      plot.name = NULL,
-      adjust.pt.size = aps) +
+      # all_plts[[length(all_plts)+1]] <- scExpression.UMAP(
+      # so.query,
+      # cur.marker,
+      # x.label = "UMAP 1",
+      # y.label = "",
+      # plot.name = NULL,
+      # adjust.pt.size = aps) +
+      # theme_miko(legend = T) +
+      # viridis::scale_color_viridis(option = "A") +
+      # labs(title = "", subtitle =cur.marker)
+
+      all_plts[[length(all_plts)+1]] <- Nebulosa::plot_density(
+        object = so.query,
+        features = cur.marker,
+        slot = "data",
+        joint = FALSE,
+        reduction = "umap",
+        dims = c(1, 2),
+        method = c("ks", "wkde"),
+        adjust = 1,
+        size = pt.size,
+        shape = 16,
+        combine = TRUE,
+        pal = "inferno"
+      )  +
       theme_miko(legend = T) +
-      viridis::scale_color_viridis(option = "A") + 
-      labs(title = "", subtitle =cur.marker) 
+      viridis::scale_color_viridis(option = "A") +
+      labs(title = "", subtitle =cur.marker)
+      
+      
     }
     
   }
@@ -683,7 +707,6 @@ available_markers <- available_markers[!is.na(available_markers)]
 # assign names marker names to each plot
 names(plt.umap.1) <- names(plt.umap.2) <- available_markers
 
-
 ```
 
 
@@ -697,7 +720,7 @@ all.markers <- FindAllMarkers(object = so.query,  features = available_markers,
 Idents(so.query) <- orig.ident
 
 if (nrow(all.markers) > 0){
-  all.markers[, c("p_val", "avg_logFC", "p_val_adj")] <- signif(all.markers[, c("p_val", "avg_logFC", "p_val_adj")], 3)
+  all.markers[, c("p_val", "avg_log2FC", "p_val_adj")] <- signif(all.markers[, c("p_val", "avg_log2FC", "p_val_adj")], 3)
   
   # get top DEGS
   if (!is.na(which.results$umap.top.n)){
@@ -731,6 +754,222 @@ if (!is.na(which.results$umap.top.n)){
 
 ```
 
+
+```{r}
+# 
+# getExpressionMatrix.dev <- function(so, only.variable = F, which.assay = NULL, which.data = "scale", use.additional.genes = NA, as.dense = F){
+# 
+#   # specify assay
+#   if (is.null(which.assay)) which.assay <- DefaultAssay(so)
+# 
+#   # get complete matrix
+#   if (which.data == "scale"){
+#     exp.mat.complete <- so@assays[[which.assay]]@scale.data
+#   } else if (which.data == "data"){
+#     if (as.dense){
+#       exp.mat.complete <- as.matrix(so@assays[[which.assay]]@data)
+#     } else {
+#       exp.mat.complete <- (so@assays[[which.assay]]@data)
+#     }
+# 
+#   }
+# 
+# 
+#   if (only.variable){
+#     var.feat <-  VariableFeatures(so)
+#     if (length(var.feat) == 0){
+#       if (which.assay == "SCT"){
+#         if ("integrated" %in% names(so@assays)){
+#           var.feat <-  so@assays[["integrated"]]@var.features
+#         } else {
+#           var.feat <-  so@assays[["SCT"]]@var.features
+#         }
+#       } else {
+#         stop("Could not find variable features in Seurat Object. ")
+#       }
+#     }
+# 
+#     exp.mat <- exp.mat.complete[rownames(exp.mat.complete) %in% var.feat, ]
+#   } else {
+#     exp.mat <- exp.mat.complete
+#   }
+# 
+# 
+#   if (!is.na(use.additional.genes)){
+#     which.missing <- which(!(use.additional.genes %in% rownames(exp.mat)))
+#     missing.additional.genes <- (use.additional.genes)[which.missing]
+#     exp.mat.additional <- exp.mat.complete[rownames(exp.mat.complete) %in% missing.additional.genes, ]
+#     exp.mat <- rbind(exp.mat, exp.mat.additional)
+#   }
+# 
+#   return(exp.mat)
+# }
+
+
+```
+
+
+```{r}
+# 
+# expression.Plot.dev <- function(so, which.gene, e.mat = NULL, f.mat = NULL,
+#                             which.group = "seurat_clusters", which.data = "data", which.assay = DefaultAssay(so),
+#                             x.label = NULL, x.label.angle = NULL){
+# 
+#   # get expression data
+#   if (is.null(e.mat)){
+#     em <- getExpressionMatrix(
+#       so,
+#       only.variable = F,
+#       which.assay = which.assay,
+#       which.data = which.data,
+#       use.additional.genes = NA
+#     )
+#   } else {
+#     em <- e.mat
+#   }
+# 
+#   # get fraction of expressing cells
+#   if (is.null(f.mat)){
+#     em.frac <- avgGroupExpression(
+#       so,
+#       which.data = "data",
+#       which.center = "fraction",
+#       which.group = which.group
+#     )
+#   } else {
+#     em.frac <- f.mat
+#   }
+# 
+#   if ("genes" %in% colnames(em)){
+#     rownames(em) <- em$genes
+#     em <- em %>% dplyr::select(-c("genes"))
+#   }
+#   if ("genes" %in% colnames(em.frac)){
+#     rownames(em.frac) <- em.frac$genes
+#     em.frac <- em.frac %>% dplyr::select(-c("genes"))
+#   }
+# 
+#   # get meta data
+#   so.meta <- so@meta.data
+# 
+#   # ensure grouping variable exists
+#   if (!(which.group) %in% colnames(so.meta)) stop("Grouping variable does not exist.")
+# 
+#   # merge datasets
+#   if (sum(rownames(em) %in% (which.gene)) != 1) stop("More than one gene matched query. Cannot continue.")
+#   df.meta <- data.frame(id = rownames(so.meta), group = so.meta[,which.group])
+#   em.mark <- as.data.frame(em[(rownames(em)) %in% (which.gene), ])
+#   em.df <- data.frame(id = rownames(em.mark), query = em.mark[,1])
+#   em.merge <- merge(em.df, df.meta, by = "id")
+# 
+#   # get summary statistics (for clustering)
+#   suppressMessages({em.sum <- em.merge %>%
+#     dplyr::group_by(group) %>%
+#     dplyr::summarise(x.mean = (mean((query), na.rm = T)),
+#                      x.sd = sd(query, na.rm = T))})
+#   em.frac.mark <- as.data.frame(em.frac[(rownames(em.frac)) %in% (which.gene), ])
+#   if (rownames(em.frac.mark) %in% which.gene) em.frac.mark <-as.data.frame(t(em.frac.mark))
+#   colnames(em.frac.mark) <- which.gene
+#   em.frac.mark.df <- data.frame(group = rownames(em.frac.mark), frac = em.frac.mark[,1])
+# 
+#   if (which.group == "seurat_clusters") em.frac.mark.df$group <- gsub("c", "", em.frac.mark.df$group)
+#   em.sum <- merge(em.sum, em.frac.mark.df, by = "group")
+# 
+#   # hierarchial clustering
+#   row.names.df <- em.sum$group
+#   em.sum <- em.sum %>% dplyr::select(-c("group"))
+#   clust.var <- as.matrix(em.sum)
+#   rownames(clust.var) <- row.names.df
+#   d <- dist(as.matrix(clust.var))   # find distance matrix
+# 
+#   clust.success <- F
+#   try({
+#     hc <- hclust(d)                # apply hirarchical clustering
+#     clust.success <- T
+#   }, silent = T)
+# 
+# 
+#   if (is.null(x.label)) x.label <- which.group
+# 
+#   if (clust.success){
+#     # helper function for creating dendograms
+#     ggdend.v2 <- function(df) {
+#       ggplot() +
+#         geom_segment(data = df, aes(x=x, y=y, xend=xend, yend=yend)) +
+#         ggdendro::theme_dendro()
+#     }
+# 
+#     # get dendromgram data from heat object
+#     d.query.clust <- ggdendro::dendro_data(hc)
+# 
+#     # ggplot dendograms
+#     p.query.clust <- ggdend.v2(d.query.clust$segments) +
+#       ggtitle(paste0(which.gene, " Expression")) +
+#       theme(axis.title.x=element_blank(),
+#             axis.text=element_blank(),
+#             axis.line=element_blank(),
+#             axis.ticks=element_blank(),
+#             legend.position = "none")
+# 
+#     # reorder data according to clusters
+#     em.merge$group <- factor(as.character(em.merge$group), levels = (d.query.clust[["labels"]][["label"]]))
+# 
+#     max.query <- max(em.merge$query, na.rm = T)
+#     em.merge$query.norm <- rescaleValues(values = em.merge$query, new.min = 0, new.max = 1)
+#     
+#     suppressMessages({em.merge.sum <- em.merge %>%
+#       group_by(group) %>%
+#       summarize(ef = mean(query > 0),
+#                 ev = mean(query.norm, na.rm = T))})
+#     
+#     
+#     plt.em <- ggplot() +
+#       geom_bar(data = em.merge.sum, aes(x = group, y = ef, fill = group), stat = "identity", alpha = 0.5) +
+#       coord_cartesian(ylim = c(0, 1)) +
+#       geom_violin(data = em.merge, aes(x = group, y = query.norm, fill = group)) +
+#       geom_point(data = em.merge.sum, aes(x = group, y = (ev), fill = group)) +
+#       theme_miko() +
+#       xlab(x.label)  +
+#       scale_y_continuous(sec.axis = sec_axis(~., name = "Normalized Expression (violin)"), name = "Expressing Fraction (bar)") +
+#       theme(plot.margin = unit(c(0, 1, 0, 1), "cm"),
+#             legend.position = "none")
+# 
+#     if (!is.null(x.label.angle) && is.numeric(x.label.angle)){
+#       plt.em <- plt.em + theme(axis.text.x = element_text(angle = x.label.angle, hjust = 1))
+#     }
+# 
+#     # combine plots
+#     plt.sgExp <-  cowplot::plot_grid(p.query.clust, plt.em, ncol = 1, align = "v", rel_heights = c(1,3))
+# 
+#   } else {
+# 
+#     max.query <- max(em.merge$query, na.rm = T)
+#     em.merge.sum <- em.merge %>%
+#       group_by(group) %>%
+#       summarize(ef = mean(query > 0),
+#                 ev = mean(query, na.rm = T))
+#     plt.sgExp <- ggplot() +
+#       geom_bar(data = em.merge.sum, aes(x = group, y = ef, fill = group), stat = "identity", alpha = 0.5) +
+#       coord_cartesian(ylim = c(0, 1)) +
+#       geom_violin(data = em.merge, aes(x = group, y = query/max.query, fill = group)) +
+#       geom_point(data = em.merge.sum, aes(x = group, y = (ev)/max.query, fill = group)) +
+#       theme_miko() +
+#       xlab(x.label)  +
+#       scale_y_continuous(sec.axis = sec_axis(~., name = "Expression (violin)"), name = "Expressing Fraction (bar)") +
+#       theme(plot.margin = unit(c(0, 1, 0, 1), "cm"),
+#             legend.position = "none")
+# 
+#     if (!is.null(x.label.angle) && is.numeric(x.label.angle)){
+#       plt.em <- plt.em + theme(axis.text.x = element_text(angle = x.label.angle, hjust = 1))
+#     }
+#   }
+# 
+#   return(plt.sgExp)
+# 
+# }
+
+
+```
 
 
 
@@ -766,14 +1005,14 @@ for (i in 1:length(available_markers)){
   plt.sgExp.clust <- expression.Plot(so = so.query, e.mat = e.mat.log, f.mat = f.mat.clust, 
                                          which.gene = available_markers[i], which.group = "seurat_clusters", 
                                          which.data = "data", x.label = "Cluster") + 
-    labs(title = "Violin Plots", subtitle = "Clusters")  
+    labs(title = "Violin Plots", subtitle = "Clusters", caption = "violin = normalized expression\ndot = expression mean\nbar = expressin fraction")  
   
   is.success <- F
   try({
     plt.sgExp.barcode <- expression.Plot(so = so.query, e.mat = e.mat.log, f.mat = f.mat.bc, 
                                              which.gene = available_markers[i], which.group = "Barcode", which.data = "data",
                                               x.label = "Sample", x.label.angle = 25) +  
-      labs(title = "", subtitle = "Samples")  
+      labs(title = "", subtitle = "Samples", caption = "violin = normalized expression\ndot = expression mean\nbar = expressin fraction")  
       
     is.success <- T
   })
@@ -791,6 +1030,8 @@ for (i in 1:length(available_markers)){
   }
 }
 
+
+plt.sgExp.all
 ```
 
 
@@ -930,10 +1171,10 @@ df.cor.list <- df.cor.list[ ,c("genes", which.available.markers)]
 
 # Rank by LFC if DEG
 if (which.input$query_input_format == 3){
-  deg.gene.enrich <- deg.gene[ ,c("cluster", "avg_logFC", "gene")]
-  colnames(deg.gene.enrich) <- c("cluster", "avg_logFC", "genes")
+  deg.gene.enrich <- deg.gene[ ,c("cluster", "avg_log2FC", "gene")]
+  colnames(deg.gene.enrich) <- c("cluster", "avg_log2FC", "genes")
   deg.gene.enrich$cluster <- paste("c", deg.gene.enrich$cluster , sep = "")
-  deg.gene.enrich.wide <- pivot_wider(deg.gene.enrich, names_from = cluster, values_from = avg_logFC)
+  deg.gene.enrich.wide <- pivot_wider(deg.gene.enrich, names_from = cluster, values_from = avg_log2FC)
   
   df2enrich <- as.data.frame(deg.gene.enrich.wide)
   
@@ -1572,6 +1813,8 @@ if (save.pdf) dir.create(paste0(output.path, "PDF/"))
 1) cluster UMAP
 ===================================== 
 
+Uniform manifold projection and approximation (UMAP) used to dimensionally reduce and visualize data while maintaining global transcriptomic structure. Clusters were determined using unsupervised Louvain community detection. 
+
 Row {.tabset}
 -------------------------------------
 
@@ -1594,6 +1837,8 @@ savePDF(file.name = paste0(output.path, "PDF/", "M09_umap_barcode.pdf"), plot.ha
 
 2) Expression
 ===================================== 
+
+Expression plots of queried gene(sets). Dot.All shows all queries, whereas Dot.DEG shows only those that are differentially expressed (p<0.05) across clusters. Expression heatmap shows scaled expression values. All plots have been hierarchially-clustered. 
 
 Row {.tabset}
 -------------------------------------
@@ -1678,6 +1923,8 @@ if (exists("plt.sgExp.list")){
 3) Results
 ===================================== 
 
+Summary report for each query gene(set). Top left: Expression values projected onto UMAP and corresponding cluster memberships. Bottom left: Normalized expression strafied by clusters or sample barcodes. Groups were hierarchially-clustered using normalized expression, expressing fraction and expression variance. Right: Query gene(set) correlations were computed and correlation-based ranks were used as input into gene set enrichment analysis (GSEA) to identify query-associated enrichments. 
+
 Row {.tabset}
 -------------------------------------
 
@@ -1720,6 +1967,8 @@ for (i in 1:length(dash.list)){
 
 4) Correlations
 ===================================== 
+
+Gene(set) query correlation table and heatmap. Only top correlations are shown. 
 
 Row {.tabset}
 -------------------------------------
@@ -1773,6 +2022,8 @@ try({
 5) GSEA 
 ===================================== 
 
+GSEA enrichment results for genes ranked by query correlations.  
+
 Row {.tabset}
 -------------------------------------
 
@@ -1824,6 +2075,8 @@ for (i in 1:length(gse.pathway.list)){
 6) Expression Table(s)
 ===================================== 
 
+Gene(set) expression tables, stratified by clusters and sample barcodes. 
+
 Row {.tabset}
 -------------------------------------
 
@@ -1844,6 +2097,8 @@ for (i in 1:length(df.expression.list)){
 7) DEG
 ===================================== 
 
+Differential expression statistics for gene(set) queries. 
+
 ### DEG Query Genes
 
 ```{r DEG query }
@@ -1853,6 +2108,8 @@ flex.asDT(all.markers)
 
 8) Marker List
 ===================================== 
+
+Gene(set) tables used in analysis. 
 
 ### Marker List
 

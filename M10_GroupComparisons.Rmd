@@ -70,14 +70,14 @@ group.field <- "Barcode"
                    # CT2A = "CT2A")
 
 
-group.list <- list(all.0231 = "0231",
-                   all.0238 = "0238")
+group.list <- list(ctrl = "ctrl.0231",
+                   TR = "TR.0231")
 # group.list <- list(WT = "WT",
 #                    C2 = "C2")
 
 # specify which group is reference/control group (NA if unspecified)
 # which.reference <- NA 
-which.reference <- "all.0231"
+which.reference <- "ctrl.0231"
 # which.reference <- "GL261"
 # which.reference <- "WT" # specify whcih group to use as reference (e.g., DEG compared to what?)
 
@@ -386,11 +386,30 @@ names(g2e.list) <- my.entrez$SYMBOL
 gene.universe <- unique(rownames(so.query))
 gene.universe <- unique(g2e.list[gene.universe])
 
+# clean fora output function
+cleanForaOutput <- function(fora.output, my.entrez){
+  suppressMessages({
+    suppressWarnings({
+      fora.output$set <- lapply(fora.output$overlapGenes, 
+                                mapvalues,from = my.entrez$ENTREZID, to = my.entrez$SYMBOL)
+      fora.output$set <- lapply(fora.output$set, paste,collapse = ", ")
+      fora.output[ ,c("pval", "padj")] <- signif( fora.output[ ,c("pval", "padj")], 3)
+      fora.output <- fora.output %>% dplyr::select(-c("overlapGenes"))
+    })
+  })
+  return(fora.output)
+}
+
+
+cons.noncons <- list()
+if (length(conserved.markers.list) > 0){
+  
+
 n.enrich <- 16
 cl <- parallel::makeCluster(n.enrich)
 doParallel::registerDoParallel(cl)
 
-cons.noncons <- list()
+
 cons.noncons <- foreach(i = 1:length(conserved.markers.list), .packages = c("dplyr", "fgsea"))  %dopar% {
   
   cluster.name <- names(conserved.markers.list)[i]
@@ -415,6 +434,8 @@ names(cons.noncons) <- names(conserved.markers.list)
 
 stopCluster(cl)
 
+
+
 results.conserved <- results.nonconserved <- NULL
 for (i in 1:length(cons.noncons)){
   
@@ -429,22 +450,19 @@ for (i in 1:length(cons.noncons)){
                                     (n.res.df[n.res.df$padj< 0.2]))
 }
 
-# clean fora output function
-cleanForaOutput <- function(fora.output, my.entrez){
-  suppressMessages({
-    suppressWarnings({
-      fora.output$set <- lapply(fora.output$overlapGenes, 
-                                mapvalues,from = my.entrez$ENTREZID, to = my.entrez$SYMBOL)
-      fora.output$set <- lapply(fora.output$set, paste,collapse = ", ")
-      fora.output[ ,c("pval", "padj")] <- signif( fora.output[ ,c("pval", "padj")], 3)
-      fora.output <- fora.output %>% dplyr::select(-c("overlapGenes"))
-    })
-  })
-  return(fora.output)
-}
-
 results.nonconserved <- cleanForaOutput(results.nonconserved, my.entrez = my.entrez)
 results.conserved <- cleanForaOutput(results.conserved, my.entrez = my.entrez)
+
+} else {
+  
+  
+  results.nonconserved <- NULL
+results.conserved <- NULL
+}
+
+
+
+
 
 ```
 
@@ -461,6 +479,7 @@ cc.nc.list <- list()
 for (i in 1:length(plt.cmarkers.scatter)){
   
   cluster.name <- names(plt.cmarkers.scatter)[i]
+  if (is.null(cluster.name)) next
   cluster.id <- as.numeric(as.character(gsub("c", "", cluster.name)))
   
   # UMAP #######################################################################
@@ -487,14 +506,19 @@ for (i in 1:length(plt.cmarkers.scatter)){
   
   
   rnc.cur <- results.nonconserved[results.nonconserved$cluster %in% cluster.name, ]
+  if (!is.null(rnc.cur)){
   rnc.cur <- (rnc.cur %>% dplyr::arrange(pval))[1:10, ]
   rnc.cur$path.trun <- stringr::str_trunc(rnc.cur$pathway, 40)
-  rnc.cur <- rnc.cur[!is.na(rnc.cur$pathway), ]
+  rnc.cur <- rnc.cur[!is.na(rnc.cur$pathway), ]    
+  }
+
   
   rcc.cur <- results.conserved[results.conserved$cluster %in% cluster.name, ]
+   if (!is.null(rnc.cur)){
   rcc.cur <- (rcc.cur %>% dplyr::arrange(pval))[1:10, ]
   rcc.cur$path.trun <- stringr::str_trunc(rcc.cur$pathway, 40)
   rcc.cur <- rcc.cur[!is.na(rcc.cur$pathway), ]
+   }
   
   plt.conserved.go <- rcc.cur %>%
     ggplot(aes(x = -log10(pval), y = reorder(path.trun, -log1p(pval)), fill = -log1p(pval))) + 
@@ -513,6 +537,9 @@ for (i in 1:length(plt.cmarkers.scatter)){
     xlab("-log(p)") + labs(title = "Non-conserved DEGs", subtitle = "GO Ontology", fill = "-log(p)")
   
   
+  is.success <- F
+  try({
+
   if ((nrow(rnc.cur) > 0) & (nrow(rcc.cur) > 0)){
     plt.right <- cowplot::plot_grid(plt.conserved.go, plt.nonconserved.go, ncol = 1)
   } else if ((nrow(rnc.cur) > 0) & (nrow(rcc.cur) == 0)) {
@@ -522,11 +549,22 @@ for (i in 1:length(plt.cmarkers.scatter)){
   } else if ((nrow(rnc.cur) == 0) & (nrow(rcc.cur) == 0)) {
     plt.right <- NULL
   }
+    
+    is.success <- T    
+  }, silent = T)
+  
+  if (!is.success) plt.right <- NULL
+  
+  if (length(plt.cmarkers.scatter) == 0){
+    plt.cms <- NULL
+  } else {
+    plt.cms <- plt.cmarkers.scatter[[i]]
+  }
   
   if (is.null(plt.right)){
-    plt.cc.nc <- cowplot::plot_grid(plt.cur.cluster.umap, plt.cmarkers.scatter[[i]], ncol = 2, align = "hv")
+    plt.cc.nc <- cowplot::plot_grid(plt.cur.cluster.umap, plt.cms, ncol = 2, align = "hv")
   } else {
-    plt.cc.nc <- cowplot::plot_grid(plt.cur.cluster.umap, plt.cmarkers.scatter[[i]], plt.right, ncol = 3, align = "hv")
+    plt.cc.nc <- cowplot::plot_grid(plt.cur.cluster.umap, plt.cms, plt.right, ncol = 3, align = "hv")
   }
   
   cc.nc.list[[cluster.name]] <- plt.cc.nc
@@ -3352,6 +3390,10 @@ Row {.tabset}
 ```{r nc cc plots, warning = FALSE, message = FALSE,fig.width=14, fig.height=5}
 
 bwc_out <- NULL
+
+try({
+  
+
 bwc_out <- lapply(seq_along(cc.nc.list), function(i) {
   
   try({
@@ -3368,6 +3410,8 @@ bwc_out <- lapply(seq_along(cc.nc.list), function(i) {
   }, silent = T)
 })
 
+}, silent = T)
+
 ```
 
 `r try({paste0(knitr::knit(text = paste(bwc_out, collapse = '\n')))}, silent = T)`
@@ -3375,7 +3419,7 @@ bwc_out <- lapply(seq_along(cc.nc.list), function(i) {
 
 
 ```{r save conserved markers plot}
-
+try({
 
 for (i in 1:length(cc.nc.list)){
   s1 <- names(cc.nc.list)[i]
@@ -3384,6 +3428,8 @@ for (i in 1:length(cc.nc.list)){
           plot.handle =  cc.nc.list[[i]], 
           fig.width = 14, fig.height = 5, save.flag = save.pdf)
 }
+  
+}, silent = T)
 
   
 ```
