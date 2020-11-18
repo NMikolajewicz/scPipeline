@@ -1,0 +1,1334 @@
+---
+title: "Regulon_Analysis"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = if (exists("user")){paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", format(Sys.Date(), "%d%m%y"), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
+    )
+  })
+---
+
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+packages2load <- c("Seurat", "scMiko",
+                   "dplyr", "tidyr", "RColorBrewer", "ggplot2", 
+                   "flexdashboard", "future", 
+                   "parallel", "doParallel", "foreach")
+# "AnnotationDbi",
+
+library(SCENIC)
+  
+  library(RcisTarget)
+
+# load packages
+invisible(lapply(packages2load, library, character.only = TRUE))
+
+```
+
+
+
+```{r analysis specifications}
+
+
+
+# Query input
+input.file <- "M01_NM2_R1_test_300720.Rdata"
+# input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
+# input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
+# input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+# input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+
+subsample_factor <- 1
+# specify cluster resolution
+cluster.resolution <- 0.5 # OPTIONAL; range 0 to inf (default = 1)
+
+which.species <- "Mm" # eREQUIRED; Hs, Mm
+
+
+
+# print inline
+print.inline <- FALSE # OPTIONAL; TRUE/FALSE
+
+# specify number of workers for parallelization
+# n.workers <- list(
+#   # scoring = 12,
+#   # deg = 12
+# )
+
+
+# save PDF
+save.pdf <- T
+
+
+dbDir <- "M31_cisTarget_databases/"
+scenicOptions <- initializeScenic(org = "mgi", dbDir=dbDir, dbs = defaultDbNames[["mgi"]], nCores = 1)
+
+
+```
+
+
+
+
+```{r load data, warning = FALSE}
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed_Datasets/"
+dir.reference <- "Reference_Datasets/"
+
+if (!exists("data.path") & !exists("user")) {
+  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+}
+if (!exists("input.file")) stop("input.file is not specified")
+
+# load query dataset
+warning("Importing data...")
+if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
+load(paste(data.path, dir.preprocessed, input.file, sep = ""));
+
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
+
+t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "integration.anchors")
+
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                         species = which.species, resolution= cluster.resolution, subset.data = NULL, 
+                         subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
+                         terms2drop = t2d, rmv.pattern = "so", keep.default.assay.only = T)
+
+# unpack results
+if (exists("so")) try({rm(so)}, silent = T)
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+rm(prep.list);
+invisible({gc()})
+
+```
+
+
+```{r analysis log, include = FALSE}
+
+# Initiate and fill analysis Log
+df.log <- initiateLog("31, Transcription Factors")
+# df.log <- addLogEntry("Query File (.Rdata)", input.file, df.log, "input.file")
+# df.log <- addLogEntry("Default Assay", current.assay, df.log, "current.assay")
+# df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
+# df.log <- addLogEntry("Subsample Factor", subsample_factor, df.log, "subsample_factor")
+# df.log <- addLogEntry("Input species", so.input.species, df.log, "so.input.species")
+# 
+# df.log <- addLogEntry("Minimum gene set size", min.geneset.size, df.log, "min.geneset.size")
+# df.log <- addLogEntry("n workers, scoring", n.workers$scoring, df.log, "scoring")
+# df.log <- addLogEntry("n workers, deg", n.workers$deg, df.log, "deg")
+
+df.log <- addLogEntry("PDF saved", save.pdf, df.log, "save.pdf")
+
+```
+
+
+```{r, include = FALSE}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+
+```{r cluster results, warning = FALSE, include = FALSE}
+
+# plot umap by cluster
+# plt.umap_by_cluster <- DimPlot(so.query, reduction = "umap", group.by = "seurat_clusters", label = TRUE)  + 
+#   labs(title = "UMAP", subtitle = "Stratified by Clusters") + 
+#   xlab("UMAP 1") + ylab("UMAP 2") + theme_miko(legend = T)
+
+
+plt.umap_by_cluster <-cluster.UMAP(so.query) + 
+  labs(title = "UMAP", subtitle = "Stratified by Clusters") +
+  xlab("UMAP 1") + ylab("UMAP 2") + theme_miko(legend = T)
+
+# plot umap by barcodes
+plt.umap_by_barcode <- DimPlot(so.query, reduction = "umap", group.by = "Barcode")  + 
+  labs(title = "UMAP", subtitle = "Stratified by Barcodes") + 
+  xlab("UMAP 1") + ylab("UMAP 2") + theme_miko(legend = T) 
+# + ggthemes::scale_color_ptol()
+
+# plot umap by subset labels
+plt.umap_by_subset <- DimPlot(so.query, reduction = "umap", group.by = "subset_group")  + 
+  ggtitle(label = "UMAP") + 
+  xlab("UMAP 1") + ylab("UMAP 2")  + theme_miko(legend = T) + ggthemes::scale_color_ptol()
+
+
+if (print.inline){
+  print(plt.umap_by_cluster)
+  print(plt.umap_by_barcode)
+  print(plt.umap_by_subset)
+}
+
+```
+
+```{r bind Expression values, include = FALSE}
+
+library(schex)
+so.query <- make_hexbin(so.query, 20, dimension_reduction = "UMAP")
+cID <- so.query@misc$hexbin[[1]]
+out <- so.query@misc$hexbin[[2]]
+
+exp.mat <- getExpressionMatrix(
+  so.query,
+  only.variable = F,
+  which.assay = DefaultAssay(so.query),
+  which.data = "data",
+  use.additional.genes = NA,
+  as.dense = T
+)
+
+pct.rep <- apply(exp.mat, 1, function(x) mean(x>0))
+which.rep <- names(pct.rep)[pct.rep > 0.2]
+exp.mat <- exp.mat[rownames(exp.mat) %in% which.rep, ]
+
+# specfiy genesets ###########################################################
+gene.names <- rownames(exp.mat)
+
+# get data partitions ########################################################
+u.bin <- unique(cID)
+be.mat <- matrix(nrow = length(gene.names), ncol = length(u.bin))
+
+gene.group.bin <- list()
+
+df.group.gene.comp <- NULL
+# for (i in 1:length(gene.names)){
+
+n.enrich <- 16
+cl <- parallel::makeCluster(n.enrich)
+doParallel::registerDoParallel(cl)
+
+
+# single.exp <- prepDataFun(so.query,DefaultAssay(so.query),"data", gene.names[i])
+e.mat.sub <- exp.mat
+e.mat.sub <- e.mat.sub[!duplicated(rownames(e.mat.sub)), ]
+
+bin.e.list <- list()
+bin.e.list <- foreach(i = 1:length(gene.names), .packages = c("dplyr", "Seurat"))  %dopar% {
+  # for (i in 1:length(gene.names)){
+  
+  single.exp <- as.vector(e.mat.sub[ rownames(e.mat.sub) %in% gene.names[i], ])
+  group.exp <- tapply(single.exp, cID, FUN = function(z) z)
+  gene.avg <- (unlist(lapply(group.exp, function(x) log(mean(expm1(x)+1)))))
+  
+  
+  list(
+    group.exp = group.exp,
+    gene.avg = gene.avg,
+    gn =  gene.names[i]
+  )
+}
+
+stopCluster(cl)
+
+for (i in 1:length(bin.e.list)){
+  gene.name <- bin.e.list[[i]]$gn
+  be.mat[i ,] <- bin.e.list[[i]]$gene.avg
+  df.group.gene.comp <- bind_rows(df.group.gene.comp,  bin.e.list[[i]]$df.cor.current)
+  gene.group.bin[[gene.name]] <- bin.e.list[[i]]$group.exp
+}
+rownames(be.mat) <-  gene.names
+
+
+
+  
+  datExpr.noz.bin <- t(be.mat); rownames(datExpr.noz.bin) <- paste0("v", seq(1,nrow(datExpr.noz.bin)))
+
+  s.mat <- parCor(mat = datExpr.noz.bin, method = "spearman", do.par = T, n.workers = 16)
+
+  # clear NAs
+  s.mat[is.na(s.mat)] <- 0
+
+```
+
+
+```{r get soft power, fig.width=10, fig.height=7, include = FALSE}
+
+sft <- getSoftThreshold2(s.mat, power =c(seq(1,20, by = 1)), 
+                         network.type = "signed", rescale.adjacency = F, n.cores = 4, nBreaks = 10)
+
+if (print.inline){
+  cowplot::plot_grid(plotlist = sft$distribution.plot, ncol = 5)
+  print(sft$optimization.plot)
+}
+
+
+# get soft power
+sft.opt <- sft[["results"]]
+if (sum(sft.opt$r2 < -0.9) > 0){
+  best.power <- sft.opt$sf[which(sft.opt$r2 < -0.9)[1]] 
+} else {
+  best.power <- sft[["powerEstimate"]]
+}
+if (is.na(best.power)) best.power <- 1
+
+# run WCGNA ####################################################################
+output.all <- runWGCNA(e.mat = datExpr.noz, s.mat = s.mat, cor.metric = "spearman", 
+                       soft.power = best.power, use.TOM = T, 
+                       network.type = "signed", TOMDenom  = "min", TOM.type = "signed", rescale.adjacency = F)
+
+s.mat <- output.all[["s.mat"]]
+w.mat <- output.all[["w.mat"]]
+
+  
+  # motifAnnotName <- "motifAnnotations_hgnc"
+  motifAnnotName <- "motifAnnotations_mgi"
+
+  data(list = motifAnnotName, package = "RcisTarget", 
+       verbose = FALSE)
+  motifAnnotations <- eval(as.name(motifAnnotName))
+    allTFs <- unique(motifAnnotations$TF)
+    
+    w.mat.tf <- w.mat[rownames(w.mat) %in% allTFs, ]
+
+    
+       linkList <-  GENIE3::getLinkList(w.mat.tf, threshold = 0.001)
+       colnames(linkList) <- c("TF", "Target", "weight")
+    
+```
+
+
+
+
+```{r, include = FALSE}
+
+# scenicOptions, 
+
+
+
+
+    
+run1.dev <- function(scenicOptions,  linkList, s.mat){
+  
+  weightThreshold = 0.001
+topThr = c(0.005)
+nTopTfs = c(5,10, 50)
+nTopTargets = 50
+aFun = SCENIC::topPerTf
+corrThr = 0.03
+  # linkList = NULL
+# corrMat = NULL
+weightCol = "weight"
+
+  # linkList <- linkList[which(linkList[, weightCol] >= weightThreshold), ]
+
+  tfModules <- list()
+  linkList$TF <- as.character(linkList$TF)
+  linkList$Target <- as.character(linkList$Target)
+  allName <- paste0("w", format(weightThreshold, scientific = FALSE))
+  tfModules[[allName]] <- split(linkList$Target, factor(linkList$TF))
+  if (!is.null(topThr)) {
+    topThr <- setNames(topThr, paste("w", format(topThr, 
+      scientific = FALSE), sep = ""))
+    for (i in seq_along(topThr)) {
+      llminW <- linkList[which(linkList[, weightCol] > 
+        topThr[i]), ]
+      tfModules[[names(topThr)[i]]] <- split(llminW$Target, 
+        factor(llminW$TF))
+    }
+  }
+  if (!is.null(nTopTargets)) {
+    nTopTargets <- setNames(nTopTargets, paste("top", nTopTargets, 
+      sep = ""))
+    for (i in seq_along(nTopTargets)) {
+      tfModules[[names(nTopTargets)[i]]] <- lapply(tfModules[[allName]], 
+        function(x) x[1:(min(length(x), nTopTargets[i]))])
+    }
+  }
+  
+  
+  tfModules.melted <- reshape2::melt(tfModules)
+  colnames(tfModules.melted) <- c("Target", "TF", "method")
+  topTFsperTarget.asDf <- NULL
+  
+  if (!is.null(nTopTfs)) {
+    linkList_byTarget <- split(linkList, factor(linkList$Target))
+    nTopTfs <- setNames(nTopTfs, paste("top", nTopTfs, "perTarget", 
+      sep = ""))
+    topTFsperTarget <- lapply(linkList_byTarget, function(llt) {
+      nTFs <- nTopTfs[which(nTopTfs <= nrow(llt))]
+      reshape2::melt(lapply(nTFs, function(x) llt[1:x, 
+        "TF"]))
+    })
+    topTFsperTarget <- topTFsperTarget[which(!sapply(sapply(topTFsperTarget, 
+      nrow), is.null))]
+    topTFsperTarget.asDf <- data.frame(data.table::rbindlist(topTFsperTarget, 
+      idcol = TRUE))
+    colnames(topTFsperTarget.asDf) <- c("Target", "TF", 
+      "method")
+  }
+  
+  byFun <- NULL
+  if (!is.null(aFun)) {
+    byFun <- aFun(linkList, weightCol)
+  }
+  
+  tfModules <- rbind(tfModules.melted, topTFsperTarget.asDf,  byFun)
+  # rm(tfModules.melted)
+  # rm(topTFsperTarget.asDf)
+  tfModules$TF <- as.character(tfModules$TF)
+  tfModules$Target <- as.character(tfModules$Target)
+  # if (verbose) 
+  #   print(rbind(nTFs = length(unique(tfModules$TF)), nTargets = length(unique(tfModules$Target)), 
+  #     nGeneSets = nrow(unique(tfModules[, c("TF", "method")])), 
+  #     nLinks = nrow(tfModules)))
+  # if (is.null(corrMat)) {
+    corrMat <- s.mat
+  # }
+  # if (!is.null(corrMat)) {
+    tfs <- unique(tfModules$TF)
+    missingTFs <- tfs[which(!tfs %in% rownames(corrMat))]
+    if (length(missingTFs) > 0) {
+      warning("The following TFs are missing from the correlation matrix: ", 
+        paste(missingTFs, collapse = ", "))
+      tfs <- tfs[which(tfs %in% rownames(corrMat))]
+      corrMat <- corrMat[tfs, ]
+    }
+    tfModules_byTF <- split(tfModules, as.factor(tfModules$TF))
+    
+    tfModules_withCorr_byTF <- lapply(tfModules_byTF[tfs], function(tfGeneSets) {
+        tf <- as.character(unique(tfGeneSets$TF))
+        targets <- as.character(tfGeneSets$Target)
+        cbind(tfGeneSets, corr = c(as.numeric(corrMat[tf, 
+          targets] > corrThr) - as.numeric(corrMat[tf, 
+          targets] < -corrThr)))
+      })
+    
+    tfModules_withCorr_byTF <- tfModules_withCorr_byTF[which(lengths(tfModules_withCorr_byTF) > 
+      0)]
+    tfModules_withCorr <- data.frame(data.table::rbindlist(tfModules_withCorr_byTF))
+    
+    if (length(missingTFs) > 0) {
+      tfModules_withCorr <- rbind(tfModules_withCorr, 
+        data.frame(tfModules[tfModules$TF %in% missingTFs, ], corr = NA))
+    }
+  # }
+  # else {
+  #   tfModules_withCorr <- data.frame(tfModules, corr = NA)
+  #   if (verbose) 
+  #     message("Correlation information not available. It will not be added to the modules.")
+  # }
+  # saveRDS(tfModules_withCorr, file = getIntName(scenicOptions, 
+    # "tfModules_asDF"))
+  # scenicOptions@status$current <- 1
+  # invisible(scenicOptions)
+    
+    tfModules_asDF <- tfModules_withCorr
+    
+    return(tfModules_asDF)
+}
+
+
+tfModules_asDF <- run1.dev(scenicOptions,  linkList = linkList, s.mat = s.mat)
+
+```
+
+
+
+```{r, include = FALSE}
+
+############ PRIVATE
+.calcNES <- function(AUC)
+{
+  meanAUC <- mean(AUC)
+  sdAUC <- sd(AUC)
+  
+  # NES = (AUC-mean)/sd
+  NES <- vapply(AUC, function(x) (x-meanAUC)/sdAUC,
+                FUN.VALUE=numeric(1))
+  return(NES)
+}
+
+.auc.asTable <- function(auc, nesThreshold=3.0, digits=3, idColumn="motif")
+{
+  nes <- .calcNES(auc)
+  nes <- sort(nes, decreasing=TRUE)
+  
+  signifRankings <- names(nes)[which(nes >= nesThreshold)]
+  aucTable <- data.table::data.table(motif=signifRankings,
+                                     NES=signif(nes[signifRankings], digits=digits),
+                                     AUC=signif(auc[signifRankings],digits=digits))
+  colnames(aucTable)[1] <- idColumn
+  aucTable
+}
+
+.addTfs <- function(aucTable,
+                    motifAnnot=NULL,
+                    TFs=NULL,
+                    motifAnnot_highConfCat=NULL,
+                    motifAnnot_lowConfCat=NULL,
+                    idColumn="motif",
+                    keepAnnotationCategory=keepAnnotationCategory)
+{
+  if(!is.null(TFs))
+  {
+    aucTable <- data.table::data.table(aucTable,
+                                 highlightedTFs=paste(TFs, collapse=", ") ,
+                                 TFinDB="")
+    
+    if(!is.null(motifAnnot)) {
+      motifAnnot_subset <- motifAnnot[(motifAnnot[[idColumn]] %in% aucTable[[idColumn]]) 
+                                      & (motifAnnot$TF %in% TFs), ][,c(idColumn, "TF", "annotationSource"),with=F]
+      motifAnnot_subset <- split(motifAnnot_subset, motifAnnot_subset[[idColumn]])
+      for(motifName in names(motifAnnot_subset))
+      {
+        if(any(as.character(motifAnnot_subset[[motifName]]$annotationSource) 
+               %in% motifAnnot_lowConfCat))
+          aucTable[aucTable[[idColumn]]==motifName,"TFinDB"] <- "*"
+        
+        # overrides lowConf
+        if(any(as.character(motifAnnot_subset[[motifName]]$annotationSource) 
+               %in% motifAnnot_highConfCat))
+          aucTable[aucTable[[idColumn]]==motifName,"TFinDB"] <- "**"
+      }
+    }
+  }
+  
+  if(!is.null(motifAnnot))
+  {
+    if(!is.null(motifAnnot_highConfCat))
+    {
+      TF_highConf <- .formatTfs(motifs=aucTable[[idColumn]], 
+                                motifAnnot=motifAnnot,
+                                annotCats=motifAnnot_highConfCat,
+                                idColumn=idColumn,
+                                keepAnnotationCategory=keepAnnotationCategory)
+      
+      aucTable <- data.table::data.table(aucTable, TF_highConf=TF_highConf)
+    }
+    
+    if(!is.null(motifAnnot_lowConfCat))
+    {
+      TF_lowConf <- .formatTfs(motifs=aucTable[[idColumn]], 
+                               motifAnnot=motifAnnot,
+                               annotCats=motifAnnot_lowConfCat,
+                               idColumn=idColumn, 
+                               keepAnnotationCategory=keepAnnotationCategory)
+      
+      aucTable <- data.table::data.table(aucTable, TF_lowConf=TF_lowConf)
+    }
+  }
+  
+  aucTable
+}
+
+
+## 26 apr 2019
+# Replaced input: aucTable by motifs. In calls:  .formatTfs(motifs=aucTable[[idColumn]]
+# aucTable$motif --> motifs
+# nrow(aucTable) --> length(motifs)
+.formatTfs <- function(motifs, motifAnnot, annotCats, idColumn, keepAnnotationCategory)
+{
+  motifAnnot_subset <- motifAnnot[motifAnnot$annotationSource %in% annotCats, ] 
+  motifAnnot_subset <- motifAnnot_subset[motifAnnot_subset[[idColumn]] %in% motifs, ] 
+  if(keepAnnotationCategory)
+  {
+    motifAnnot_Cats <- vapply(split(motifAnnot_subset, motifAnnot_subset[[idColumn]]), 
+                              function(mat){
+                                mat <- split(mat$TF, factor(mat$annotationSource))
+                                tfsByCat <- vapply(names(mat),
+                                                   function(x) paste(paste(unlist(mat[[x]]),
+                                                                           collapse="; "),
+                                                                     " (",x,"). ",
+                                                                     sep=""), "")
+                                paste(tfsByCat, collapse="")
+                              }, FUN.VALUE="")
+  }else{
+    motifAnnot_Cats <- vapply(split(motifAnnot_subset, motifAnnot_subset[[idColumn]]), 
+                              function(mat){
+                                paste(unique(unlist(mat$TF)), collapse="; ")
+                              }, FUN.VALUE="")
+  }
+   
+  ret <- setNames(rep("", length(motifs)), motifs)
+  ret[names(motifAnnot_Cats)] <- motifAnnot_Cats
+  return(ret)
+}
+
+
+addMotifAnnotation2 <- function (auc, nesThreshold = 3, digits = 3, motifAnnot = NULL, 
+  motifAnnot_highConfCat = c("directAnnotation", "inferredBy_Orthology"), 
+  motifAnnot_lowConfCat = c("inferredBy_MotifSimilarity", 
+    "inferredBy_MotifSimilarity_n_Orthology"), idColumn = "motif", 
+  highlightTFs = NULL, keepAnnotationCategory = TRUE) 
+{
+  auc <- getAUC(auc)
+  if (!is.null(highlightTFs)) {
+    if (is.null(motifAnnot)) 
+      stop("To hightlight TFs, please provide a motif-TF annotation.")
+    if (is.null(names(highlightTFs))) {
+      warning("The input TFs are not named, ", "all TFs will be used with all Gene Sets.")
+      highlightTFs <- setNames(rep(list(highlightTFs), 
+        nrow(auc)), rownames(auc))
+    }
+    if (!all(names(highlightTFs) %in% rownames(auc))) 
+      warning("TFs 1")
+    if (!all(rownames(auc) %in% names(highlightTFs))) 
+      warning("TFs 2")
+  }
+  if (!is.null(motifAnnot)) {
+    if (!is.data.table(motifAnnot)) 
+      stop("motifAnnot should be a data.table")
+    commonCat <- intersect(motifAnnot_highConfCat, motifAnnot_lowConfCat)
+    if (length(commonCat) > 0) 
+      warning("The following annotation types are both in", 
+        "'motifAnnot_highConfCat' and 'motifAnnot_lowConfCat': ", 
+        commonCat)
+  }
+  applyFun <- lapply
+  # if ((nrow(auc) > 4) && ("BiocParallel" %in% installed.packages())) {
+  #   applyFun <- BiocParallel::bplapply
+  #   message("Using BiocParallel...")
+  # }
+  ret <- applyFun(rownames(auc), function(geneSet) {
+    tfs <- highlightTFs[[geneSet]]
+    aucTable <- .auc.asTable(auc[geneSet, ], nesThreshold = nesThreshold, 
+      digits = digits, idColumn = idColumn)
+    if (nrow(aucTable) > 0) {
+      aucTable <- .addTfs(aucTable, motifAnnot = motifAnnot, 
+        TFs = tfs, motifAnnot_highConfCat = motifAnnot_highConfCat, 
+        motifAnnot_lowConfCat = motifAnnot_lowConfCat, 
+        idColumn = idColumn, keepAnnotationCategory = keepAnnotationCategory)
+      aucTable <- data.table::data.table(geneSet = geneSet, 
+        aucTable)
+    }
+    else {
+      aucTable <- NULL
+    }
+    aucTable
+  })
+  ret <- data.table::rbindlist(ret)
+  if (nrow(ret) > 0) 
+    colnames(ret)[which(colnames(ret) == "ranking")] <- "motif"
+  return(ret)
+}
+
+
+```
+
+
+```{r part 2, include = FALSE}
+# scenicOptions <- runSCENIC_2_createRegulons(scenicOptions, coexMethod=c("top5perTarget"))
+
+
+
+
+run2.dev <- function (scenicOptions, tfModules_asDF, s.mat, linkList){
+  nCores <- 1
+  
+  minGenes = 5 # default: 20
+coexMethods = "top5perTarget"
+minJakkardInd = 0.8 # default: 0.8
+signifGenesMethod = "aprox"
+onlyPositiveCorr = TRUE
+onlyBestGsPerMotif = TRUE
+
+  
+ # tfModules_asDF <-  loadInt(scenicOptions, "tfModules_asDF")
+
+    tfModules_asDF <- tfModules_asDF[which(tfModules_asDF$method %in%
+      coexMethods), ]
+  if (!is.null(minJakkardInd)) {
+    tfModules_asDF <- mergeOverlappingModules(tfModules_asDF, 
+      minJakkardInd = minJakkardInd)    
+  }
+
+  library(AUCell)
+  library(RcisTarget)
+  # motifAnnot <- getDbAnnotations(scenicOptions)
+  
+  
+    motifAnnotName <- "motifAnnotations_mgi"
+  # library(RcisTarget)
+  data(list = motifAnnotName, package = "RcisTarget", 
+       verbose = FALSE)
+  motifAnnot <- eval(as.name(motifAnnotName))
+    # allTFs <- unique(motifAnnotations$TF)
+    # 
+    # RESUME HERE
+    
+  
+  # if (is.null(names(getSettings(scenicOptions, "dbs")))) {
+  #   names(scenicOptions@settings$dbs) <- scenicOptions@settings$dbs
+  #   tmp <- sapply(strsplit(getSettings(scenicOptions, "dbs"), 
+  #     "-", fixed = T), function(x) x[grep("bp|kb", x)])
+  #   if (all(lengths(tmp) > 0)) 
+  #     names(scenicOptions@settings$dbs) <- tmp
+  # }
+  loadAttempt <- sapply(getDatabases(scenicOptions), dbLoadingAttempt)
+  genesInDb <- unique(unlist(lapply(getDatabases(scenicOptions), 
+                                    function(x) names(feather::feather_metadata(x)[["types"]]))))
+  
+  allFeaturesInAnnot <- unlist(motifAnnot[, 1])
+  featuresWithAnnot <- lapply(getDatabases(scenicOptions), function(dbFile) {
+    nRnks <- unlist(feather::read_feather(dbFile, columns = "features")[, 
+                                                                        1])
+    length(intersect(allFeaturesInAnnot, nRnks))/length(unique(c(allFeaturesInAnnot, 
+                                                                 nRnks)))
+  })
+  # return(featuresWithAnnot)
+  # 
+  # featuresWithAnnot <- checkAnnots(scenicOptions, motifAnnot)
+
+  tfModules_asDF$TF <- as.character(tfModules_asDF$TF)
+  tfModules_asDF$Target <- as.character(tfModules_asDF$Target)
+  
+  motifAnnotations <- eval(as.name(motifAnnotName))
+    # motifAnnotations <- getDbAnnotations(scenicOptions)
+  allTFs <- sort(unique(motifAnnotations$TF))
+  
+  # allTFs <- getDbTfs(scenicOptions)
+  
+  tfModules_asDF <- tfModules_asDF[which(tfModules_asDF$TF %in% allTFs), ]
+  
+  geneInDb <- tfModules_asDF$Target %in% genesInDb
+  
+  missingGene <- sort(unique(tfModules_asDF[which(!geneInDb), "Target"]))
+
+  tfModules_asDF <- tfModules_asDF[which(geneInDb), ]
+
+    tfModules_Selected <- tfModules_asDF[which(tfModules_asDF$corr == 1), ]
+    
+    tfModules_Selected$geneSetName <- paste(tfModules_Selected$TF, tfModules_Selected$method, sep = "_")
+    
+  tfModules_Selected$geneSetName <- factor(as.character(tfModules_Selected$geneSetName))
+  allGenes <- unique(tfModules_Selected$Target)
+  tfModules <- split(tfModules_Selected$Target, tfModules_Selected$geneSetName)
+  tfModules <- setNames(lapply(names(tfModules), function(gsn) {
+    tf <- strsplit(gsn, "_")[[1]][1]
+    unique(c(tf, tfModules[[gsn]]))
+  }), names(tfModules))
+  tfModules <- tfModules[which(lengths(tfModules) >= minGenes)]
+
+  
+  # Calculate ENRICHMENT #######################################################
+  motifs_AUC <- lapply(getDatabases(scenicOptions), function(rnkName) {
+    ranking <- importRankings(rnkName, columns = allGenes)
+    # message("Scoring database: ", ranking@description)
+    RcisTarget::calcAUC(tfModules, ranking, aucMaxRank = 0.03 * 
+      getNumColsInDB(ranking), nCores = nCores, verbose = FALSE)
+  })
+  
+  # motifEnrichment <- list()
+  # 
+  # for (i in 1:length(motifs_AUC)){
+  #   
+  #    tf <- sapply(setNames(strsplit(rownames(motifs_AUC[[i]]), "_"), rownames(motifs_AUC[[i]])), function(x) x[[1]])
+  #   
+  #   motifEnrichment[[i]]] addMotifAnnotation2(motifs_AUC[[i]], nesThreshold = 3, digits = 3, 
+  #                      motifAnnot = motifAnnot, motifAnnot_highConfCat = c("directAnnotation", 
+  #                                                                          "inferredBy_Orthology"), 
+  #                      motifAnnot_lowConfCat = c("inferredBy_MotifSimilarity", 
+  #                                                "inferredBy_MotifSimilarity_n_Orthology"), 
+  #                      highlightTFs = tf)   
+  #   
+  # }
+  # 
+  
+  motifEnrichment <- lapply(motifs_AUC, function(aucOutput) {
+    tf <- sapply(setNames(strsplit(rownames(aucOutput), "_"), rownames(aucOutput)), function(x) x[[1]])
+    
+    addMotifAnnotation2(aucOutput, nesThreshold = 3, digits = 3, 
+                       motifAnnot = motifAnnot, motifAnnot_highConfCat = c("directAnnotation", 
+                                                                           "inferredBy_Orthology"), 
+                       motifAnnot_lowConfCat = c("inferredBy_MotifSimilarity", 
+                                                 "inferredBy_MotifSimilarity_n_Orthology"), 
+                       highlightTFs = tf)
+    
+  })
+  
+  motifEnrichment <- do.call(rbind, lapply(names(motifEnrichment), 
+    function(dbName) {
+      cbind(motifDb = dbName, motifEnrichment[[dbName]])
+    }))
+
+  
+  # Keep only the motifs annotated to the initial TF ############################
+  motifEnrichment_selfMotifs <- motifEnrichment[which(motifEnrichment$TFinDB != ""), , drop = FALSE]
+
+  if (onlyBestGsPerMotif) {
+    met_byDb <- split(motifEnrichment_selfMotifs, motifEnrichment_selfMotifs$motifDb)
+    for (db in names(met_byDb)) {
+      met <- met_byDb[[db]]
+      met <- split(met, factor(met$highlightedTFs))
+      met <- lapply(met, function(x) {
+        rbindlist(lapply(split(x, x$motif), function(y) y[which.max(y$NES), 
+          ]))
+      })
+      met_byDb[[db]] <- rbindlist(met)
+    }
+    motifEnrichment_selfMotifs <- rbindlist(met_byDb)
+    rm(met_byDb)
+    rm(met)
+  }
+
+  dbNames <- getDatabases(scenicOptions)
+  
+  motifEnrichment_selfMotifs_wGenes <- lapply(names(dbNames), function(motifDbName) {
+      ranking <- importRankings(dbNames[motifDbName], columns = allGenes)
+      
+      addSignificantGenes(resultsTable = motifEnrichment_selfMotifs[motifEnrichment_selfMotifs$motifDb == 
+        motifDbName, ], geneSets = tfModules, rankings = ranking, 
+        plotCurve = FALSE, maxRank = 5000, method = signifGenesMethod, 
+        nMean = 100, nCores = nCores)
+    })
+  
+  suppressPackageStartupMessages(library(data.table))
+  
+  motifEnrichment_selfMotifs_wGenes <- rbindlist(motifEnrichment_selfMotifs_wGenes)
+
+  motifEnrichment.asIncidList <- apply(motifEnrichment_selfMotifs_wGenes, 1, function(oneMotifRow) {
+      genes <- strsplit(oneMotifRow["enrichedGenes"], 
+        ";")[[1]]
+      oneMotifRow <- data.frame(rbind(oneMotifRow), stringsAsFactors = FALSE)
+      data.frame(oneMotifRow[rep(1, length(genes)), c("NES", 
+        "motif", "highlightedTFs", "TFinDB", "geneSet", 
+        "motifDb")], genes, stringsAsFactors = FALSE)
+    })
+  
+  motifEnrichment.asIncidList <- rbindlist(motifEnrichment.asIncidList)
+  
+  colnames(motifEnrichment.asIncidList)[which(colnames(motifEnrichment.asIncidList) == 
+    "highlightedTFs")] <- "TF"
+  
+  colnames(motifEnrichment.asIncidList)[which(colnames(motifEnrichment.asIncidList) == 
+    "TFinDB")] <- "annot"
+  
+  colnames(motifEnrichment.asIncidList)[which(colnames(motifEnrichment.asIncidList) == 
+    "genes")] <- "gene"
+  
+  motifEnrichment.asIncidList <- data.frame(motifEnrichment.asIncidList, 
+    stringsAsFactors = FALSE)
+  
+  regulonTargetsInfo <- lapply(split(motifEnrichment.asIncidList, motifEnrichment.asIncidList$TF), function(tfTargets) {
+    tfTable <- as.data.frame(do.call(rbind, lapply(split(tfTargets, 
+      tfTargets$gene), function(enrOneGene) {
+      highConfAnnot <- "**" %in% enrOneGene$annot
+      enrOneGeneByAnnot <- enrOneGene
+      if (highConfAnnot) 
+        enrOneGeneByAnnot <- enrOneGeneByAnnot[which(enrOneGene$annot == 
+          "**"), ]
+      bestMotif <- which.max(enrOneGeneByAnnot$NES)
+      tf <- unique(enrOneGene$TF)
+      cbind(TF = tf, gene = unique(enrOneGene$gene), highConfAnnot = highConfAnnot, 
+        nMotifs = nrow(enrOneGene), bestMotif = as.character(enrOneGeneByAnnot[bestMotif, 
+          "motif"]), NES = as.numeric(enrOneGeneByAnnot[bestMotif, 
+          "NES"]), motifDb = as.character(enrOneGeneByAnnot[bestMotif, 
+          "motifDb"]), coexModule = gsub(paste0(tf, 
+          "_"), "", as.character(enrOneGeneByAnnot[bestMotif, 
+          "geneSet"]), fixed = TRUE))
+    })), stringsAsFactors = FALSE)
+    
+    tfTable[order(tfTable$NES, decreasing = TRUE), ]
+  })
+  
+  # rm(motifEnrichment.asIncidList)
+  regulonTargetsInfo <- rbindlist(regulonTargetsInfo)
+  corrMat <- s.mat
+  
+  if (!is.null(corrMat)) {
+    regulonTargetsInfo$spearCor <- NA_real_
+    for (tf in unique(regulonTargetsInfo$TF)) {
+      regulonTargetsInfo[which(regulonTargetsInfo$TF == 
+        tf), "spearCor"] <- corrMat[tf, unlist(regulonTargetsInfo[which(regulonTargetsInfo$TF == 
+        tf), "gene"])]
+    }
+  }
+  # else warning("It was not possible to add the correlation to the regulonTargetsInfo table.")
+  # linkList <- loadInt(scenicOptions, "genie3ll", ifNotExists = "null")
+  
+  if (!is.null(linkList) & ("weight" %in% colnames(linkList))) {
+    if (is.data.table(linkList)) 
+      linkList <- as.data.frame(linkList)
+    uniquePairs <- nrow(unique(linkList[, c("TF", "Target")]))
+    if (uniquePairs == nrow(linkList)) {
+      linkList <- linkList[which(linkList$weight >= getSettings(scenicOptions, 
+        "modules/weightThreshold")), ]
+      rownames(linkList) <- paste(linkList$TF, linkList$Target, sep = "__")
+      regulonTargetsInfo <- cbind(regulonTargetsInfo, 
+        CoexWeight = linkList[paste(regulonTargetsInfo$TF, 
+          regulonTargetsInfo$gene, sep = "__"), "weight"])
+    }
+    else {
+      warning("There are duplicated regulator-target (gene id/name) pairs in the co-expression link list.", 
+        "\nThe co-expression weight was not added to the regulonTargetsInfo table.")
+    }
+  }
+
+  regulonTargetsInfo_splitByAnnot <- split(regulonTargetsInfo,  regulonTargetsInfo$highConfAnnot)
+  regulons <- NULL
+  
+  if (!is.null(regulonTargetsInfo_splitByAnnot[["TRUE"]])) {
+    regulons <- lapply(split(regulonTargetsInfo_splitByAnnot[["TRUE"]], 
+      regulonTargetsInfo_splitByAnnot[["TRUE"]][, "TF"]), 
+      function(x) sort(as.character(unlist(x[, "gene"]))))
+  }
+  
+  regulons_extended <- NULL
+  if (!is.null(regulonTargetsInfo_splitByAnnot[["FALSE"]])) {
+    regulons_extended <- lapply(split(regulonTargetsInfo_splitByAnnot[["FALSE"]], 
+      regulonTargetsInfo_splitByAnnot[["FALSE"]][, "TF"]), 
+      function(x) unname(unlist(x[, "gene"])))
+    regulons_extended <- setNames(lapply(names(regulons_extended), 
+      function(tf) sort(unique(c(regulons[[tf]], unlist(regulons_extended[[tf]]))))), 
+      names(regulons_extended))
+    names(regulons_extended) <- paste(names(regulons_extended), 
+      "_extended", sep = "")
+  }
+  regulons <- c(regulons, regulons_extended)
+  # saveRDS(regulons, file = getIntName(scenicOptions, "regulons"))
+  incidList <- reshape2::melt(regulons)
+  incidMat <- table(incidList[, 2], incidList[, 1])
+  # saveRDS(incidMat, file = getIntName(scenicOptions, "regulons_incidMat"))
+  # rm(incidMat)
+  
+  
+  regulons.final <- regulons
+  
+  return(regulons.final)
+
+}
+
+
+regulons <- run2.dev(scenicOptions, tfModules_asDF, s.mat, linkList)
+
+# (scenicOptions, tfModules_asDF, s.mat, linkList)
+```
+
+
+```{r part 3, include = FALSE}
+
+
+# runSCENIC_3_scoreCells()
+run3.dev <- function (scenicOptions, exprMat, regulons){
+  
+  exprMat <- log2(exprMat + 1)
+skipBinaryThresholds = FALSE
+  skipHeatmap = FALSE
+skipTsne = FALSE
+
+  # nCores <- getSettings(scenicOptions, "nCores")
+  nCores <-1
+  if (is.data.frame(exprMat)) {
+    supportedClasses <- paste(gsub("AUCell_buildRankings,", 
+      "", methods("AUCell_buildRankings")), collapse = ", ")
+    supportedClasses <- gsub("-method", "", supportedClasses)
+    stop("'exprMat' should be one of the following classes: ", 
+      supportedClasses, "\n(data.frames are not supported. Please, convert the expression matrix to one of these classes.)")
+  }
+
+  regulons <- regulons[order(lengths(regulons), decreasing = TRUE)]
+  regulons <- regulons[lengths(regulons) >= 1]
+
+  regulons <- setNames(lapply(names(regulons), function(tf) 
+    sort(unique(c(gsub("_extended", "", tf), regulons[[tf]])))), names(regulons))
+  names(regulons) <- paste(names(regulons), " (", lengths(regulons), 
+    "g)", sep = "")
+
+  biggestRegulons <- grep("_extended", names(regulons), invert = T, value = T)
+  biggestRegulons <- biggestRegulons[1:min(length(biggestRegulons), 10)]
+  
+  library(AUCell)
+  set.seed(123)
+
+    aucellRankings <- AUCell_buildRankings(exprMat, nCores = nCores, plotStats = TRUE, verbose = F)
+  
+  regulonAUC <- AUCell_calcAUC(regulons, aucellRankings, aucMaxRank = aucellRankings@nGenesDetected["1%"],  nCores = nCores)
+  variableRegulons <- names(which(apply(getAUC(regulonAUC), 1, sd) > 0))
+  reguDist <- as.dist(1 - cor(t(getAUC(regulonAUC)[variableRegulons,  ]), method = "spear"))
+  reguClust <- hclust(reguDist, method = "ward.D2")
+  regulonClusters <- setNames(dynamicTreeCut::cutreeDynamic(reguClust, 
+    distM = as.matrix(reguDist), verbose = FALSE), reguClust$labels)
+  regulonOrder <- reguClust$labels[reguClust$order]
+  regulonOrder <- regulonOrder[order(regulonClusters[regulonOrder], decreasing = TRUE)]
+  
+  
+  # return(regulonAUC)
+  # saveRDS(regulonAUC, file = getIntName(scenicOptions, "aucell_regulonAUC"))
+  # cells_AUCellThresholds <- NULL
+  if (!skipBinaryThresholds) {
+    cells_AUCellThresholds <- AUCell_exploreThresholds(regulonAUC,
+      smallestPopPercent = 0.25, assignCells = TRUE,
+      plotHist = FALSE, verbose = FALSE, nCores = nCores)
+    # saveRDS(cells_AUCellThresholds, file = getIntName(scenicOptions,
+      # "aucell_thresholds"))
+    regulonsCells <- getAssignments(cells_AUCellThresholds)
+    trhAssignment <- getThresholdSelected(cells_AUCellThresholds)
+    trhAssignment <- signif(trhAssignment, 3)
+    commentsThresholds <- sapply(cells_AUCellThresholds,
+      function(x) unname(x$aucThr$comment))
+    table2edit <- cbind(regulon = names(cells_AUCellThresholds),
+      threshold = trhAssignment[names(cells_AUCellThresholds)],
+      nCellsAssigned = lengths(regulonsCells)[names(cells_AUCellThresholds)],
+      AUCellComment = commentsThresholds[names(cells_AUCellThresholds)],
+      nGenes = gsub("[\\(g\\)]", "", regmatches(names(cells_AUCellThresholds),
+        gregexpr("\\(.*?\\)", names(cells_AUCellThresholds)))),
+      clusteringOrder = 1:length(cells_AUCellThresholds),
+      clusterGroup = regulonClusters[names(cells_AUCellThresholds)],
+      onlyNonDuplicatedExtended = (names(cells_AUCellThresholds) %in%
+        onlyNonDuplicatedExtended(names(cells_AUCellThresholds))),
+      personalNotes = "")
+
+    # rm(trhAssignment)
+  }
+  
+  
+  return(list(
+     regulonAUC = regulonAUC[regulonOrder, ],
+     trhAssignment = trhAssignment,
+   regulBin = table2edit   
+  )
+
+  )
+
+}
+
+
+
+run3_res <- run3.dev(scenicOptions, exprMat = exp.mat, regulons = regulons)
+
+regulonAUC <- run3_res$regulonAUC
+regulBin <- run3_res$regulBin
+trhAssignment <- run3_res$trhAssignment
+
+regulon.activity <- as.matrix(regulonAUC@assays@data@listData[["AUC"]])
+# pheatmap::pheatmap(regulon.activity, show_colnames = F)
+
+df.meta <- so.query@meta.data
+df.meta$cells <- rownames(df.meta)
+df.ann <- data.frame(cells = colnames(regulon.activity))
+
+df.ann <- merge(df.ann, df.meta, by = "cells")
+df.annf <- df.ann[ ,c("seurat_clusters", "Barcode")]
+rownames(df.annf) <- df.ann$cells
+
+cellInfo <-so.query@meta.data
+# pheatmap::pheatmap(regulon.activity, show_colnames = F, annotation_col = df.annf )
+# 
+# 
+# # regulonAUC <- loadInt(scenicOptions, "aucell_regulonAUC")
+# rss <- calcRSS(AUC=regulonAUC, cellAnnotation=cellInfo[colnames(regulonAUC), "Barcode"])
+# # rssPlot <- plotRSS(rss)
+# 
+#   rssNorm <- scale(rss)
+#   # rssNorm[rssNorm < 1] <- 0
+#   rssNorm <- rssNorm[, which(!colnames(rssNorm) %in% NULL)]
+#   rss.df <- reshape2::melt(rss)
+#   head(rss.df)
+#   colnames(rss.df) <- c("Topic", "cellType", "RSS")
+#   rssNorm.df <- reshape2::melt(rssNorm)
+#   colnames(rssNorm.df) <- c("Topic", "cellType", "Z")
+#   rss.df <- merge(rss.df, rssNorm.df)
+#   # rss.df <- rss.df[which(rss.df$Z >= 1.5), ]
+#   
+  
+  # pheatmap::pheatmap(rss)
+  
+  # binarize ##################3
+#   minPerc <- .7
+# # binaryRegulonActivity <- loadInt(scenicOptions, "aucell_binary_nonDupl")
+# # cellInfo_binarizedCells <- cellInfo[which(rownames(cellInfo)%in% colnames(binaryRegulonActivity)),, drop=FALSE]
+# regulonActivity_byCellType_Binarized <- sapply(split(rownames(cellInfo_binarizedCells), cellInfo_binarizedCells$CellType), 
+#                                                function(cells) rowMeans(binaryRegulonActivity[,cells, drop=FALSE]))
+
+
+
+```
+
+```{r plot regulon and TF expression, fig.width=14, fig.height=5}
+
+thresholds <- regulBin
+
+df.umap <- data.frame(so.query@reductions[["umap"]]@cell.embeddings)
+colnames(df.umap) <- c("x", "y") 
+df.umap$cells <- rownames(df.umap)
+
+auc.mat <- t(regulonAUC@assays@data@listData[["AUC"]])
+
+df.auc.bin <- NULL
+all.regulons <- regulBin[ ,"regulon"]
+
+plt.regulon.activity <- list()
+for (i in 1:nrow(regulBin)){
+  regulon.name <- regulBin[i,"regulon"]
+  regulon.name2 <- stringr::str_remove(stringr::str_remove(stringr::str_remove(regulon.name, "_extended "), "\\([0-9]*g\\)"), " ")
+  regulon.name3 <- paste0(regulon.name2, ".", i)
+  regulon.threhsold <- as.numeric(regulBin[i,"threshold"])
+  
+  df.current.auc.bin <- data.frame(
+    cells = rownames(auc.mat),
+    active = auc.mat[ ,colnames(auc.mat) %in% regulon.name] > regulon.threhsold,
+    auc = auc.mat[ ,colnames(auc.mat) %in% regulon.name]
+  )
+  
+  df.umap.exp <- df.umap
+  df.umap.exp$z <- so.query@assays[["RNA"]]@data[rownames(so.query@assays[["RNA"]]@data) %in% regulon.name2, ]
+  df.current.auc.bin <- merge(df.current.auc.bin, df.umap.exp, by = "cells")
+  
+  df.current.auc.bin$do.color <- "grey"
+  df.current.auc.bin$do.color[df.current.auc.bin$active] <- "tomato"
+  
+  df.current.auc.bin <- df.current.auc.bin %>% dplyr::arrange(do.color)
+  
+  
+  plt.regulon.exp <- df.current.auc.bin %>%
+    ggplot(aes(x = x, y= y)) + 
+    geom_point(color = df.current.auc.bin$do.color, size = autoPointSize(nrow(df.current.auc.bin))) + 
+    labs(title = regulon.name, subtitle = "Regulon Activity", caption = "red = ON; grey = OFF") + 
+    theme_miko() + 
+    xlab("UMAP 1") + ylab("UMAP 2") 
+  
+  
+  df.current.auc.bin2 <- df.current.auc.bin
+  df.current.auc.bin2 <- df.current.auc.bin2[df.current.auc.bin2$z > 0, ]
+  
+plt.scatter.comp <- df.current.auc.bin2 %>%
+  ggplot(aes(x = z, y = auc)) + 
+  geom_point(alpha = 0.05) + geom_smooth(color = "tomato", method = "lm") + 
+  theme_miko() + 
+      ggpmisc::stat_poly_eq(formula = y~x, aes(label = paste(..rr.label.., sep = "~~~")), parse = T) +
+  ylab("Regulon Activity") + xlab("Transcription Factor Expression") + 
+  labs(title = regulon.name2)
+
+  
+  plt.gene.exp <- tryCatch({
+    plt.gene.exp <- Nebulosa::plot_density(
+      object = so.query,
+      features = regulon.name2
+    )  
+  }, error = function(e){
+    return(NULL)
+  })
+  
+  if (!is.null(plt.gene.exp)){
+    plt.gene.exp <- plt.gene.exp + theme_miko(legend = T) + 
+      labs(title = regulon.name2, subtitle = "TF Expression", caption = "") + 
+      xlab("UMAP 1") + ylab("UMAP 2") 
+    
+    plt.combo <- cowplot::plot_grid(plt.regulon.exp, plt.gene.exp, plt.scatter.comp, rel_widths = c(0.8, 1, 0.8), ncol = 3)
+  } else {
+    plt.combo <- plt.gene.exp
+  }
+  
+  plt.regulon.activity[[regulon.name]] <- plt.combo
+  
+  if (print.inline){
+    print(plt.combo)
+  }
+  
+}
+
+
+
+
+
+```
+
+
+```{r keep this chunk}
+
+
+# library(RcisTarget)
+# library(feather)
+
+# 
+# dbFiles <- c("https://resources.aertslab.org/cistarget/databases/mus_musculus/mm9/refseq_r45/mc9nr/gene_based/mm9-500bp-upstream-7species.mc9nr.feather",
+# "https://resources.aertslab.org/cistarget/databases/mus_musculus/mm9/refseq_r45/mc9nr/gene_based/mm9-tss-centered-10kb-7species.mc9nr.feather")
+
+
+# download.file(dbFiles[2], destfile=basename(dbFiles[2]), method = "curl")
+
+
+### Initialize settings
+# library(SCENIC)
+# scenicOptions <- initializeScenic(org = "mgi", dbDir=dbDir, dbs = defaultDbNames[["mgi"]], nCores = 16)
+
+```
+
+
+```{r central log}
+
+# update central log
+run.id <- NULL
+if (!exists("user")) user <- "guest"
+
+clog.update.success <- F
+try({
+  run.id <-  updateCentralLog(Module = "M31", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
+  clog.update.success <-  T
+}, silent = F)
+
+
+if (!(clog.update.success)){
+  warning("Central log update was unsuccessful :(\n")
+  run.id <- paste("M31_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+}
+
+```
+
+
+```{r setup output directories}
+
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+
+# create output directories
+dir.create(output.path)
+dir.create(paste0(output.path, "Tables/"))
+if (save.pdf) dir.create(paste0(output.path, "PDF/"))
+
+```
+
+
+UMAP
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Cluster
+
+```{r}
+
+  print(plt.umap_by_cluster)
+
+```
+
+### Barcode
+
+```{r}
+  print(plt.umap_by_barcode)
+```
+
+### Subset
+
+```{r}
+  print(plt.umap_by_subset)
+```
+
+
+Results
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+
+
+```{r dash summary,  message=FALSE, warning=FALSE, fig.width=18, fig.height=8}
+
+dash_out <- lapply(seq_along(plt.regulon.activity), function(i) {
+  
+  s1 <- names(plt.regulon.activity)[i]
+  
+  s2 <- paste("print(plt.regulon.activity[[", i, "]])", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=14, fig.height=5, message=FALSE, warning=FALSE}", paste("dash", i, sep = "")))
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(dash_out, collapse = '\n')))`
+
+
+```{r save dash}
+
+for (i in 1:length(plt.regulon.activity)){
+  s1 <- names(plt.regulon.activity)[i]
+  plot.name <- paste0("M31_regulon_summary_" ,s1, ".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+          plot.handle =  plt.regulon.activity[[i]], 
+          fig.width = 14, fig.height = 5, save.flag = save.pdf)
+}
+
+```
+
+
+```{r save analysis log and Rdata results}
+
+
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
+df.log[nrow(df.log), 2] <- as.character("elapsed.time")
+df.log[nrow(df.log), 3] <- as.character(elapsed.time)
+
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
+
+
+df.log_Module_31 <- df.log
+
+
+```
+
+
+
+Log (Module 31)
+===================================== 
+
+```{r table.log_current}
+
+knitr::kable(df.log_Module_31)
+
+```
+
+
+```{r save analysis log as csv}
+
+try({
+  write.csv(df.log_Module_31, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+    row.names = F)  
+}, silent = T)
+
+```
+
+```{r merge pdfs, include = FALSE}
+
+# combine pdfs into single binder
+if (save.pdf){
+  try({
+    pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+    pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+    
+    pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+  }, silent = T)
+}
+
+
+```
