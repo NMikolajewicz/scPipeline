@@ -921,11 +921,11 @@ if (decoration.list$GSVA){
   
   # gmt path for GSVA scoring
   # check current release at: http://download.baderlab.org/EM_Genesets/current_release/
-  if (which.species == "Hs"){
-    gmt.path <- paste0("http://download.baderlab.org/EM_Genesets/current_release/Human/symbol/Human_GOBP_AllPathways_no_GO_iea_",  
+    if (which.species == "Hs"){
+    gmt.path <- paste0("http://download.baderlab.org/EM_Genesets/", format(Sys.Date(), "%B_01_%Y"), "/Human/symbol/Human_GOBP_AllPathways_no_GO_iea_",  
                        format(Sys.Date(), "%B_01_%Y"), "_symbol.gmt")
   } else if (which.species == "Mm"){
-    gmt.path <- paste0("http://download.baderlab.org/EM_Genesets/current_release/Mouse/symbol/Mouse_GOBP_AllPathways_no_GO_iea_", 
+    gmt.path <- paste0("http://download.baderlab.org/EM_Genesets/", format(Sys.Date(), "%B_01_%Y"), "/Mouse/symbol/Mouse_GOBP_AllPathways_no_GO_iea_",  
                        format(Sys.Date(), "%B_01_%Y"), "_symbol.gmt")
   }
   
