@@ -57,7 +57,7 @@ input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 
 # data prep parameters #########################################################
 
-# specify cluster resolution
+# specify cluster resolution t
 cluster.resolution <- 0.5
 
 # Data subsampling
@@ -77,7 +77,7 @@ which.msigdb.subcollection <- "TFT"
 # analysis parameters ##########################################################
 # DEG ANALYSIS #####################################################
 
-# Rapid marker finding (logical flag)
+# Rapid marker finding (logical flag) t
 quick_markers <- F 
 
 # which markers to return

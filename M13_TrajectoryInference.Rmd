@@ -60,13 +60,14 @@ dir.preprocessed <- "Preprocessed_Datasets/"
 # input.file <- "R154_M27_NM2_M02_neuroDif_p41011_neuralReprojection_260920.Rdata"
 # input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 # input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
-input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+# input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
 # input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
 
 do.reprojection <- T
 
 # Data subsampling
-subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 0.3  # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify cluster resolution
 cluster.resolution <- 0.5
@@ -76,7 +77,7 @@ print.inline <-F
 
 gene.grouping <- "correlation" #options: 'modular', 'correlation'
 
-which.species <- "Mm"
+which.species <- "Hs"
 
 # N genes for pseudotime analysis (200-300 )
 n.hvg <- 500
@@ -85,22 +86,23 @@ n.hvg <- 500
 n.top.genes.timeVaryingAnalysis <- n.hvg
 
 # subset data
-# subset.df <- NA
-subset.df <- data.frame(field = "Barcode", subgroups = c("WT"))
+subset.df <- NA
+# subset.df <- data.frame(field = "Barcode", subgroups = c("WT"))
 
 
 # filtering parameters ############################################
 # cluster ids to include/omit
 filter.parameters <- list(
   include = NULL,
-  omit = c(9,12)    # e.g., c(19, 2) c(6,8,13) c(8,10)
+  omit = c(12, 13, 15)
+  # omit = c(9,12)    # e.g., c(19, 2) c(6,8,13) c(8,10)
 )
 
 # SLINGSHOT PARAMETERS #####################################
 slingshot.parameters <- list(
   
   # cluster id (ensure it coincided with correct cluster.resolution). Set to NULL if unspecified. 
-  start.cluster = 4,               
+  start.cluster = 0,               
   end.cluster = NULL,
   
   # Which reduction to use for sling shot (multiple can be chosen as character vector
@@ -183,16 +185,19 @@ scPedigree.parameters <- list(
 
 # p7 Hs Mesoderm Differentiation
 tempora.timepoints <- list(
-  do.Tempora = F,
+  do.Tempora = T,
   field = "Barcode",
-  order = c("07_Meso_D0_6", "05_Meso_D123_1", "06_Meso_D45_1", "08_Meso_D6_6"),
-  new.label = c("D0", "D123", "D45", "D6")
+  # order = c("07_Meso_D0_6", "05_Meso_D123_1", "06_Meso_D45_1", "08_Meso_D6_6"),
+  order = c("03_MesoD0_R1", "10_MesoD0_R2", "04_MesoD1_R1", "11_MesoD1_R2", "05_MesoD2_R1", "12_MesoD2_R2", "06_MesoD3_R1", "13_MesoD3_R2", "07_MesoD4_R1", "14_MesoD4_R2", "08_MesoD5_R1", "15_MesoD5_R2", "09_MesoD6_R1", "16_MesoD6_R2"),
+  new.label = c("D0", "D0", "D1", "D1", "D2", "D2", "D3", "D3", "D4", "D4", "D5", "D5", "D6", "D6")
+  # new.label = c("D0", "D123", "D45", "D6")
 )
 
 
 # ENSEMBLE Parameters
 ensemble.parameters <- list(
-  root.cluster.ensemble = 4,   # set to NA if unspecified
+  root.cluster.ensemble = 0,
+  # root.cluster.ensemble = 4,   # set to NA if unspecified
   tolerance.threshold = 0.15 # lineage extension, tolerance threshold (recommended range: 0 [stringent] to 0.15 [lenient])
 )
 
@@ -1941,13 +1946,16 @@ if (tempora.timepoints$do.Tempora){
     tempora.timepoints$new.label <- tempora.timepoints$order
   }
   
+  
+  new.labels <- unique(tempora.timepoints$new.label)
+  
   # input data
   so.tempora <- ImportSeuratObject(so.query, 
                                    assayType = DefaultAssay(so.query), 
                                    assaySlot = "data", 
                                    clusters = "seurat_clusters", 
                                    timepoints = "timepoint",
-                                   timepoint_order = tempora.timepoints$new.label)
+                                   timepoint_order =new.labels)
   
   
   # specify pathway source
@@ -1957,10 +1965,18 @@ if (tempora.timepoints$do.Tempora){
     which.species <- "Hs"
   }
   
-  if (which.species == "Hs"){
-    gmt.path <- "http://download.baderlab.org/EM_Genesets/current_release/Human/symbol/Human_GOBP_AllPathways_no_GO_iea_July_01_2020_symbol.gmt"
+  # if (which.species == "Hs"){
+  #   gmt.path <- "http://download.baderlab.org/EM_Genesets/current_release/Human/symbol/Human_GOBP_AllPathways_no_GO_iea_July_01_2020_symbol.gmt"
+  # } else if (which.species == "Mm"){
+  #   gmt.path <- "http://download.baderlab.org/EM_Genesets/current_release/Mouse/symbol/Mouse_GOBP_AllPathways_no_GO_iea_June_01_2020_symbol.gmt"
+  # }
+  
+    if (which.species == "Hs"){
+    gmt.path <- paste0("http://download.baderlab.org/EM_Genesets/", format(Sys.Date(), "%B_01_%Y"), "/Human/symbol/Human_GOBP_AllPathways_no_GO_iea_",  
+                       format(Sys.Date(), "%B_01_%Y"), "_symbol.gmt")
   } else if (which.species == "Mm"){
-    gmt.path <- "http://download.baderlab.org/EM_Genesets/current_release/Mouse/symbol/Mouse_GOBP_AllPathways_no_GO_iea_June_01_2020_symbol.gmt"
+    gmt.path <- paste0("http://download.baderlab.org/EM_Genesets/", format(Sys.Date(), "%B_01_%Y"), "/Mouse/symbol/Mouse_GOBP_AllPathways_no_GO_iea_",  
+                       format(Sys.Date(), "%B_01_%Y"), "_symbol.gmt")
   }
   
   #Estimate pathway enrichment profiles of clusters
@@ -1992,7 +2008,6 @@ if (print.inline & tempora.timepoints$do.Tempora){
   so.tempora <- PlotTrajectory(so.tempora)
 }
 ```
-
 
 ```{r Tempora timeseries, warning = FALSE, fig.width=7, fig.height=5}
 
@@ -2400,6 +2415,7 @@ plt.ensemble.traj <- cowplot::plot_grid(ensemble.geom.plot, ensemble.mean.plot, 
 
 if (print.inline){
   print(plt.ensemble.traj)
+  
 }
 
 ```
