@@ -73,9 +73,12 @@ invisible(lapply(packages2load, library, character.only = TRUE, quietly = TRUE))
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 # input.file <- "R98_M27_NM2_M02_p467891011_Mm_allGBM_tumorImmune_140920.Rdata"
-input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R44_M27_NM2_p4789_allGBM_tumorSubpop1_150820.Rdata"
+# input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
+# input.file <- "R305_M27_NM2_M02_BC2_allGBM_immune_tier1_251120.Rdata"
+input.file = "R304_M27_NM2_M02_BC2_allGBM_tumorStringent_tier1_251120.Rdata"
 # input.file <- "R32_M02_NM2_M02_testSet_rPCA_120820.Rdata"
 
 ################################################################################
@@ -85,10 +88,11 @@ override.input <- F # if true, output.file is ignored and input.file is overwrit
 # output file (required only if override input = F)
 # output.file <- "M02_cor_p467891011_Mm_GBM_080920.Rdata" # note that run id, module number and user name will automatically be appended as prefix.
 # R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata
-output.file <- "M02_neuroDif_p41011_neuralReprojection_long_260920.Rdata"
+output.file <- "allGBM_tumorStringent_tier2_271120.Rdata"
+
 
 # cluster resolution
-cluster.resolution <-0.2
+cluster.resolution <-1
 
 # print inline
 print.inline <- F
@@ -102,16 +106,17 @@ which.species <- "Mm"
 # specify subseting 
 # which.subset <- "p4789_immune_cr0_45"
 # which.subset <- "p4567891011_tumorImmune_res0_5"
-# which.subset <- data.frame(field = "seurat_clusters", subgroups = c(0,1,2,3,4,5,6,7,9,11,12,13,14,16,17,18,20,23,24,25,26))
-which.subset <- NULL
+# which.subset <- data.frame(field = "seurat_clusters", subgroups = c(0,1,2,3,4,5,6,7,8, 9,10,11, 13,14,16, 18, 20))
+which.subset = data.frame(field = "seurat_clusters", subgroups = c(0:20))
+# which.subset <- NULL
 
 # save pdf
 save.pdf <- T
 
 # specify decorations
 decoration.list <- list(
-  reprojection = T,
-  PCA = F,
+  reprojection = F,
+  PCA = T,
   ICA = F,
   TSNE = T,
   NMF = F,
@@ -1092,7 +1097,7 @@ savePDF(file.name = paste0(output.path, "PDF/", "M27_reprocessed_UMAP_byBC.pdf")
 TSNE
 ===================================== 
 ### T-Distributed Stochastic Neighbor Embedding
-```{r tsne plots, fig.width = 10, fig.height = 5}
+```{r tsne plots, fig.width = 12, fig.height = 5}
 if (!is.null(plt.tsne.combo)){
   print(plt.tsne.combo)
 }

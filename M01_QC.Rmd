@@ -40,18 +40,18 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # specify parameters
 analysis.parameters <- analysisParameters(
-  which.data = c("pilot12.Hs"),
-  which.strata = c("LM.trouble"),
+  which.data = c("Rambow.Melanoma"),
+  # which.strata = c("LM.trouble"),
   organism.filter.flag = F,                             
   organism.include = c("Hs"),
   save.flag = T,                                                              # OPTIONAL; logical (default = T)  # save results
-  save.filename = "p12_LungTrouble_061020.Rdata", # note that prefix containing module number and run ID is appended to save file. 
+  save.filename = "Rambow_Melanoma_221120.Rdata", # note that prefix containing module number and run ID is appended to save file. 
   save.directory = "Preprocessed_Datasets/",
   cluster.resolution = 1,
-  gene.upperlimit = Inf, #9000
-  gene.lowerlimit = 0,  #200
-  mt.upperlimit = 100,   #60
-  unmatched.rate.filter.flag = F,
+  gene.upperlimit = 9000, #9000
+  gene.lowerlimit = 200,  #200
+  mt.upperlimit = 60,   #60
+  # unmatched.rate.filter.flag = F,
   vars2regress = c("percent.mt"), # optional: "dataset" (for linear batchcorrection)
   do.additional.reduction = F
 )
@@ -223,28 +223,59 @@ df.log <- addLogEntry("Input Species", all_input_organisms, df.log, "all_input_o
 
 ```
 
+
+```{r}
+# ensembl2sym <- function(my.ensembl, my.species){
+# 
+#   my.ensembl <- as.vector(my.ensembl)
+#   if (my.species == "Hs"){
+#     db <- org.Hs.eg.db::org.Hs.eg.db
+#   } else if (my.species == "Mm"){
+#     db <- org.Mm.eg.db::org.Mm.eg.db
+#   }
+#   my.symbol <- AnnotationDbi::select(db,
+#                                      keys = my.ensembl,
+#                                      columns = c("ENSEMBL", "SYMBOL"),
+#                                      keytype = "ENSEMBL")
+#   return(my.symbol)
+# }
+
+```
+
 ```{r c5}
 
-loadMatdev <- function(import_set, input_organisms, dir) {
+loadMat.dev <- function(import_set, input_organisms, dir) {
   
   import_set_path <- paste(dir, import_set, sep ="")
   
   # import expression matrix data
   
-  is.kumal <- F # specificy fixes made to accomodate Kumal 2018 EMT6 data
-  if (is.kumal){
+  which.set <- "rambow" # options: "kumal", "rambow"
+  # is.kumal <- F # specificy fixes made to accomodate Kumal 2018 EMT6 data
+  if (which.set == "kumal"){
     expression_matrix<-read.csv(import_set_path[1],header=F, stringsAsFactors = F)
     expression_matrix <- as.data.frame(t(expression_matrix))
-  } else {
+  } else if (which.set == "rambow"){
+    expression_matrix<-read.table(import_set_path[1],sep = ",",header=TRUE)
+    rownames(expression_matrix) <- expression_matrix$X
+    expression_matrix <- expression_matrix %>% dplyr::select(-c("X"))
+    my.ensembl <-rownames(expression_matrix)
+    my.symbol <- ensembl2sym(my.ensembl, input_organisms)
+    my.symbol <- my.symbol[complete.cases(my.symbol), ]
+    expression_matrix <- expression_matrix[rownames(expression_matrix) %in% my.symbol$ENSEMBL, ]
+    e2g.list <- my.symbol$SYMBOL; names(e2g.list) <- my.symbol$ENSEMBL
+    rownames(expression_matrix) <- make.unique(e2g.list[ rownames(expression_matrix)])
+    expression_matrix$GENE <- rownames(expression_matrix)
+  }
+  else {
     expression_matrix<-read.table(import_set_path[1],header=TRUE)
   }
-  
   
   # sum(is.na(expression_matrix))
   expression_matrix[is.na(expression_matrix)] <- 0
   
   # get gene and ensembl names
-  if (is.kumal){
+  if (which.set == "kumal"){
     features.df<-read.csv(import_set_path[3],header=T, stringsAsFactors = F)
     cell.df <-read.csv(import_set_path[2],header=T, stringsAsFactors = F)
     colnames(expression_matrix) <- cell.df$NM_ID
@@ -312,7 +343,7 @@ loadMatdev <- function(import_set, input_organisms, dir) {
   so[["RNA"]] <- AddMetaData( object=so[["RNA"]],metadata=as.vector((gNames)[match.id]),col.name="SYMBOL");
   
   # Additional metadata
-  if (is.kumal){
+  if (which.set == "kumal"){
     kumal.id <- match( colnames(so), cell.df$NM_ID) 
     so@meta.data[["Sample_ID"]] <- cell.df$Sample_ID[kumal.id]
     so@meta.data[["Model"]] <- cell.df$Model[kumal.id]
@@ -508,7 +539,7 @@ for (i in 1:length(input_data)){
   } else if (input.type[i] == 3){
 
     output.list <- loadMat.dev(import_set = cur.total_sets, 
-                               stringr::str_trim(unlist(strsplit(all_input_organisms[i], ","))), 
+                               input_organisms = stringr::str_trim(unlist(strsplit(all_input_organisms[i], ","))), 
                                dir[i])
     
   }
@@ -818,6 +849,54 @@ if (analysis.parameters$print.inline){
   print(plt.violin_by_subgroup)
 }
 
+
+```
+
+```{r}
+# 
+# function(so, legend.width = 1, ...){
+# 
+#   df.meta <- so@meta.data
+# 
+#   # correlations
+#   rho1p <- signif(cor(x = df.meta$nCount_RNA, y =  df.meta$percent.mt, method = "pearson"), 2)
+#   rho1s <- signif(cor(x = df.meta$nCount_RNA, y =  df.meta$percent.mt, method = "spearman"), 2)
+#   rho2p <- signif(cor(x = df.meta$nFeature_RNA, y =  df.meta$percent.mt, method = "pearson"), 2)
+#   rho2s <- signif(cor(x = df.meta$nFeature_RNA, y =  df.meta$percent.mt, method = "spearman"), 2)
+#   rho3p <- signif(cor(x = df.meta$nCount_RNA, y =  df.meta$nFeature_RNA, method = "pearson"), 2)
+#   rho3s <- signif(cor(x = df.meta$nCount_RNA, y =  df.meta$nFeature_RNA, method = "spearman"), 2)
+# 
+#   # cell densities
+#   df.meta$density1 <- tryCatch({getDensity(df.meta$nCount_RNA, df.meta$percent.mt, n = 100)},
+#                                error = function(e) {return(1)})
+#   df.meta$density2 <- tryCatch({getDensity(df.meta$nFeature_RNA, df.meta$percent.mt, n = 100)},
+#                                error = function(e) {return(1)})
+#   df.meta$density3 <- tryCatch({getDensity(df.meta$nCount_RNA, df.meta$nFeature_RNA, n = 100)},
+#                                error = function(e) {return(1)})
+#   
+#   # a <- getDensity(df.meta$nCount_RNA, df.meta$nFeature_RNA, n = 100)
+# 
+#   # construct plots
+#   plt.handle1 <- df.meta %>% ggplot(aes(x = nCount_RNA, y = percent.mt, color = density1)) + geom_point() + theme_miko(legend = T) +
+#     xlab("UMI/cell") + ylab("Mitochondrial Content (%)") +
+#     labs(title = paste0("r = ", rho1p, "; rho = ", rho1s)) + scale_color_viridis("Density") +
+#     theme(legend.position="bottom", legend.key.width=unit(legend.width,"cm"))
+# 
+#   plt.handle2 <- df.meta %>% ggplot(aes(x = nFeature_RNA, y = percent.mt, color = density1)) + geom_point() + theme_miko(legend = T) +
+#     xlab("Genes/cell") + ylab("Mitochondrial Content (%)")  +
+#     labs(title = paste0("r = ", rho2p, "; rho = ", rho2s)) + scale_color_viridis("Density") +
+#     theme(legend.position="bottom", legend.key.width=unit(legend.width,"cm"))
+# 
+#   plt.handle3 <- df.meta %>% ggplot(aes(x = nCount_RNA, y = nFeature_RNA, color = density1)) + geom_point() + theme_miko(legend = T) +
+#     xlab("UMI/cell") + ylab("Genes/cell")  +
+#     labs(title = paste0("r = ", rho3p, "; rho = ", rho3s)) + scale_color_viridis("Density") +
+#     theme(legend.position="bottom", legend.key.width=unit(legend.width,"cm"))
+# 
+#   plt.QC_scatter <- cowplot::plot_grid(plt.handle1, plt.handle2, plt.handle3, ncol = 3)
+# 
+#   return(plt.QC_scatter)
+# 
+# }
 
 ```
 

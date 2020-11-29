@@ -32,24 +32,27 @@ invisible({lapply(packages2load, library, character.only = TRUE)})
 
 # Query input
 # input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
-input.file <- "R247_M01_NM2_p12_LungTrouble_061020.Rdata"
+# input.file <- "R247_M01_NM2_p12_LungTrouble_061020.Rdata"
+input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
 
 # save file
-output.file <- "LungTrouble_batch_expression_031120.csv"
+output.file <- "allGBM_cleanCluster_031120.csv"
 
 
 # Data subsampling
 subsample_factor <- 1 # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify cluster resolution
-cluster.resolution <- 0.5
+cluster.resolution <- 1
+
+clean.clusters <- T
 
 # subset data
 subset.df <- NA
 
-which.species <-  "Hs"
+which.species <-  "Mm"
 
-which.grouping <- "Barcode"
+which.grouping <- "seurat_clusters"
 
 ```
 
@@ -90,6 +93,7 @@ n.cells <- prep.list$n.cell
 rm(prep.list)
 invisible({gc()})
 
+if (clean.clusters) so.query <- cleanCluster(so.query, return.plots = F)
 
 # assert factor order
 u.clust.meta <- unique(as.numeric(as.character(so.query@meta.data[["seurat_clusters"]])))

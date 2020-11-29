@@ -52,19 +52,20 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 
 # Query input
-input.file <- "M01_NM2_R1_test_300720.Rdata"
+# input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 # input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
-# input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
 # input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 # input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file = "R291_M01_NM2_Rambow_Melanoma_221120.Rdata"
 
 subsample_factor <- 1
 # specify cluster resolution
 cluster.resolution <- 0.5 # OPTIONAL; range 0 to inf (default = 1)
 
-which.species <- "Mm" # eREQUIRED; Hs, Mm
+which.species <- "Hs" # eREQUIRED; Hs, Mm
 
 
 
@@ -83,7 +84,13 @@ save.pdf <- T
 
 
 dbDir <- "M31_cisTarget_databases/"
-scenicOptions <- initializeScenic(org = "mgi", dbDir=dbDir, dbs = defaultDbNames[["mgi"]], nCores = 1)
+
+if (which.species == "Mm"){
+  scenicOptions <- initializeScenic(org = "mgi", dbDir=dbDir, dbs = defaultDbNames[["mgi"]], nCores = 1)
+} else if (which.species == "Hs"){
+  scenicOptions <- initializeScenic(org = "hgnc", dbDir=dbDir, dbs = defaultDbNames[["hgnc"]], nCores = 1)
+}
+
 
 
 ```
@@ -297,7 +304,13 @@ w.mat <- output.all[["w.mat"]]
 
   
   # motifAnnotName <- "motifAnnotations_hgnc"
+
+if (which.species == "Mm"){
   motifAnnotName <- "motifAnnotations_mgi"
+} else if (which.species == "Hs"){
+  motifAnnotName <- "motifAnnotations_hgnc"
+}
+  
 
   data(list = motifAnnotName, package = "RcisTarget", 
        verbose = FALSE)
@@ -663,7 +676,13 @@ onlyBestGsPerMotif = TRUE
   # motifAnnot <- getDbAnnotations(scenicOptions)
   
   
-    motifAnnotName <- "motifAnnotations_mgi"
+if (which.species == "Mm"){
+  motifAnnotName <- "motifAnnotations_mgi"
+} else if (which.species == "Hs"){
+  motifAnnotName <- "motifAnnotations_hgnc"
+}
+  
+    # motifAnnotName <- "motifAnnotations_mgi"
   # library(RcisTarget)
   data(list = motifAnnotName, package = "RcisTarget", 
        verbose = FALSE)
@@ -1087,7 +1106,7 @@ for (i in 1:nrow(regulBin)){
   )
   
   df.umap.exp <- df.umap
-  df.umap.exp$z <- so.query@assays[["RNA"]]@data[rownames(so.query@assays[["RNA"]]@data) %in% regulon.name2, ]
+  df.umap.exp$z <- so.query@assays[[DefaultAssay(so.query)]]@data[rownames(so.query@assays[[DefaultAssay(so.query)]]@data) %in% regulon.name2, ]
   df.current.auc.bin <- merge(df.current.auc.bin, df.umap.exp, by = "cells")
   
   df.current.auc.bin$do.color <- "grey"
@@ -1160,7 +1179,10 @@ plt.scatter.comp <- df.current.auc.bin2 %>%
 # dbFiles <- c("https://resources.aertslab.org/cistarget/databases/mus_musculus/mm9/refseq_r45/mc9nr/gene_based/mm9-500bp-upstream-7species.mc9nr.feather",
 # "https://resources.aertslab.org/cistarget/databases/mus_musculus/mm9/refseq_r45/mc9nr/gene_based/mm9-tss-centered-10kb-7species.mc9nr.feather")
 
-
+# dbFiles <- c("https://resources.aertslab.org/cistarget/databases/homo_sapiens/hg19/refseq_r45/mc9nr/gene_based/hg19-500bp-upstream-7species.mc9nr.feather",
+# "https://resources.aertslab.org/cistarget/databases/homo_sapiens/hg19/refseq_r45/mc9nr/gene_based/hg19-tss-centered-10kb-7species.mc9nr.feather")
+# 
+# 
 # download.file(dbFiles[2], destfile=basename(dbFiles[2]), method = "curl")
 
 
@@ -1321,14 +1343,14 @@ try({
 ```{r merge pdfs, include = FALSE}
 
 # combine pdfs into single binder
-if (save.pdf){
-  try({
-    pdf.list <- list.files (path = paste0(output.path, "PDF/") )
-    pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
-    
-    pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
-  }, silent = T)
-}
+# if (save.pdf){
+#   try({
+#     pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+#     pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+#     
+#     pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+#   }, silent = T)
+# }
 
 
 ```

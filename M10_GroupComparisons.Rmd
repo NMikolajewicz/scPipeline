@@ -46,11 +46,14 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # query input ##################################################################
 # input.file <- "Module1_invivo_EMT6_screen_metaDAta_270320.Rdata"
-input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+# input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 # input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+# input.file <- "R308_M27_NM2_M02_BC2_allGBM_immune_tier2_251120.Rdata"
+input.file <- "R304_M27_NM2_M02_BC2_allGBM_tumorStringent_tier1_251120.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "Module1_pilot6_invitroGBM_updatedBarcodes_290220.Rdata"
@@ -59,26 +62,26 @@ input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
 # general analysis parameters ##################################################
 cluster.resolution <- c(1)
 subsample_factor <- 1
-which.species <- "Hs"
+which.species <- "Mm"
 
 # grouping #####################################################################
 # (list specifying group compositions); supports indirect matching 
 # group.field <- "batch" # batch used when using intergration dataset
 group.field <- "Barcode"
 
-# group.list <- list(GL261 = "GL261",
-                   # CT2A = "CT2A")
+group.list <- list(GL261 = "GL261",
+                   CT2A = "CT2A")
 
 
-group.list <- list(ctrl = "ctrl.0231",
-                   TR = "TR.0231")
-# group.list <- list(WT = "WT",
+# group.list <- list(ctrl = "ctrl.0231",
+#                    TR = "TR.0231")
+# group.list <- list(C68 = "C68",
 #                    C2 = "C2")
 
 # specify which group is reference/control group (NA if unspecified)
 # which.reference <- NA 
-which.reference <- "ctrl.0231"
-# which.reference <- "GL261"
+# which.reference <- "ctrl.0231"
+which.reference <- "GL261"
 # which.reference <- "WT" # specify whcih group to use as reference (e.g., DEG compared to what?)
 
 
@@ -87,7 +90,7 @@ sim.type <- "bin" #option: bin vs single - expression binned or not prior to tak
 TOM.type <- "signed"
 which.network <- "signed"       # 'signed', 'unsigned', or 'signed hybrid'
 which.cor <- "spearman"         # correlation method (Recommended: spearman)
-min.cluster.size <- 10          # minimal number of genes per module
+min.cluster.size <- 3          # minimal number of genes per module
 which.metanet <- "total"    # "consensus" or "differential" or "total" or "mean"
 pct.threshold <- 0.1            # min expressing fraction threhsold
 
@@ -129,6 +132,13 @@ df.log <- addLogEntry("Min module size", min.cluster.size, df.log, "min.cluster.
 
 df.log <- addLogEntry("Reference group", which.reference, df.log, "which.reference")
 df.log <- addLogEntry("Print flag", print.inline, df.log, "print.inline")
+
+```
+
+
+```{r assertions}
+
+stopifnot(which.reference %in% names(group.list))
 
 ```
 
@@ -2793,43 +2803,43 @@ glmnetPlots <- function(dfmms, which.s, m.weights, d.weights){
 
 ```{r glmnet regression, fig.width = 12, fig.height = 4, warning = FALSE, message  = FALSE, include = FALSE}
 
-
-cl <- parallel::makeCluster(12)
-doParallel::registerDoParallel(cl)
-
-df.ma.merge.scaled <- as.data.frame(apply(df.ma.merge.f, 2, function(x) scale(x)))
-
-# cross-validation #############################################################
-model.weights <- NULL; # dmmf.weights
-cvfit = cv.glmnet(x = as.matrix(df.ma.merge.scaled %>% dplyr::select(-c("y"))), 
-                  y = df.ma.merge.scaled$y, 
-                  weights = model.weights , #dmmf.weights
-                  type.measure = "default", 
-                  parallel = T,
-                  relax = F,
-                  lambda = exp(seq(-10, 0, by = 0.2)),
-                  nfolds = 100)
-
-# stop workers
-parallel::stopCluster(cl)
-
-df.cv.fit <- data.frame(
-  lambda = cvfit[["lambda"]], 
-  cv = cvfit[["cvm"]],
-  cv.up = cvfit[["cvup"]],
-  cv.down = cvfit[["cvlo"]]
-)
-
-# fit glmnet model #############################################################
-which.s1 <- df.cv.fit$lambda[which.min((df.cv.fit$cv))]
-
-min.cv <- min(df.cv.fit$cv)
-max.cv <- max(df.cv.fit$cv)
-cv.threshold <- min.cv + ((max.cv - min.cv)/10)
-which.s2 <- df.cv.fit$lambda[which.min(abs(df.cv.fit$cv - cv.threshold))]
-
-
-which.s3 <- cvfit[["lambda.1se"]]
+# 
+# cl <- parallel::makeCluster(12)
+# doParallel::registerDoParallel(cl)
+# 
+# df.ma.merge.scaled <- as.data.frame(apply(df.ma.merge.f, 2, function(x) scale(x)))
+# 
+# # cross-validation #############################################################
+# model.weights <- NULL; # dmmf.weights
+# cvfit = cv.glmnet(x = as.matrix(df.ma.merge.scaled %>% dplyr::select(-c("y"))), 
+#                   y = df.ma.merge.scaled$y, 
+#                   weights = model.weights , #dmmf.weights
+#                   type.measure = "default", 
+#                   parallel = T,
+#                   relax = F,
+#                   lambda = exp(seq(-10, 0, by = 0.2)),
+#                   nfolds = 100)
+# 
+# # stop workers
+# parallel::stopCluster(cl)
+# 
+# df.cv.fit <- data.frame(
+#   lambda = cvfit[["lambda"]], 
+#   cv = cvfit[["cvm"]],
+#   cv.up = cvfit[["cvup"]],
+#   cv.down = cvfit[["cvlo"]]
+# )
+# 
+# # fit glmnet model #############################################################
+# which.s1 <- df.cv.fit$lambda[which.min((df.cv.fit$cv))]
+# 
+# min.cv <- min(df.cv.fit$cv)
+# max.cv <- max(df.cv.fit$cv)
+# cv.threshold <- min.cv + ((max.cv - min.cv)/10)
+# which.s2 <- df.cv.fit$lambda[which.min(abs(df.cv.fit$cv - cv.threshold))]
+# 
+# 
+# which.s3 <- cvfit[["lambda.1se"]]
 
 plt.mod.perform.sum1 <- plt.mod.perform.sum2 <- plt.mod.perform.sum3 <- plt.mod.perform.sum4 <- plt.mod.perform.sum5 <- NULL
 
@@ -3366,6 +3376,9 @@ paired_out <- lapply(seq_along(plt.pairwise.list), function(i) {
 
 ```{r}
 
+try({
+  
+
 for (i in 1:length(plt.pairwise.list)){
   s1 <- names(plt.pairwise.list)[i]
   plot.name <- paste0("M10_deg_markers_" ,s1, ".pdf")
@@ -3373,6 +3386,8 @@ for (i in 1:length(plt.pairwise.list)){
           plot.handle =  plt.pairwise.list[[i]], 
           fig.width = 7, fig.height = 6, save.flag = save.pdf)
 }
+  
+}, silent = T)
 
 ```
 
@@ -4187,14 +4202,14 @@ try({
 ```{r merge pdfs, include = FALSE}
 
 # combine pdfs into single binder
-if (save.pdf){
-  try({
-    pdf.list <- list.files (path = paste0(output.path, "PDF/") )
-    pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
-    
-    pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
-  }, silent = T)
-}
-
+# if (save.pdf){
+#   try({
+#     pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+#     pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+#     
+#     pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+#   }, silent = T)
+# }
+# 
 
 ```
