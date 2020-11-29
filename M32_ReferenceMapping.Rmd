@@ -1,0 +1,912 @@
+---
+title: "Reference Mapping"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+editor_options: 
+  chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = if (exists("user")){paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", format(Sys.Date(), "%d%m%y"), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
+    )
+  })
+---
+
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+packages2load <- c("Seurat", "scMiko",
+                   "dplyr", "tidyr", "RColorBrewer", "ggplot2", 
+                   "flexdashboard", "future", 
+                   "parallel", "doParallel", "foreach")
+
+# load packages
+invisible(lapply(packages2load, library, character.only = TRUE))
+
+```
+
+
+
+```{r analysis specifications}
+
+# parameter specification
+
+# parameter.list <- list(
+#   p6.invitro = list(
+#     input.file = "M01_NM2_R1_test_300720.Rdata",
+#     is.reference = T,
+#     cluster.resolution = 0.5,
+#     subsample_factor = 1,
+#     subset.data = NA,
+#     species = "Mm"
+#   ),
+#   UHN.GBM = list(
+#     input.file = "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata",
+#     is.reference = F,
+#     cluster.resolution = 0.5,
+#     subsample_factor = 1,
+#     subset.data = NA,
+#     species = "Hs"
+#   )
+# )
+
+# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+# input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+
+# input.file <- "R304_M27_NM2_M02_BC2_allGBM_tumorStringent_tier1_251120.Rdata"
+
+
+
+parameter.list <- list(
+  melanoma = list(
+    input.file = "R291_M01_NM2_Rambow_Melanoma_221120.Rdata",
+    is.reference = F,
+    cluster.resolution = 1,
+    subsample_factor = 1,
+    subset.data = NA,
+    species = "Mm"
+  ),
+  gbm = list(
+    input.file = "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata",
+    is.reference = T,
+    cluster.resolution = 1,
+    subsample_factor = 1,
+    subset.data = NA,
+    species = "Mm"
+  )
+)
+
+
+# print inline
+print.inline <- FALSE # OPTIONAL; TRUE/FALSE
+
+# save PDF
+save.pdf <- T
+update.log <- T
+
+
+```
+
+
+
+
+```{r load data, warning = FALSE}
+
+message("Importing data...\n")
+so.list <- list()
+for (i in 1:length(parameter.list)){
+  
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed_Datasets/"
+
+if (!exists("data.path") & !exists("user")) {
+  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+}
+
+# load query dataset
+warning("Importing data...")
+input.file <- parameter.list[[i]]$input.file
+if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
+load(paste(data.path, dir.preprocessed, input.file, sep = ""));
+
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
+
+t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "integration.anchors")
+
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                         species =  parameter.list[[i]]$species, resolution= parameter.list[[i]]$cluster.resolution, 
+                         subset.data = parameter.list[[i]]$subset.data, 
+                         subsample = parameter.list[[i]]$subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
+                         terms2drop = t2d, rmv.pattern = "so", keep.default.assay.only = F)
+
+# unpack results
+if (exists("so")) try({rm(so)}, silent = T)
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+rm(prep.list);
+invisible({gc()})
+
+so.list[[names(parameter.list)[i]]] <- so.query
+rm(so.query); invisible({gc()})
+}
+
+```
+
+```{r}
+
+so.query <- so.list[["melanoma"]]
+
+so.query@meta.data[["bc"]] <- NA
+so.query@meta.data[["bc"]][so.query@meta.data[["orig.ident"]] %in% "T0"] <- "T0"
+so.query@meta.data[["bc"]][so.query@meta.data[["orig.ident"]] %in% "T4"] <- "phase1"
+so.query@meta.data[["bc"]][so.query@meta.data[["orig.ident"]] %in% "T28"] <- "phase2"
+so.query@meta.data[["bc"]][so.query@meta.data[["orig.ident"]] %in% "Tres"] <- "phase3"
+
+
+# reprocess melanoma 
+so.query <- so.query[ ,so.query@meta.data[["bc"]] %in% c("phase2", "phase3")]
+
+so.list[["melanoma"]] <- so.query
+# Idents(so.query) <- so.query@meta.data[["orig.ident"]]
+
+
+cluster.UMAP(so.query, group.by = "orig.ident")
+
+
+df.umap <- data.frame(so.query@reductions[["umap"]]@cell.embeddings)
+colnames(df.umap) <- c("x", "y")
+
+df.umap$T0 <- "grey"
+df.umap$T0[so.query@meta.data[["orig.ident"]] %in% "T0"] <- "tomato"
+
+df.umap$phase1 <- "grey"
+df.umap$phase1[so.query@meta.data[["orig.ident"]] %in% "T4"] <- "tomato"
+
+df.umap$phase2 <- "grey"
+df.umap$phase2[so.query@meta.data[["orig.ident"]] %in% "T28"] <- "tomato"
+
+df.umap$phase3 <- "grey"
+df.umap$phase3[so.query@meta.data[["orig.ident"]] %in% "Tres"] <- "tomato"
+
+
+df.umap %>%
+  ggplot(aes(x = x , y = y)) + 
+  geom_point(color = df.umap$T0) + 
+  theme_miko() + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+  labs(title = "T0")
+
+df.umap %>%
+  ggplot(aes(x = x , y = y)) + 
+  geom_point(color = df.umap$phase1) + 
+  theme_miko() + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+  labs(title = "phase 1")
+
+
+df.umap %>%
+  ggplot(aes(x = x , y = y)) + 
+  geom_point(color = df.umap$phase2) + 
+  theme_miko() + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+  labs(title = "phase 2")
+
+
+df.umap %>%
+  ggplot(aes(x = x , y = y)) + 
+  geom_point(color = df.umap$phase3) + 
+  theme_miko() + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+  labs(title = "phase 3")
+
+
+```
+
+
+
+```{r harmonize species}
+
+message("Harmonizing species...\n")
+all.species <- unique(unlist(lapply(parameter.list, function(x) x$species)))
+
+if (length(all.species) > 0){
+  which.species <- "Hs"
+} else if ((length(all.species) ==  1) && (all.species %in% c("Mm", "Hs"))){
+  which.species <- all.species
+} else {
+  stop("Species incorrectly specified.\n")
+}
+
+if (which.species == "Hs"){
+  my.converter <- toupper
+} else if (which.species == "Mm") {
+  my.converter <- firstup
+}
+
+for (i in 1:length(so.list)){
+  
+  assay.names <- names(so.list[[i]]@assays)
+  
+  
+  for (j in 1:length(assay.names)){
+    so.list[[i]]@assays[[assay.names[j]]]@counts@Dimnames[[1]] <- 
+      my.converter(so.list[[i]]@assays[[assay.names[j]]]@counts@Dimnames[[1]])
+    so.list[[i]]@assays[[assay.names[j]]]@data@Dimnames[[1]] <- 
+      my.converter(so.list[[i]]@assays[[assay.names[j]]]@data@Dimnames[[1]]) 
+    
+       try({rownames(so.list[[1]]@assays[[assay.names[j]]]@scale.data) <- 
+      my.converter(rownames(so.list[[1]]@assays[[assay.names[j]]]@scale.data))}, silent = T)   
+    
+    
+    
+  }
+  
+      try({rownames(so.list[[i]]@reductions[["pca"]]@feature.loadings) <- 
+      my.converter(rownames(so.list[[i]]@reductions[["pca"]]@feature.loadings))}, silent = T)
+}
+
+
+```
+```{r analysis log, include = FALSE}
+
+# Initiate and fill analysis Log
+df.log <- initiateLog("32, Reference Mapping")
+df.log <- addLogEntry("PDF saved", save.pdf, df.log, "save.pdf")
+df.log <- addLogEntry("Update Central Log", update.log, df.log, "update.log")
+df.log <- addLogEntry("Print Inline", print.inline, df.log, "print.inline")
+
+df.log <- addLogEntry("set1 - Input File", parameter.list[[1]]$input.file, df.log, "input.file")
+df.log <- addLogEntry("set1 - Reference Set", parameter.list[[1]]$is.reference, df.log, "is.reference")
+df.log <- addLogEntry("set1 - Cluster Resolution", parameter.list[[1]]$cluster.resolution, df.log, "cluster.resolution")
+df.log <- addLogEntry("set1 - Subsample Factor", parameter.list[[1]]$subsample_factor, df.log, "subsample_factor")
+df.log <- addLogEntry("set1 - Subset Data", parameter.list[[1]]$subset.data, df.log, "subset.data")
+df.log <- addLogEntry("set1 - Species", parameter.list[[1]]$species, df.log, "species")
+
+df.log <- addLogEntry("set2 - Input File", parameter.list[[2]]$input.file, df.log, "input.file")
+df.log <- addLogEntry("set2 - Reference Set", parameter.list[[2]]$is.reference, df.log, "is.reference")
+df.log <- addLogEntry("set2 - Cluster Resolution", parameter.list[[2]]$cluster.resolution, df.log, "cluster.resolution")
+df.log <- addLogEntry("set2 - Subsample Factor", parameter.list[[2]]$subsample_factor, df.log, "subsample_factor")
+df.log <- addLogEntry("set2 - Subset Data", parameter.list[[2]]$subset.data, df.log, "subset.data")
+df.log <- addLogEntry("set2 - Species", parameter.list[[2]]$species, df.log, "species")
+
+```
+
+
+```{r get past module logs, include = FALSE}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+
+
+
+```{r transfer labels}
+
+# get reference indices
+ind.reference <- which(unique(unlist(lapply(parameter.list, function(x) x$is.reference))))
+ind.query <- seq(1, length(parameter.list))[! (seq(1, length(parameter.list)) %in% ind.reference)]
+
+# determine normalization method
+available.assays <- (unique(unlist(lapply(so.list, function(x) x@active.assay))))
+
+df.var <- NULL
+var.all.list <- list()
+for (i in 1:length(so.list)){
+  DefaultAssay(so.list[[i]]) <- "RNA"
+  so.list[[i]] <- DietSeurat(so.list[[i]], assays = "RNA", graphs = names(so.list[[i]]@graphs),
+                             dimreducs = names(so.list[[i]]@reductions))
+  # rownames(so.list[[i]]) <-  make.unique(rownames(so.list[[i]]))
+  so.list[[i]]@assays[["RNA"]]@counts@Dimnames[[1]] <-make.unique(so.list[[i]]@assays[["RNA"]]@counts@Dimnames[[1]])
+  so.list[[i]]@assays[["RNA"]]@data@Dimnames[[1]] <-make.unique(so.list[[i]]@assays[["RNA"]]@data@Dimnames[[1]])
+  
+  so.list[[i]]@assays[["RNA"]]@meta.features <- data.frame(row.names = (rownames(so.list[[i]])))
+  so.list[[i]] <- NormalizeData(so.list[[i]], normalization.method = "LogNormalize", scale.factor = 10000, assay = "RNA")
+  so.list[[i]] <- FindVariableFeatures(object = so.list[[i]], selection.method = 'mvp', 
+                             mean.cutoff = c(0.1, 8), dispersion.cutoff = c(1, Inf), assay = "RNA")
+  
+  
+  df.var.cur <- so.list[[i]]@assays[["RNA"]]@meta.features
+  df.var.cur$gene <- toupper(rownames(df.var.cur))
+  
+  if (is.null(df.var)){
+    df.var <- df.var.cur[ ,c("mvp.dispersion.scaled", "gene")]
+    colnames(df.var) <- c(paste0("v", i), "gene")
+  } else {
+    df.var.cur <- df.var.cur[ ,c("mvp.dispersion.scaled", "gene")]
+    colnames(df.var.cur) <- c(paste0("v", i), "gene")   
+    df.var <- merge(df.var, df.var.cur, by = "gene")
+  }
+  
+  var.all.list[[i]] <- df.var.cur
+  
+}
+
+which.norm <- "LogNormalize"
+
+
+message("Identifying common gene subset...\n")
+rownames(df.var) <- df.var$gene
+df.var$max.val <- pmax(df.var$v1, df.var$v2)
+top.var <- (df.var %>% top_n(3000, max.val))$gene
+commmon.genes <- unique(c(top.var, so.list[[1]]@assays[["RNA"]]@var.features, so.list[[2]]@assays[["RNA"]]@var.features))
+
+
+# if (length(available.assays) > 1){
+#   which.norm <- "SCT"
+# } else if (available.assays == "SCT"){
+#   which.norm <- "SCT"
+# } else if (available.assays == "RNA"){
+#   which.norm <- "LogNormalize"
+# }
+
+
+# identify common gene list
+# genes.list <- list()
+# for (i in 1:length(so.list)){
+#   genes.list[[i]] <- rownames(so.list[[i]])
+# }
+# commmon.genes <- intersect(genes.list[[1]], genes.list[[2]])
+
+genes.list <- list()
+so.list2 <- list()
+for (i in 1:length(so.list)){
+  so.list2[[i]] <- so.list[[i]]
+  so.list2[[i]]@meta.data[["umap.x"]] <- so.list2[[i]]@reductions[["umap"]]@cell.embeddings[,1]
+  so.list2[[i]]@meta.data[["umap.y"]] <- so.list2[[i]]@reductions[["umap"]]@cell.embeddings[,2]
+}
+
+message("Finding transfer anchors...\n")
+so.anchors2 <- FindTransferAnchors(reference = so.list2[[ind.reference]], query = so.list2[[ind.query]], 
+                                   features = commmon.genes,
+   normalization.method = which.norm, reduction = "pcaproject")
+
+message("Transferring cluster labels...\n")
+cluster.predictions.cluster <- TransferData(anchorset = so.anchors2, 
+                            refdata = so.list2[[ind.reference]]@meta.data[["seurat_clusters"]], 
+                            weight.reduction = "pcaproject")
+                            # dims = 1:3z0)
+
+message("Transferring barcode labels...\n")
+cluster.predictions.bc <- TransferData(anchorset = so.anchors2, 
+                            refdata = so.list2[[ind.reference]]@meta.data[["Barcode"]], 
+                            weight.reduction = "pcaproject")
+                            # dims = 1:30)
+
+message("Transferring umap coordinates labels...\n")
+cluster.predictions.umap <- TransferData(anchorset = so.anchors2, 
+                            refdata = t(so.list2[[ind.reference]]@reductions[["umap"]]@cell.embeddings), 
+                            weight.reduction = "pcaproject")
+                            # dims = 1:30)
+
+
+message("Constructing UMAP data objects...")
+
+# a <- cluster.predictions.umap@data
+df.umap.query <- data.frame(t(as.matrix(cluster.predictions.umap@data)))
+colnames(df.umap.query) <- c("x", "y")
+df.umap.query$cluster <- cluster.predictions.cluster$predicted.id
+df.umap.query$barcode <- cluster.predictions.bc$predicted.id
+df.umap.query$max.score <- cluster.predictions.cluster$prediction.score.max
+
+df.umap.reference <- data.frame(so.list2[[ind.reference]]@reductions[["umap"]]@cell.embeddings)
+colnames(df.umap.reference) <- c("x", "y")
+df.umap.reference$cluster <- so.list2[[ind.reference]]@meta.data[["seurat_clusters"]]
+df.umap.reference$barcode <- so.list2[[ind.reference]]@meta.data[["Barcode"]]
+
+```
+
+
+```{r cluster umaps, fig.width = 12, fig.height = 5}
+
+plt.reference.umap <- cluster.UMAP(so.list[[ind.reference]]) + 
+  labs(subtitle = "Reference")
+plt.query.umap <- cluster.UMAP(so.list[[ind.query]]) + 
+  labs(subtitle = "Query")
+plt.cluster.umap <- cowplot::plot_grid(plt.reference.umap, plt.query.umap, ncol = 2)
+
+
+plt.reference.bc <- cluster.UMAP(so.list[[ind.reference]], group.by = "Barcode") + 
+  labs(subtitle = "Reference")
+plt.query.bc <- cluster.UMAP(so.list[[ind.query]], group.by = "Barcode") + 
+  labs(subtitle = "Query")
+plt.bc.umap <- cowplot::plot_grid(plt.reference.bc, plt.query.bc, ncol = 2)
+
+if (print.inline){
+  # fig.width = 12, fig.height = 5
+  print(plt.cluster.umap)
+  plt.bc.umap
+}
+
+```
+
+
+```{r, fig.width = 10, fig.height = 5}
+
+# ensure clusters are ordered
+df.umap.query$cluster <- orderedFactor(df.umap.query$cluster)
+df.umap.reference$cluster <- orderedFactor(df.umap.reference$cluster)
+
+n.points <- nrow(df.umap.query) + nrow(df.umap.reference)
+
+message("Generating inital UMAP mappings...")
+plt.u.ref <-  ggplot() + 
+  geom_point(data = df.umap.query, aes(x = x, y = y), color = "grey80", size = autoPointSize(n.points = n.points)) + 
+  geom_point(data = df.umap.reference, aes(x = x, y = y, color = cluster), size = autoPointSize(n.points = n.points)) + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+  theme_miko(legend = F) + 
+  labs(title = "Reference", caption = "grey: query")
+
+plt.u.query <-  ggplot() + 
+  geom_point(data = df.umap.reference, aes(x = x, y = y), color = "grey80", size = autoPointSize(n.points = n.points)) + 
+  geom_point(data = df.umap.query, aes(x = x, y = y, color = cluster), size = autoPointSize(n.points = n.points)) + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+   theme_miko(legend = T) + 
+  labs(title = "Query", caption = "grey: reference")
+
+plt.initial.mapping <- cowplot::plot_grid(plt.u.ref, plt.u.query,ncol = 2, rel_widths = c(1.75, 2))
+
+if (print.inline){
+  print(plt.initial.mapping)
+  # fig.width = 10, fig.height = 5
+}
+```
+
+```{r score threhsolding, fig.width = 17, fig.height = 5}
+
+message("Visualizing alignment thresholds...")
+alignment.threshold <- 0.7
+plt.query.score <-  ggplot() + 
+  geom_point(data = df.umap.reference, aes(x = x, y = y), color = "grey80", size = autoPointSize(n.points = n.points)) + 
+  geom_point(data = df.umap.query, aes(x = x, y = y, color = max.score), size = autoPointSize(n.points = n.points)) + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+   theme_miko(legend = T) + 
+  labs(title = "Query", caption = "grey: reference", color = "Alignment Score") + 
+  viridis::scale_color_viridis()
+
+plt.score.hist <-  ggplot() + 
+  geom_histogram(data = df.umap.query, aes(x = max.score), fill = "grey", color = "black") + 
+  xlab("Alignment Score") + ylab("Count") + 
+   theme_miko(legend = T) + 
+  geom_vline(xintercept = alignment.threshold, linetype = "dashed") + 
+  labs(title = "Alignment Scores", subtitle = "Distribution", caption = "dashed: alignment threhsold")
+
+plt.u.query <-  ggplot() + 
+  geom_point(data = df.umap.reference, aes(x = x, y = y), color = "grey80", size = autoPointSize(n.points = n.points)) + 
+  geom_point(data = df.umap.query %>% dplyr::filter(max.score > alignment.threshold), aes(x = x, y = y, color = cluster), size = autoPointSize(n.points = n.points)) + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+   theme_miko(legend = T) + 
+  labs(title = "Query", caption = "grey: reference")
+
+plt.u.query <-  ggplot() + 
+  geom_point(data = df.umap.reference, aes(x = x, y = y), color = "grey80", size = autoPointSize(n.points = n.points)) + 
+  geom_point(data = df.umap.query %>% dplyr::filter(max.score > alignment.threshold), aes(x = x, y = y, color = barcode), size = 1) + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+   theme_miko(legend = T) + 
+  labs(title = "Query", caption = "grey: reference") + 
+  ggthemes::scale_colour_ptol()
+
+
+plt.alignment.threshold <- cowplot::plot_grid(plt.query.score, plt.score.hist, plt.u.query, ncol = 3)
+
+if (print.inline){
+  print(plt.alignment.threshold)
+  # fig.width = 17, fig.height = 5
+}
+
+```
+
+
+
+
+```{r visualize original map, fig.width=10, fig.height=6}
+
+include.which.cells <- rownames(df.umap.query %>% dplyr::filter(max.score > alignment.threshold))
+
+ref.range <- c(0,1)
+
+# get umap embeddings
+df.embedding <- data.frame(x0 = df.umap.query$x, y0 = df.umap.query$y)
+df.embedding$cell <- rownames(df.umap.query)
+df.embedding$cluster <- df.umap.query$cluster
+df.embedding$group.ref <- "Mapped"
+
+df.umap.query.original <- data.frame(so.list2[[ind.query]]@reductions[["umap"]]@cell.embeddings)
+colnames(df.umap.query.original) <- c("x", "y")
+query.range <- ref.range 
+df.emb.query <- data.frame(x = df.umap.query.original$x, y = df.umap.query.original$y)
+
+df.emb.query$cell <- rownames(df.umap.query.original)
+df.emb.query$cluster <- so.list2[[ind.query]]@meta.data[["seurat_clusters"]]
+df.emb.query$name <- "Original"
+
+# assemble mapping plot
+ x.min <- min(c(df.umap.reference$x, df.emb.query$x));
+ x.max <- max(df.emb.query$x);
+ 
+df.emb.query$x <- df.emb.query$x - ((x.max - x.min) + 2)
+fig.width.height <- c(10,5)
+df.emb.ref <- data.frame(x = df.embedding$x0, y = df.embedding$y0, 
+                         cell = df.embedding$cell, 
+                         name = "Mapped")
+df.integrated.point <- bind_rows(df.emb.ref, df.emb.query)
+df.integrated.seg <- merge(df.embedding, df.emb.query, by = "cell")
+
+# set opacity based on mapping confidence
+df.integrated.point$do.alpha <- 0.05
+  df.integrated.point$do.alpha[ df.integrated.point$cell %in% include.which.cells] <-1
+
+# generate Plot
+plt.embedding_0_1 <- ggplot() + 
+  geom_point(data = df.umap.reference, aes(x = x, y = y), color = "grey80", size = autoPointSize(n.points = n.points)) + 
+  geom_point(data = df.integrated.point , aes(x = x, y = y, color = name), size = autoPointSize(n.points = n.points), alpha = df.integrated.point$do.alpha) + 
+  geom_segment(aes(x = x0, y = y0, xend = x, yend = y), color = "black", alpha = 0.01, data = df.integrated.seg %>% dplyr::filter(cell %in% include.which.cells)) + 
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank()) + 
+  ggthemes::scale_color_ptol() + theme(legend.position="bottom") + 
+  labs(caption = "Grey points: reference data\nOpaque: high-confidence mapping\nTransparent: low-confidence mapping", color = "Data")
+
+
+if (print.inline){
+  print(plt.embedding_0_1)
+  # fig.width=10, fig.height=6
+}
+
+```
+
+
+```{r map distributions}
+
+at <- seq(0, 1, by = 0.1)
+df.at.all <- NULL
+for (i in 1:length(at)){
+  
+  df.at <- data.frame(
+    cells = rownames(df.umap.query),
+    cluster = df.umap.query$cluster,
+    barcode = df.umap.query$barcode,
+    score = df.umap.query$max.score
+  )
+  
+  df.at$aligned <- F
+  df.at$aligned[df.at$score > at[i]] <- T
+  df.at$cluster2 <- df.at$cluster
+  df.at$cluster2[!df.at$aligned] <- "not mapped"
+  df.at$bc2 <- df.at$barcode
+  df.at$bc2[!df.at$aligned] <- "not mapped"
+  df.at$threshold <- at[i]
+  df.at.all <- bind_rows(df.at.all, df.at)
+}
+
+# order factors
+df.at.all$cluster <- orderedFactor(df.at.all$cluster)
+df.at.all$cluster2 <- factor(df.at.all$cluster2, levels = c(levels(df.at.all$cluster), "not mapped"))
+df.at.all$barcode <- orderedFactor(df.at.all$barcode)
+df.at.all$bc2 <- factor(df.at.all$bc2, levels = c(levels(df.at.all$barcode), "not mapped"))
+df.at.all$threshold <- factor(df.at.all$threshold , levels = at)
+
+plt.map.distribution <- df.at.all %>%
+  ggplot(aes(x = threshold, y = score, fill = cluster2)) + 
+  geom_bar(stat = "identity", position = "fill") + 
+  theme_miko(legend = T) + 
+  xlab("Alignment Threshold") + ylab("Distribution of Mapped Clusters") + 
+  labs(title = "Distribution of Mapped Clusters", subtitle = "Clusters specify those in reference data", fill = "Cluster")
+
+plt.bc.distribution <- df.at.all %>%
+  ggplot(aes(x = threshold, y = score, fill = bc2)) + 
+  geom_bar(stat = "identity", position = "fill") + 
+  theme_miko(legend = T) + 
+  xlab("Alignment Threshold") + ylab("Distribution of Mapped Barcodes") + 
+  labs(title = "Distribution of Mapped Barcodes", subtitle = "Barcodes specify those in reference data", fill = "Barcode")
+
+
+if (print.inline){
+  print(plt.map.distribution)
+  
+  plt.bc.distribution
+  # fig.width=10, fig.height=6
+}
+
+
+
+df.at.all.sum  <- df.at.all %>%
+  dplyr::group_by(threshold) %>%
+  summarize(pct.mapped = mean(aligned))
+
+plt.prop.mapped <- df.at.all.sum %>%
+  ggplot(aes(x = as.numeric(as.character(threshold)), y = pct.mapped)) + 
+  geom_point() + 
+  geom_path() + theme_miko() + 
+  xlab("Alignment Threhsold") + 
+  ylab("Proportion of Cells Mapped") + 
+  geom_vline(xintercept = alignment.threshold, linetype = "dashed") + 
+  labs(title = "Proportion of Cells Mapped to Reference", subtitle = "Mapping determined for range of alignment thresholds")
+```
+
+
+
+```{r summary statistisc, fig.width = 12, fig.height = 5}
+
+
+prop.mapped <- signif(mean(df.umap.query$max.score > alignment.threshold), 3)
+df.meta.merge <- df.umap.query
+
+df.meta.merge$cluster2 <- df.meta.merge$cluster 
+df.meta.merge$cluster2[df.meta.merge$max.score < alignment.threshold] <- NA
+df.meta.merge$barcode2 <- df.meta.merge$barcode 
+df.meta.merge$barcode2[df.meta.merge$max.score < alignment.threshold] <- NA
+
+# df.meta.cluster <- df.meta.merge %>%
+#   dplyr::filter(max.score > alignment.threshold) %>%
+#   dplyr::group_by(cluster2) %>%
+#   dplyr::summarize(
+#     p.alive = mean(alive == "Alive", na.rm = T),
+#     p.dead = mean(alive == "Dead", na.rm = T),
+#     mean.time = mean(time, na.rm = T),
+#     sd.time = sd(time, na.rm = T),
+#     mean.age = mean(age, na.rm = T),
+#     sd.age = sd(age, na.rm = T),
+#     n.patients = length(time)
+#   )
+# 
+# df.meta.bc <- df.meta.merge %>%
+#   dplyr::filter(max.score > alignment.threshold) %>%
+#   dplyr::group_by(barcode2) %>%
+#   dplyr::summarize(
+#     p.alive = mean(alive == "Alive", na.rm = T),
+#     p.dead = mean(alive == "Dead", na.rm = T),
+#     mean.time = mean(time, na.rm = T),
+#     sd.time = sd(time, na.rm = T),
+#     mean.age = mean(age, na.rm = T),
+#     sd.age = sd(age, na.rm = T),
+#     n.patients = length(time)
+#   )
+
+plt.1 <- df.meta.merge %>%
+  ggplot(aes(x = barcode2, fill = barcode2)) + 
+  geom_bar() + 
+  theme_miko(legend = T) + 
+  # geom_text(data = df.meta.bc, aes(y = n.patients + (0.05*nrow(df.meta.merge)), x = barcode2, label = n.patients)) + 
+  xlab("Sample") + ylab("N Patients") + 
+  labs(title = "Mapping Summary", subtitle = "Predicted 'Samples'", caption = "NA = not mapped", fill = "Sample") 
+  # ggthemes::scale_fill_ptol()
+
+plt.2 <- df.meta.merge %>% 
+  ggplot(aes(x = cluster2, fill = cluster2)) + 
+  geom_bar() + 
+  theme_miko(legend = T) + 
+  # geom_text(data = df.meta.cluster, aes(y = n.patients + (0.05*nrow(df.meta.merge)), x = cluster2, label = n.patients)) +
+  xlab("Cluster") + ylab("N Patients") + 
+  labs(title = "Mapping Summary", subtitle = "Predicted 'Clusters'", caption = "NA = not mapped", fill = "Cluster")  
+  # ggthemes::scale_fill_ptol()
+
+
+cowplot::plot_grid(plt.1, plt.2)
+```
+```{r central log}
+
+
+if (exists("update.log")){
+  do.update <- update.log
+} else {
+  do.update <- T
+}
+
+
+if (do.update){
+  
+  # update central log
+  run.id <- NULL
+  if (!exists("user")) user <- "guest"
+  
+  clog.update.success <- F
+  try({
+    run.id <-  updateCentralLog(Module = "M31", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
+    clog.update.success <-  T
+  }, silent = F)
+  
+  
+  if (!(clog.update.success)){
+    warning("Central log update was unsuccessful :(\n")
+    run.id <- paste("M31_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+  }
+} else {
+  clog.update.success <- F
+  run.id <- paste("M32_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+  save.pdf <- F
+}
+
+```
+
+
+```{r setup output directories}
+
+if (save.pdf){
+  
+  # output path
+  if (!exists("data.path")) data.path = ""
+  output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+  
+  # create output directories
+  dir.create(output.path)
+  dir.create(paste0(output.path, "Tables/"))
+  dir.create(paste0(output.path, "PDF/"))
+
+} else {
+  output.path <- ""
+}
+
+```
+
+UMAP
+=====================================
+
+Row {.tabset}
+-------------------------------------
+
+### Cluster
+
+```{r cluster umap, fig.width = 12, fig.height = 5}
+  print(plt.cluster.umap)
+
+  savePDF(file.name = paste0(output.path, "PDF/", "M32_umap_clusters.pdf"), 
+          plot.handle = (plt.cluster.umap), 
+          fig.width = 12, fig.height = 5, save.flag = save.pdf)
+```
+
+### Barcodes
+
+```{r bc umap, fig.width = 12, fig.height = 5}
+  print(plt.bc.umap)
+
+  savePDF(file.name = paste0(output.path, "PDF/", "M32_umap_barcodes.pdf"), 
+          plot.handle = (plt.bc.umap), 
+          fig.width = 12, fig.height = 5, save.flag = save.pdf)
+```
+
+Mapping
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Initial Mapping
+
+```{r inital mapping plot, fig.width = 10, fig.height = 5}
+
+  print(plt.initial.mapping)
+
+  savePDF(file.name = paste0(output.path, "PDF/", "M32_initial_mapping.pdf"), 
+          plot.handle = (plt.initial.mapping), 
+          fig.width = 10, fig.height = 5, save.flag = save.pdf)
+
+```
+
+### Alignment Threshold
+
+```{r alignment plots,  fig.width = 17, fig.height = 5}
+print(plt.alignment.threshold)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M32_alignment_thresholds.pdf"), 
+        plot.handle = (plt.alignment.threshold), 
+        fig.width = 17, fig.height = 5, save.flag = save.pdf)
+```
+
+### Map Embedding
+
+```{r map embedding plots, fig.width=10, fig.height=6}
+  print(plt.embedding_0_1)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M32_map_embedding.pdf"), 
+        plot.handle = (plt.embedding_0_1), 
+        fig.width = 10, fig.height = 6, save.flag = save.pdf)
+
+```
+
+Label Transfer
+===================================== 
+
+Row {.tabset}
+-------------------------------------
+
+### Proportion Mapped
+
+```{r proportion mapped}
+
+plt.prop.mapped
+
+savePDF(file.name = paste0(output.path, "PDF/", "M32_proportion_mapped.pdf"), 
+        plot.handle = (plt.prop.mapped), 
+        fig.width = 6, fig.height = 6, save.flag = save.pdf)
+
+```
+
+
+
+
+### Clusters
+
+```{r label transfer - clusters, fig.width=10, fig.height=6}
+  print(plt.map.distribution)
+  # fig.width=10, fig.height=6
+
+savePDF(file.name = paste0(output.path, "PDF/", "M32_label_transfer_clusters.pdf"), 
+        plot.handle = (plt.map.distribution), 
+        fig.width = 10, fig.height = 6, save.flag = save.pdf)
+```
+
+### Barcodes
+
+```{r label transfer - barcodes, fig.width=10, fig.height=6}
+  print(plt.bc.distribution)
+  # fig.width=10, fig.height=6
+savePDF(file.name = paste0(output.path, "PDF/", "M32_label_transfer_barcodes.pdf"), 
+        plot.handle = (plt.bc.distribution), 
+        fig.width = 10, fig.height = 6, save.flag = save.pdf)
+
+```
+
+
+```{r save analysis log and Rdata results}
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
+df.log[nrow(df.log), 2] <- as.character("elapsed.time")
+df.log[nrow(df.log), 3] <- as.character(elapsed.time)
+
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
+
+
+df.log_Module_32 <- df.log
+
+
+```
+
+
+Log (Module 32)
+===================================== 
+
+```{r table.log_current}
+
+knitr::kable(df.log_Module_32)
+
+```
+
+
+```{r save analysis log as csv}
+
+if (save.pdf){
+  try({
+    write.csv(df.log_Module_32, file = paste0(output.path, "Tables/", "analysisLog.csv"),
+              row.names = F)
+  }, silent = T)
+}
+
+
+```
