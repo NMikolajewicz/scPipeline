@@ -51,18 +51,32 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 # input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
-input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+input.file <- "R308_M27_NM2_M02_BC2_allGBM_immune_tier2_251120.Rdata"
+# input.file <- "R304_M27_NM2_M02_BC2_allGBM_tumorStringent_tier1_251120.Rdata"
+# input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+# input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
+# input.file <- "R291_M01_NM2_Rambow_Melanoma_221120.Rdata"
 
 # "neural.dif.HH", 
 # specify reference genesets
 # "MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat",, , "neural.dif.HH"
-which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm",   "VastDB", "cycling.seurat", "brain.GBM.R103","immune.Monaco", "invitro.GBM", "Zeisel2018_brainDev", "neural.dif.HH")
-# which.references <- "brain.GBM.R103"
+which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm",   "VastDB", "cycling.seurat", "immune.Monaco",  "invitro.GBM", "Zeisel2018_brainDev", "brain.GBM.R103", "GBM.invitro.fig1")
+
+# , "invitro.GBM", "Zeisel2018_brainDev" "brain.GBM.R103",
+
+# which.references <- "TRRUSTv2_Hs_reg"
+# which.references <- "brain.GBM.R103", "neural.dif.HH"
 
 # specify cluster resolution
 cluster.resolution <- 1 # OPTIONAL; range 0 to inf (default = 1)
 
 so.input.species <- "Mm" # eREQUIRED; Hs, Mm
+
+
+clean.clusters <- T
 
 
 # Data subsampling
@@ -136,6 +150,10 @@ n.cells <- prep.list$n.cell
 rm(prep.list);
 invisible({gc()})
 
+# clean clusters
+if (clean.clusters) so.query <- cleanCluster(so.query, return.plots = F)
+
+
 ```
 
 
@@ -148,7 +166,7 @@ df.log <- addLogEntry("Default Assay", current.assay, df.log, "current.assay")
 df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
 df.log <- addLogEntry("Subsample Factor", subsample_factor, df.log, "subsample_factor")
 df.log <- addLogEntry("Input species", so.input.species, df.log, "so.input.species")
-
+df.log <- addLogEntry("Clusters cleaned", clean.clusters, df.log, "clean.clusters")
 df.log <- addLogEntry("Minimum gene set size", min.geneset.size, df.log, "min.geneset.size")
 df.log <- addLogEntry("n workers, scoring", n.workers$scoring, df.log, "scoring")
 df.log <- addLogEntry("n workers, deg", n.workers$deg, df.log, "deg")

@@ -52,10 +52,12 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
-input.file <- "M01_NM2_R1_test_300720.Rdata"
+# input.file <- "M01_NM2_R1_test_300720.Rdata"
+
+input.file <- "R304_M27_NM2_M02_BC2_allGBM_tumorStringent_tier1_251120.Rdata"
 
 # cluster resolution
-cluster.resolution <- 0.5
+cluster.resolution <- 1
 
 # print inline
 print.inline <- F
@@ -70,7 +72,7 @@ which.subset <- NULL
 # barcode recoding
 # named list, with new barcodes in names and old barcode patterns in entries
 barcode.recode <- "gbm_2"
-barcode.recode <- NULL
+# barcode.recode <- NULL
 
 # species
 which.species <- "Mm"

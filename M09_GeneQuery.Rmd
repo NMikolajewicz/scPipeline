@@ -41,10 +41,10 @@ invisible({gc()})
 start.time <- proc.time()
 
 # load packages
-packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", 
+packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", "grid",
                    "DT", "flexdashboard", "ggpmisc", "future", "foreach", "doParallel",
                    "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "ggplot2", "reactome.db",
-                   "schex", "RColorBrewer", "cowplot")
+                   "schex", "RColorBrewer", "cowplot", "viridis", "viridisLite")
 
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE))
@@ -54,9 +54,23 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 ```{r parameter specification}
 
+# INPUT FILE ###################################################################
+# input.file <- "M01_NM2_R1_test_300720.Rdata"
+# input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+# input.file <- "Module1_p7_mesoderm_110620.Rdata"
+# input.file <- "Module1_m27_p7_mesoderm_070420.Rdata"
+# input.file <- "Module1_p7_mesoderm_update_170620.Rdata"
+# input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
+# input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
+# input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
+input.file <- "R304_M27_NM2_M02_BC2_allGBM_tumorStringent_tier1_251120.Rdata"
+# input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+# input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
 
 
-# QUERY SPECIFICATION
+# QUERY SPECIFICATION ##########################################################
 which.input <- list(
   
   # gene list input format options:
@@ -71,79 +85,98 @@ which.input <- list(
   do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
-  which.gene.set =c('mesoderm') # character (e.g., sex.specific)
+  which.gene.set =c("GBM_HH_261120") # character (e.g., sex.specific)
 )
 
+# GBM_HH_261120
 
-#############################
 
-# ANALYSIS SPECIFICATION
-which.results <- data.frame(
-  umap.top.n = NA,       # plot top n markers (by DEG analysis). NA if all. 
+# PARAMETER SPECIFICATION ######################################################
+
+parameter.list <- list(
+  # General parameters #########################################################
+  general.cluster.resolution = 1,    # Numeric [0, Inf]
+  general.subsample.factor = 1,      # Numeric (0,1]
+  general.subset = data.frame(field = "seurat_clusters", subgroups = c(0:20)),   # 'no.subset' if unspecified
+  general.species = "Mm",            # Options: 'Mm', 'Hs'
+  general.clean.clusters = F,        # Logical. 
+  general.save.pdf = T,              # Logical. 
+  general.print.inline = F,          # Logical. 
+  general.barcode.recode = list(     # new names (list names); old names (list entires). Empty list if no recoding. 
+    GL261 = "GL261",
+    CT2A = "CT2A"
+  ),
+  
+  # Correlation parameters #####################################################
+  cor.method = "spearman",           # Options: 'pearson', 'spearman', 'rho_p'
   cor.top.n = 70,
+  cor.which.data = "data",
+  cor.check.existing = T,            # Logical. 
+  cor.recompute.existing.if.query.missing = T,
+  
+  # GSEA parameters #############################################################
   gsea.top.n = 20,
-  gsea.threshold = 2 ,     # 1: padj < 0.1; 2: p<0.01 & |NES| > 1; 3: top 3 pathways (sorted by NES)
-  annotation.db = "Bader",    # Reactome, GO, Bader
-  ontology = c("BP"),         # "BP", "MF", "CC"
-  do.hex = F               # specify whether to generate hex UMAPs (schex package)
+  gsea.threshold = 2 ,               # Options: 1: padj < 0.1; 2: p<0.01 & |NES| > 1; 3: top 3 pathways (sorted by NES)
+  gsea.database = "Bader",           # Options: 'Reactome', 'GO', 'Bader'
+  gsea.ontology = c("BP"),           # Options: "BP", "MF", "CC"
+  gsea.n.workers = 12,               # Numeric [1,n.available.cores]
+  
+  # Variance decomposition parameters ##########################################
+  vd.n.workers = 20,                 # Numeric [1,n.available.cores]
+  vd.covariates = c("seurat_clusters", "percent.mt", "bc", "Phase", "seq.coverage"),
+  vd.interactions = c("bc:seurat_clusters"),
+  
+  # General parameters #########################################################
+  expression.do.hex = F              # Logical. Specify whether to generate hex UMAPs (schex package)
 )
 
-############################
+```
 
-# CORRELATION SETTINGS
-  cor.method <- "spearman" # rho_p, spearman, pearson
-correlation.settings <- list(
-  which.data = "data",                     # ONLY USE 'DATA'. which data used as input for correlations; options: 'data' or 'scale'
-  check.existing = T,                        # check if correlation matrix was precomputed (M27)
-  recompute.existing.if.query.missing = T   # if pre-computed corr matrix exists, but query is missing, recompute?
-)
+```{r assertions, include = FALSE}
 
-############################
-# Miscillaneus settings
+# check if all parameters specified
+expected.parameters <- c('general.cluster.resolution', 'general.subsample.factor', 'general.subset', 'general.species', 'general.clean.clusters', 'general.save.pdf', 'general.print.inline', 'general.barcode.recode', 'cor.method', 'cor.top.n', 'cor.which.data', 'cor.check.existing', 'cor.recompute.existing.if.query.missing', 'gsea.top.n', 'gsea.threshold', 'gsea.database', 'gsea.ontology', 'gsea.n.workers', 'vd.n.workers', 'vd.covariates', 'vd.interactions', 'expression.do.hex')
 
-# cluster resolution
-cluster.resolution <- 0.5
+which.parameters.missing <- names(parameter.list)[!(names(parameter.list) %in% expected.parameters)]
+if (length(which.parameters.missing) > 0){
+  stop(paste0(paste(which.parameters.missing, collapse = ", "), " parameters are not specified."))
+}
 
-# specify subgroup provided in M00_subgroups.csv; subgroup <- "no.subgroup" to include all data
-subset.df <- "no.subset"
-# subset.df <- data.frame(field = "Barcode", subgroups = "C68")
-
-which.species <- "Hs" # Option: Mm or Hs
-
-# input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
-# input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
-# input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
-# input.file <- "M01_NM2_R1_test_300720.Rdata"
-# input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
-# input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
-# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
-# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
-# input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
-# input.file <- "Module1_p7_mesoderm_110620.Rdata"
-# input.file <- "Module1_m27_p7_mesoderm_070420.Rdata"
-# input.file <- "Module1_p7_mesoderm_update_170620.Rdata"
-# input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
-# input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
-input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
-
-# print figures inline
-print.inline <- F
-
-# n workers
-n.workers <- list(
-  gsea = 12
-)
-
-# save PDF
-save.pdf <- T
-
-# downsample factor
-subsample_factor <- 1
+# ensure all input specifications are met. 
+stopifnot(is.numeric(parameter.list$general.cluster.resolution))
+stopifnot(parameter.list$general.cluster.resolution > 0)
+stopifnot(is.numeric(parameter.list$general.subsample.factor))
+stopifnot(parameter.list$general.subsample.factor > 0)
+stopifnot(parameter.list$general.subsample.factor <=  1)
+stopifnot(("data.frame" %in% class(parameter.list$general.subset)) || parameter.list$general.subset == "no.subset")
+stopifnot(parameter.list$general.species %in% c("Mm", "Hs"))
+stopifnot(class(parameter.list$general.clean.clusters) == "logical")
+stopifnot(class(parameter.list$general.save.pdf) == "logical")
+stopifnot((class(parameter.list$general.barcode.recode)) == "list")
+stopifnot(parameter.list$cor.method %in% c('pearson', 'spearman', 'rho_p'))
+stopifnot(is.numeric(parameter.list$cor.top.n))
+stopifnot(parameter.list$cor.top.n > 0)
+stopifnot(parameter.list$cor.which.data == "data")
+stopifnot(class(parameter.list$cor.check.existing) == "logical")
+stopifnot(class(parameter.list$cor.recompute.existing.if.query.missing) == "logical")
+stopifnot(is.numeric(parameter.list$gsea.top.n))
+stopifnot(parameter.list$gsea.top.n > 0)
+stopifnot(parameter.list$gsea.threshold %in% c(1,2,3))
+stopifnot(parameter.list$gsea.database %in% c("Bader", "GO", "Reactome"))
+stopifnot(parameter.list$gsea.ontology %in% c("BP", "MF", "CC"))
+stopifnot(is.numeric(parameter.list$gsea.n.workers))
+stopifnot(parameter.list$gsea.n.workers > 0)
+stopifnot(parameter.list$gsea.n.workers <= parallel::detectCores())
+stopifnot(is.numeric(parameter.list$vd.n.workers))
+stopifnot(parameter.list$vd.n.workers > 0)
+stopifnot(parameter.list$vd.n.workers <= parallel::detectCores())
+stopifnot(class(parameter.list$expression.do.hex) == "logical")
 
 
 ```
 
-```{r import appropriate csv files}
+
+```{r import appropriate csv files, include = FALSE}
 
 if (which.input$query_input_format==1){
   gene.sets.type1 <- read.csv("M09_type1_queries.csv", header = TRUE, stringsAsFactors = F)
@@ -165,9 +198,9 @@ if (which.input$query_input_format==1){
 
 ```
 
-```{r}
+```{r meta module helper function, include = FALSE}
+
 meta.module.helper <- function(do.module, default.set){
-  
   if (is.na(do.module)){
     return(default.set)
   } else if (do.module == TRUE) {
@@ -175,12 +208,12 @@ meta.module.helper <- function(do.module, default.set){
   } else if (do.module == FALSE) {
     return(F)
   }
-  
 }
+
 ```
 
 
-```{r input subtype data specification}
+```{r input subtype data specification, include = FALSE}
 
 which.gene.set <- as.character(which.input$which.gene.set)
 
@@ -203,7 +236,7 @@ if (which.input$query_input_format==0){
 } else if (which.input$query_input_format==5){
   stopifnot(which.gene.set %in% gene.sets.type5$term)
   markers_of_interest <- id2geneset(gene.sets.type5$id[gene.sets.type5$term %in% which.gene.set ], 
-                                    my.species = which.species) # REQUIRED if query_input_format == 1
+                                    my.species = parameter.list$general.species) # REQUIRED if query_input_format == 1
    markers_of_interest <- as.data.frame(unique(markers_of_interest))
    colnames(markers_of_interest) <- which.gene.set
    
@@ -221,14 +254,14 @@ if (exists("markers_of_interest") && "data.frame" %in% class(markers_of_interest
 }
 
 # annotation specifications
-which.annotation.db <- which.results$annotation.db
-which.ontology <- which.results$ontology
+which.annotation.db <- parameter.list$gsea.database
+which.ontology <- parameter.list$gsea.ontology
 
 
 ```
 
 
-```{r load data, warning = FALSE}
+```{r load data, warning = FALSE, include = FALSE}
 
 # Specify data directories
 dir.preprocessed <- "Preprocessed_Datasets/"
@@ -238,29 +271,20 @@ if (!exists("data.path") & !exists("user")) {
 }
 
 # load data
-warning("Importing data...")
+message("Importing data...")
 if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
 load(paste(data.path, dir.preprocessed, input.file, sep = ""))
 
 
 if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 
-if (!(exists("subset.df"))) subset.df <- "no.subset"
-
-# prep seurat object
-# prep.list <- prepSeurat2(so, e2s = gNames.list, 
-#                              species = which.species, resolution= cluster.resolution, subset.data = subset.df, 
-#                              subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
-#                              terms2drop = c("ica", "tsne", "nmf", "gsva", "deg"), rmv.pattern = "so", 
-#                          scale.reprocessed = T, neighbors.reprocessed = F, keep.default.assay.only = T)
-
-
 t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "integration.anchors")
 
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
-                         species = which.species, resolution= cluster.resolution, subset.data = subset.df, 
-                         subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
+                         species = parameter.list$general.species, resolution= parameter.list$general.cluster.resolution, 
+                         subset.data =  parameter.list$general.subset, 
+                         subsample = parameter.list$general.subsample.factor, M00_subgroup.path = "M00_subgroups.csv",
                          terms2drop = t2d, rmv.pattern = "so", keep.default.assay.only = T)
 
 
@@ -272,18 +296,42 @@ n.cells <- prep.list$n.cell
 rm(prep.list)
 invisible({gc()})
 
+# clean clusters
+if (parameter.list$general.clean.clusters) so.query <- cleanCluster(so.query, return.plots = F)
+
+```
+
+```{r recode barcodes, include = FALSE}
+
+# recode barcodes ##############################################################
+bc.list <- parameter.list$general.barcode.recode
+
+df.meta <- so.query@meta.data
+if (length(bc.list) == 0){
+  df.meta$bc <- df.meta$Barcode
+} else {
+  df.meta$bc <- NA
+  for (i in 1:length(bc.list)){
+    df.meta$bc[grepl(bc.list[[i]], df.meta$Barcode)] <- names(bc.list)[i]
+  }
+  df.meta$bc[is.na(df.meta$bc)] <- "Other"
+}
+so.query@meta.data <- df.meta
+
+
 ```
 
 
 
-```{r prepare query gene list (input type 1 or 2), message=FALSE, warning=FALSE}
+```{r prepare query gene list (input type 1 or 2), message=FALSE, warning=FALSE, include = FALSE}
 
+message("Preparing geneset(s)...")
 
 # import marker sets
 if (which.input$query_input_format == 1){
   output.markers  <- m9.importMarkers(query.format = which.input$query_input_format, 
                                       markers.of.interest = markers_of_interest,
-                                      which.species = which.species)
+                                      which.species = parameter.list$general.species)
 } else if (which.input$query_input_format == 2){
   
   if (meta.module.flag){
@@ -296,12 +344,12 @@ if (which.input$query_input_format == 1){
   output.markers  <- m9.importMarkers(query.format = which.input$query_input_format, 
                                       input.file = input_file, 
                                       which.col = which.col,
-                                      which.species = which.species)
+                                      which.species = parameter.list$general.species)
 } else if (which.input$query_input_format == 0){
   
-  if (which.species == "Hs") {
+  if (parameter.list$general.species == "Hs") {
     markers_of_interest <- toupper(markers_of_interest)
-  } else if (which.species == "Mm") {
+  } else if (parameter.list$general.species == "Mm") {
     markers_of_interest <- firstup(markers_of_interest)
   }
 }
@@ -312,7 +360,7 @@ if (exists("output.markers")) markers_of_interest <- output.markers[[1]]
 ```
 
 
-```{r prior log history, warning = FALSE}
+```{r prior log history, warning = FALSE, include = FALSE}
 # get prior log history
 cur.env <- objects()
 module.logs <- cur.env[grep("^df.log_Module",cur.env)]
@@ -321,7 +369,7 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 
 
 
-```{r define grouping var, warning = FALSE}
+```{r define grouping var, warning = FALSE, include = FALSE}
 
 # group by options:
 #   1: clusters ID (seurat_clusters)
@@ -329,7 +377,7 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 #   3: Groups (in vivo)
 group.by <- 1
 
-# specift grouping variable
+# specify grouping variable
 if (group.by == 1){
   grouping_var <- "seurat_clusters"
   group_name <- "Clusters"
@@ -350,54 +398,56 @@ n_group_members <- length(u_groups)
 
 
 
-```{r analysis log, warning = FALSE}
+```{r analysis log, warning = FALSE, include = FALSE}
 
+message("Updating analysis logs...")
 df.log <- initiateLog("9, Query Marker Exploration")
 
 df.log <- addLogEntry("Query File", input.file, df.log, "input.file")
 df.log <- addLogEntry("Gene Set Name", which.gene.set, df.log, "which.gene.set")
 df.log <- addLogEntry("Compute geneset module score", meta.module.flag, df.log, "meta.module.flag")
-df.log <- addLogEntry("Species", which.species, df.log, "which.species")
+df.log <- addLogEntry("Species", parameter.list$general.species, df.log, "general.species")
 
-if (exists("subset.df")){
-  if ("data.frame" %in% class(subset.df)){
-    df.log <- addLogEntry("Which Subset Field", subset.df$field, df.log, "field")
-    df.log <- addLogEntry("Which Subset Groups", subset.df$subgroups, df.log, "subgroups")    
-  } else if ("character" %in% class(subset.df)){
-    df.log <- addLogEntry("Which Subset Groups", subset.df, df.log, "subset.df")    
-  }
+if ("data.frame" %in% class(parameter.list$general.subset)){
+  df.log <- addLogEntry("Which Subset Field", parameter.list$general.subset$field, df.log, "field")
+  df.log <- addLogEntry("Which Subset Groups", parameter.list$general.subset$subgroups, df.log, "subgroups")    
+} else if ("character" %in% class(parameter.list$general.subset)){
+  df.log <- addLogEntry("Which Subset Groups", parameter.list$general.subset, df.log, "subset.df")    
 }
 
-df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
+df.log <- addLogEntry("Clusters cleaned", parameter.list$general.clean.clusters, df.log, "general.clean.clusters")
+df.log <- addLogEntry("Cluster Resolution", parameter.list$general.cluster.resolution, df.log, "general.cluster.resolution")
 df.log <- addLogEntry("Grouping Variable", group_name, df.log, "group_name")
 df.log <- addLogEntry("N Groups", n_group_members, df.log, "n_group_members")
-df.log <- addLogEntry("Top N UMAPs", which.results$umap.top.n, df.log, "umap.top.n")
-df.log <- addLogEntry("Top N GSEA", which.results$gsea.top.n, df.log, "gsea.top.n")
-df.log <- addLogEntry("Top N correlations", which.results$corr.top.n, df.log, "corr.top.n")
-df.log <- addLogEntry("Annotation DB", which.results$annotation.db, df.log, "annotation.db")
-df.log <- addLogEntry("subsample_factor", subsample_factor, df.log, "subsample_factor")
-if (which.results$annotation.db == "GO"){
-  df.log <- addLogEntry("GO ontology", which.results$ontology, df.log, "ontology")
+df.log <- addLogEntry("Top N GSEA", parameter.list$gsea.top.n, df.log, "gsea.top.n")
+df.log <- addLogEntry("Top N correlations", parameter.list$corr.top.n, df.log, "corr.top.n")
+df.log <- addLogEntry("Annotation database", parameter.list$gsea.database, df.log, "gsea.database")
+df.log <- addLogEntry("subsample_factor", parameter.list$general.subsample.factor, df.log, "general.subsample.factor")
+if (parameter.list$gsea.database == "GO"){
+  df.log <- addLogEntry("GO ontology", parameter.list$gsea.ontology, df.log, "gsea.ontology")
 }
-df.log <- addLogEntry("schex used for UMAPs", which.results$do.hex, df.log, "do.hex")
-df.log <- addLogEntry("PDF saved", save.pdf, df.log, "save.pdf")
-if (which.results$gsea.threshold == 1){
+df.log <- addLogEntry("schex used for UMAPs", parameter.list$expression.do.hex, df.log, "expression.do.hex")
+df.log <- addLogEntry("PDF saved", parameter.list$general.save.pdf, df.log, "general.save.pdf")
+if (parameter.list$gsea.threshold == 1){
   df.log <- addLogEntry("GSEA threshold", "padj<0.1" , df.log, "gsea.threshold")
-} else if (which.results$gsea.threshold == 2) {
+} else if (parameter.list$gsea.threshold == 2) {
   df.log <- addLogEntry("GSEA threshold", "p<0.05 & |NES| > 1" , df.log, "gsea.threshold")
-} else if (which.results$gsea.threshold == 3) {
+} else if (parameter.list$gsea.threshold == 3) {
   df.log <- addLogEntry("GSEA threshold", "top 3 (sorted by NES)" , df.log, "gsea.threshold")
 }
 
-df.log <- addLogEntry("correlation data", correlation.settings$which.data , df.log, "which.data")
-df.log <- addLogEntry("Check for precomputed corr mat", correlation.settings$check.existing , df.log, "check.existing")
-df.log <- addLogEntry("corr mat recomputed if query missing", correlation.settings$recompute.existing.if.query.missing , df.log, "recompute.existing.if.query.missing")
+df.log <- addLogEntry("Variance Decomposition, Covariates", parameter.list$vd.covariates , df.log, "vd_covariates")
+df.log <- addLogEntry("Variance Decomposition, Interactions", parameter.list$vd.interactions , df.log, "vd.interactions")
+
+df.log <- addLogEntry("correlation data", parameter.list$cor.which.data , df.log, "cor.which.data")
+df.log <- addLogEntry("Check for precomputed corr mat", parameter.list$cor.check.existing , df.log, "cor.check.existing")
+df.log <- addLogEntry("corr mat recomputed if query missing", parameter.list$cor.recompute.existing.if.query.missing , df.log, "cor.recompute.existing.if.query.missing")
 
 
 ```
 
 
-```{r keep available markers, warning = FALSE}
+```{r keep available markers, warning = FALSE, include = FALSE}
 
 if (exists("markers_of_interest")){
   if (is.character(markers_of_interest)){
@@ -417,10 +467,10 @@ if (exists("markers_of_interest")){
 
 
 
-```{r TYPE3 - prepare query gene list, warning = FALSE}
+```{r TYPE3 - prepare query gene list, warning = FALSE, include = FALSE}
 
 if (which.input$query_input_format == 3){
-  
+  message("Running differential gene analysis...")
   orig.ident <-  Idents(so.query) 
   Idents(so.query) <- grouping_var
   deg.gene <- FindAllMarkers(so.query, 
@@ -439,7 +489,7 @@ if (which.input$query_input_format == 3){
 ```
 
 
-```{r TYPE3 - reformat DEG, warning = FALSE}
+```{r TYPE3 - reformat DEG, warning = FALSE, include = FALSE}
 
 if (which.input$query_input_format == 3){
   
@@ -498,8 +548,9 @@ if (which.input$query_input_format == 3){
 
 
 
-```{r umap by cluster, warning = FALSE}
+```{r umap by cluster, warning = FALSE, include = FALSE}
 
+message("Generating UMAP plots...")
 # get GGplot handle for cluster umap
 plt.umap_by_cluster <- DimPlot(so.query, reduction = "umap", group.by = "seurat_clusters", label = TRUE)  + 
   labs(title = "UMAP", subtitle = "Stratified by Clusters") + 
@@ -509,7 +560,7 @@ plt.umap_by_barcode <- DimPlot(so.query, reduction = "umap", group.by = "Barcode
   labs(title = "UMAP", subtitle = "Stratified by Barcodes") + 
   xlab("UMAP 1") + ylab("UMAP 2") + theme_miko(legend = T)
 
-if (print.inline) plt.umap_by_cluster
+if (parameter.list$general.print.inline) plt.umap_by_cluster
 
 ```
 
@@ -519,6 +570,7 @@ if (print.inline) plt.umap_by_cluster
 
 if(!exists("moi.df")) moi.df <- (markers_of_interest)
 if (meta.module.flag == T){
+  message("Computing modular activity...")
   
   gNames <- gNames.list
   plt.clustermarkers_by_umap <- list()
@@ -536,7 +588,7 @@ if (meta.module.flag == T){
     
     # clean dataset and include only those available in seurat object
     cur.features <- as.character(moi.df[,i][moi.df[,i] != ""])
-    cur.features <- cleanFilterGenes(cur.features, so.query, which.species)
+    cur.features <- cleanFilterGenes(cur.features, so.query, parameter.list$general.species)
     
     if (length(cur.features) == 0) next
     
@@ -574,11 +626,6 @@ if (meta.module.flag == T){
   colnames(exp.mat.new.mat.t) <- colnames(exp.mat.1)
   exp.mat.1 <- rbind(exp.mat.1, exp.mat.new.mat.t)
   so.query@assays[[DefaultAssay(so.query)]]@data <- exp.mat.1
-  
-  # exp.mat.2 <-so.query@assays[[DefaultAssay(so.query)]]@scale.data
-  # colnames(exp.mat.new.mat.t) <- colnames(exp.mat.2)
-  # exp.mat.2 <- rbind(exp.mat.2, exp.mat.new.mat.t)
-  # so.query@assays[[DefaultAssay(so.query)]]@scale.data <- exp.mat.2
   markers_of_interest <- available_markers[!is.na(available_markers)]
   
 }
@@ -588,9 +635,9 @@ if (exists("so.query.try")) rm("so.query.try")
 
 
 
-```{r bin cells, warning = FALSE}
+```{r bin cells, warning = FALSE, include = FALSE}
 
-if (which.results$do.hex){
+if (parameter.list$expression.do.hex){
   
   n.cells <- ncol(so.query)
   cells.per.bin <- 30
@@ -607,15 +654,15 @@ if (which.results$do.hex){
 ```
 
 
-```{r umap expression plots, message=FALSE, warning=FALSE}
+```{r umap expression plots, message=FALSE, warning=FALSE, include = FALSE}
 
 # initialize variables
-# plt.clustermarkers_by_umap <- list()
 plt.umap.1 <- list()
 plt.umap.2 <- list()
 gNames <- gNames.list
 available_markers <- c()
 
+message("UMAP expression plots...")
 # check if point size adjustment is necessary
 if (ncol(so.query)> 50000) {
   aps <- F
@@ -654,14 +701,14 @@ for (i in c(1:(length(markers_of_interest)))) {
   } else {
     cur.marker <-  speciesConvert(markers_of_interest[i], 
                                   rownames(so.query@assays[[DefaultAssay(so.query)]]@data), 
-                                  which.species)
+                                  parameter.list$general.species)
   }
   
   markers_of_interest[i] <- cur.marker
   
   if (!is.na(cur.marker)){
     
-    if ((which.results$do.hex)){
+    if (parameter.list$expression.do.hex){
       all_plts[[length(all_plts)+1]] <- schex::plot_hexbin_feature(so.query, feature=cur.marker, 
                                                                    action="mean", xlab="UMAP1", ylab="UMAP2", 
                                                                    title=cur.marker,
@@ -669,36 +716,58 @@ for (i in c(1:(length(markers_of_interest)))) {
                                                                    type = "data")
     } else {
 
-      # all_plts[[length(all_plts)+1]] <- scExpression.UMAP(
-      # so.query,
-      # cur.marker,
-      # x.label = "UMAP 1",
-      # y.label = "",
-      # plot.name = NULL,
-      # adjust.pt.size = aps) +
-      # theme_miko(legend = T) +
-      # viridis::scale_color_viridis(option = "A") +
-      # labs(title = "", subtitle =cur.marker)
-
-      all_plts[[length(all_plts)+1]] <- Nebulosa::plot_density(
-        object = so.query,
-        features = cur.marker,
-        slot = "data",
-        joint = FALSE,
-        reduction = "umap",
-        dims = c(1, 2),
-        method = c("ks", "wkde"),
-        adjust = 1,
-        size = pt.size,
-        shape = 16,
-        combine = TRUE,
-        pal = "inferno"
-      )  +
-      theme_miko(legend = T) +
-      viridis::scale_color_viridis(option = "A") +
-      labs(title = "", subtitle =cur.marker)
-      
-      
+      # only use nebulosa for single gene expression profiles.
+      if (meta.module.flag){
+        all_plts[[length(all_plts)+1]] <- scExpression.UMAP(
+          so.query,
+          cur.marker,
+          x.label = "UMAP 1",
+          y.label = "",
+          plot.name = NULL,
+          adjust.pt.size = aps) +
+          theme_miko(legend = T) +
+          viridis::scale_color_viridis(option = "A") +
+          labs(title = "", subtitle =cur.marker)
+      } else {
+        
+        is.success.plot <- F
+        try({
+          all_plts[[length(all_plts)+1]] <- Nebulosa::plot_density(
+            object = so.query,
+            features = cur.marker,
+            slot = "data",
+            joint = FALSE,
+            reduction = "umap",
+            dims = c(1, 2),
+            method = c("ks", "wkde"),
+            adjust = 1,
+            size = pt.size,
+            shape = 16,
+            combine = TRUE,
+            pal = "inferno"
+          )  +
+            theme_miko(legend = T) +
+            viridis::scale_color_viridis(option = "A") +
+            labs(title = "", subtitle =cur.marker)  
+          
+          is.success.plot <- T
+        }, silent = T)
+        
+        
+        if (!is.success.plot){
+          all_plts[[length(all_plts)+1]] <- scExpression.UMAP(
+            so.query,
+            cur.marker,
+            x.label = "UMAP 1",
+            y.label = "",
+            plot.name = NULL,
+            adjust.pt.size = aps) +
+            theme_miko(legend = T) +
+            viridis::scale_color_viridis(option = "A") +
+            labs(title = "", subtitle =cur.marker)
+        }
+        
+      }
     }
     
   }
@@ -710,7 +779,7 @@ for (i in c(1:(length(markers_of_interest)))) {
     plt.umap.2[[current.ind]] <- all_plts[[2]]
     available_markers[length(available_markers)+1] <- markers_of_interest[i]
     
-    if (print.inline) print((CombinePlots(all_plts, ncol = length(all_plts), legend = 'none')))
+    if (parameter.list$general.print.inline) print((CombinePlots(all_plts, ncol = length(all_plts), legend = 'none')))
   }
 }
 
@@ -722,435 +791,37 @@ names(plt.umap.1) <- names(plt.umap.2) <- available_markers
 
 ```
 
+```{r remove genes with zero variance}
 
-```{r DEG query genes, warning = FALSE}
+message("Omitting zero variance genes...")
 
-# run DEG analysis
-orig.ident <-  Idents(so.query) 
-Idents(so.query) <- grouping_var
-all.markers <- FindAllMarkers(object = so.query,  features = available_markers, 
-                              logfc.threshold = 0, min.pct = 0, return.thresh = 1)
-Idents(so.query) <- orig.ident
-
-if (nrow(all.markers) > 0){
-  all.markers[, c("p_val", "avg_log2FC", "p_val_adj")] <- signif(all.markers[, c("p_val", "avg_log2FC", "p_val_adj")], 3)
-  
-  # get top DEGS
-  if (!is.na(which.results$umap.top.n)){
-    all.markers.sig <- all.markers %>% dplyr::top_n(which.results$umap.top.n, -log1p(p_val))
-  } else {
-    all.markers.sig <- all.markers
+v.mat <- so.query@assays[[DefaultAssay(so.query)]]@data
+v.mat <- v.mat[rownames(v.mat) %in% available_markers, ]
+# check if all genes have variance
+if( ! is(v.mat, "sparseMatrix")){
+  # check if values are NA
+  countNA = sum(is.nan(v.mat)) + sum(!is.finite(v.mat))
+  if( countNA > 0 ){
+    stop("There are ", countNA, " NA/NaN/Inf values in exprObj\nMissing data is not allowed")
   }
   
-  u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
-  if (length(u.clust) == 2){
-    all.markers.sig <- all.markers.sig[!duplicated(all.markers.sig$gene), ]
-    all.markers <- all.markers[!duplicated(all.markers$gene), ]
+  rv = apply(v.mat, 1, var)
+}else{
+  rv = c()
+  for( i in seq_len(nrow(v.mat)) ){
+    rv[i] = var(v.mat[i,])
   }
-  
-  if (print.inline) all.markers.sig
-} else {
-  all.markers.sig <- NULL
+}
+if( any( rv == 0) ){
+  omit.which = rownames(v.mat)[which(rv == 0)]
+  available_markers <- available_markers[!(available_markers %in% omit.which)]
 }
 
-
 ```
-
-```{r UMAP deg genes, warning = FALSE}
-
-if (!is.na(which.results$umap.top.n)){
-  top.markers <- all.markers %>% top_n(which.results$umap.top.n, -log10(p_val))
-  which.match <- available_markers %in% top.markers$gene
-  plt.umap.1 <- plt.umap.1[which.match]
-  plt.umap.2 <- plt.umap.2[which.match]
-} 
-
-```
-
-
-```{r}
-# 
-# getExpressionMatrix.dev <- function(so, only.variable = F, which.assay = NULL, which.data = "scale", use.additional.genes = NA, as.dense = F){
-# 
-#   # specify assay
-#   if (is.null(which.assay)) which.assay <- DefaultAssay(so)
-# 
-#   # get complete matrix
-#   if (which.data == "scale"){
-#     exp.mat.complete <- so@assays[[which.assay]]@scale.data
-#   } else if (which.data == "data"){
-#     if (as.dense){
-#       exp.mat.complete <- as.matrix(so@assays[[which.assay]]@data)
-#     } else {
-#       exp.mat.complete <- (so@assays[[which.assay]]@data)
-#     }
-# 
-#   }
-# 
-# 
-#   if (only.variable){
-#     var.feat <-  VariableFeatures(so)
-#     if (length(var.feat) == 0){
-#       if (which.assay == "SCT"){
-#         if ("integrated" %in% names(so@assays)){
-#           var.feat <-  so@assays[["integrated"]]@var.features
-#         } else {
-#           var.feat <-  so@assays[["SCT"]]@var.features
-#         }
-#       } else {
-#         stop("Could not find variable features in Seurat Object. ")
-#       }
-#     }
-# 
-#     exp.mat <- exp.mat.complete[rownames(exp.mat.complete) %in% var.feat, ]
-#   } else {
-#     exp.mat <- exp.mat.complete
-#   }
-# 
-# 
-#   if (!is.na(use.additional.genes)){
-#     which.missing <- which(!(use.additional.genes %in% rownames(exp.mat)))
-#     missing.additional.genes <- (use.additional.genes)[which.missing]
-#     exp.mat.additional <- exp.mat.complete[rownames(exp.mat.complete) %in% missing.additional.genes, ]
-#     exp.mat <- rbind(exp.mat, exp.mat.additional)
-#   }
-# 
-#   return(exp.mat)
-# }
-
-
-```
-
-
-```{r}
-# 
-# expression.Plot.dev <- function(so, which.gene, e.mat = NULL, f.mat = NULL,
-#                             which.group = "seurat_clusters", which.data = "data", which.assay = DefaultAssay(so),
-#                             x.label = NULL, x.label.angle = NULL){
-# 
-#   # get expression data
-#   if (is.null(e.mat)){
-#     em <- getExpressionMatrix(
-#       so,
-#       only.variable = F,
-#       which.assay = which.assay,
-#       which.data = which.data,
-#       use.additional.genes = NA
-#     )
-#   } else {
-#     em <- e.mat
-#   }
-# 
-#   # get fraction of expressing cells
-#   if (is.null(f.mat)){
-#     em.frac <- avgGroupExpression(
-#       so,
-#       which.data = "data",
-#       which.center = "fraction",
-#       which.group = which.group
-#     )
-#   } else {
-#     em.frac <- f.mat
-#   }
-# 
-#   if ("genes" %in% colnames(em)){
-#     rownames(em) <- em$genes
-#     em <- em %>% dplyr::select(-c("genes"))
-#   }
-#   if ("genes" %in% colnames(em.frac)){
-#     rownames(em.frac) <- em.frac$genes
-#     em.frac <- em.frac %>% dplyr::select(-c("genes"))
-#   }
-# 
-#   # get meta data
-#   so.meta <- so@meta.data
-# 
-#   # ensure grouping variable exists
-#   if (!(which.group) %in% colnames(so.meta)) stop("Grouping variable does not exist.")
-# 
-#   # merge datasets
-#   if (sum(rownames(em) %in% (which.gene)) != 1) stop("More than one gene matched query. Cannot continue.")
-#   df.meta <- data.frame(id = rownames(so.meta), group = so.meta[,which.group])
-#   em.mark <- as.data.frame(em[(rownames(em)) %in% (which.gene), ])
-#   em.df <- data.frame(id = rownames(em.mark), query = em.mark[,1])
-#   em.merge <- merge(em.df, df.meta, by = "id")
-# 
-#   # get summary statistics (for clustering)
-#   suppressMessages({em.sum <- em.merge %>%
-#     dplyr::group_by(group) %>%
-#     dplyr::summarise(x.mean = (mean((query), na.rm = T)),
-#                      x.sd = sd(query, na.rm = T))})
-#   em.frac.mark <- as.data.frame(em.frac[(rownames(em.frac)) %in% (which.gene), ])
-#   if (rownames(em.frac.mark) %in% which.gene) em.frac.mark <-as.data.frame(t(em.frac.mark))
-#   colnames(em.frac.mark) <- which.gene
-#   em.frac.mark.df <- data.frame(group = rownames(em.frac.mark), frac = em.frac.mark[,1])
-# 
-#   if (which.group == "seurat_clusters") em.frac.mark.df$group <- gsub("c", "", em.frac.mark.df$group)
-#   em.sum <- merge(em.sum, em.frac.mark.df, by = "group")
-# 
-#   # hierarchial clustering
-#   row.names.df <- em.sum$group
-#   em.sum <- em.sum %>% dplyr::select(-c("group"))
-#   clust.var <- as.matrix(em.sum)
-#   rownames(clust.var) <- row.names.df
-#   d <- dist(as.matrix(clust.var))   # find distance matrix
-# 
-#   clust.success <- F
-#   try({
-#     hc <- hclust(d)                # apply hirarchical clustering
-#     clust.success <- T
-#   }, silent = T)
-# 
-# 
-#   if (is.null(x.label)) x.label <- which.group
-# 
-#   if (clust.success){
-#     # helper function for creating dendograms
-#     ggdend.v2 <- function(df) {
-#       ggplot() +
-#         geom_segment(data = df, aes(x=x, y=y, xend=xend, yend=yend)) +
-#         ggdendro::theme_dendro()
-#     }
-# 
-#     # get dendromgram data from heat object
-#     d.query.clust <- ggdendro::dendro_data(hc)
-# 
-#     # ggplot dendograms
-#     p.query.clust <- ggdend.v2(d.query.clust$segments) +
-#       ggtitle(paste0(which.gene, " Expression")) +
-#       theme(axis.title.x=element_blank(),
-#             axis.text=element_blank(),
-#             axis.line=element_blank(),
-#             axis.ticks=element_blank(),
-#             legend.position = "none")
-# 
-#     # reorder data according to clusters
-#     em.merge$group <- factor(as.character(em.merge$group), levels = (d.query.clust[["labels"]][["label"]]))
-# 
-#     max.query <- max(em.merge$query, na.rm = T)
-#     em.merge$query.norm <- rescaleValues(values = em.merge$query, new.min = 0, new.max = 1)
-#     
-#     suppressMessages({em.merge.sum <- em.merge %>%
-#       group_by(group) %>%
-#       summarize(ef = mean(query > 0),
-#                 ev = mean(query.norm, na.rm = T))})
-#     
-#     
-#     plt.em <- ggplot() +
-#       geom_bar(data = em.merge.sum, aes(x = group, y = ef, fill = group), stat = "identity", alpha = 0.5) +
-#       coord_cartesian(ylim = c(0, 1)) +
-#       geom_violin(data = em.merge, aes(x = group, y = query.norm, fill = group)) +
-#       geom_point(data = em.merge.sum, aes(x = group, y = (ev), fill = group)) +
-#       theme_miko() +
-#       xlab(x.label)  +
-#       scale_y_continuous(sec.axis = sec_axis(~., name = "Normalized Expression (violin)"), name = "Expressing Fraction (bar)") +
-#       theme(plot.margin = unit(c(0, 1, 0, 1), "cm"),
-#             legend.position = "none")
-# 
-#     if (!is.null(x.label.angle) && is.numeric(x.label.angle)){
-#       plt.em <- plt.em + theme(axis.text.x = element_text(angle = x.label.angle, hjust = 1))
-#     }
-# 
-#     # combine plots
-#     plt.sgExp <-  cowplot::plot_grid(p.query.clust, plt.em, ncol = 1, align = "v", rel_heights = c(1,3))
-# 
-#   } else {
-# 
-#     max.query <- max(em.merge$query, na.rm = T)
-#     em.merge.sum <- em.merge %>%
-#       group_by(group) %>%
-#       summarize(ef = mean(query > 0),
-#                 ev = mean(query, na.rm = T))
-#     plt.sgExp <- ggplot() +
-#       geom_bar(data = em.merge.sum, aes(x = group, y = ef, fill = group), stat = "identity", alpha = 0.5) +
-#       coord_cartesian(ylim = c(0, 1)) +
-#       geom_violin(data = em.merge, aes(x = group, y = query/max.query, fill = group)) +
-#       geom_point(data = em.merge.sum, aes(x = group, y = (ev)/max.query, fill = group)) +
-#       theme_miko() +
-#       xlab(x.label)  +
-#       scale_y_continuous(sec.axis = sec_axis(~., name = "Expression (violin)"), name = "Expressing Fraction (bar)") +
-#       theme(plot.margin = unit(c(0, 1, 0, 1), "cm"),
-#             legend.position = "none")
-# 
-#     if (!is.null(x.label.angle) && is.numeric(x.label.angle)){
-#       plt.em <- plt.em + theme(axis.text.x = element_text(angle = x.label.angle, hjust = 1))
-#     }
-#   }
-# 
-#   return(plt.sgExp)
-# 
-# }
-
-
-```
-
-
-```{r}
-
-expression.Plot.dev <- function(so, which.gene, e.mat = NULL, f.mat = NULL,
-                            which.group = "seurat_clusters", which.data = "data", which.assay = DefaultAssay(so),
-                            x.label = NULL, x.label.angle = NULL){
-
-  # get expression data
-  if (is.null(e.mat)){
-    em <- getExpressionMatrix(
-      so,
-      only.variable = F,
-      which.assay = which.assay,
-      which.data = which.data,
-      use.additional.genes = NA
-    )
-  } else {
-    em <- e.mat
-  }
-
-  # get fraction of expressing cells
-  if (is.null(f.mat)){
-    em.frac <- avgGroupExpression(
-      so,
-      which.data = "data",
-      which.center = "fraction",
-      which.group = which.group
-    )
-  } else {
-    em.frac <- f.mat
-  }
-
-  if ("genes" %in% colnames(em)){
-    rownames(em) <- em$genes
-    em <- em %>% dplyr::select(-c("genes"))
-  }
-  if ("genes" %in% colnames(em.frac)){
-    rownames(em.frac) <- em.frac$genes
-    em.frac <- em.frac %>% dplyr::select(-c("genes"))
-  }
-
-  # get meta data
-  so.meta <- so@meta.data
-
-  # ensure grouping variable exists
-  if (!(which.group) %in% colnames(so.meta)) stop("Grouping variable does not exist.")
-
-  # merge datasets
-  if (sum(rownames(em) %in% (which.gene)) != 1) stop("More than one gene matched query. Cannot continue.")
-  df.meta <- data.frame(id = rownames(so.meta), group = so.meta[,which.group])
-  em.mark <- as.data.frame(em[(rownames(em)) %in% (which.gene), ])
-  em.df <- data.frame(id = rownames(em.mark), query = em.mark[,1])
-  em.merge <- merge(em.df, df.meta, by = "id")
-
-  # get summary statistics (for clustering)
-  suppressMessages({em.sum <- em.merge %>%
-    dplyr::group_by(group) %>%
-    dplyr::summarise(x.mean = (mean((query), na.rm = T)),
-                     x.sd = sd(query, na.rm = T))})
-  em.frac.mark <- as.data.frame(em.frac[(rownames(em.frac)) %in% (which.gene), ])
-  if (rownames(em.frac.mark) %in% which.gene) em.frac.mark <-as.data.frame(t(em.frac.mark))
-  colnames(em.frac.mark) <- which.gene
-  em.frac.mark.df <- data.frame(group = rownames(em.frac.mark), frac = em.frac.mark[,1])
-
-  if (which.group == "seurat_clusters") em.frac.mark.df$group <- gsub("c", "", em.frac.mark.df$group)
-  em.sum <- merge(em.sum, em.frac.mark.df, by = "group")
-
-  # hierarchial clustering
-  row.names.df <- em.sum$group
-  em.sum <- em.sum %>% dplyr::select(-c("group"))
-  clust.var <- as.matrix(em.sum)
-  rownames(clust.var) <- row.names.df
-  d <- dist(as.matrix(clust.var))   # find distance matrix
-
-  clust.success <- F
-  try({
-    hc <- hclust(d)                # apply hirarchical clustering
-    clust.success <- T
-  }, silent = T)
-
-
-  if (is.null(x.label)) x.label <- which.group
-
-  if (clust.success){
-    # helper function for creating dendograms
-    ggdend.v2 <- function(df) {
-      ggplot() +
-        geom_segment(data = df, aes(x=x, y=y, xend=xend, yend=yend)) +
-        ggdendro::theme_dendro()
-    }
-
-    # get dendromgram data from heat object
-    d.query.clust <- ggdendro::dendro_data(hc)
-
-    # ggplot dendograms
-    p.query.clust <- ggdend.v2(d.query.clust$segments) +
-      ggtitle(paste0(which.gene, " Expression")) +
-      theme(axis.title.x=element_blank(),
-            axis.text=element_blank(),
-            axis.line=element_blank(),
-            axis.ticks=element_blank(),
-            legend.position = "none")
-
-    # reorder data according to clusters
-    em.merge$group <- factor(as.character(em.merge$group), levels = (d.query.clust[["labels"]][["label"]]))
-
-    max.query <- max(em.merge$query, na.rm = T)
-    em.merge$query.norm <- rescaleValues(values = em.merge$query, new.min = 0, new.max = 1)
-
-    suppressMessages({em.merge.sum <- em.merge %>%
-      dplyr::group_by(group) %>%
-      dplyr::summarize(ef = mean(query > 0),
-                ev = mean(query.norm, na.rm = T))})
-
-
-    plt.em <- ggplot() +
-      geom_bar(data = em.merge.sum, aes(x = group, y = ef, fill = group), stat = "identity", alpha = 0.5) +
-      coord_cartesian(ylim = c(0, 1)) +
-      geom_violin(data = em.merge, aes(x = group, y = query.norm, fill = group)) +
-      geom_point(data = em.merge.sum, aes(x = group, y = (ev), fill = group)) +
-      theme_miko() +
-      xlab(x.label)  +
-      scale_y_continuous(sec.axis = sec_axis(~., name = "Normalized Expression (violin)"), name = "Expressing Fraction (bar)") +
-      theme(plot.margin = unit(c(0, 1, 0, 1), "cm"),
-            legend.position = "none")
-
-    if (!is.null(x.label.angle) && is.numeric(x.label.angle)){
-      plt.em <- plt.em + theme(axis.text.x = element_text(angle = x.label.angle, hjust = 1))
-    }
-
-    # combine plots
-    plt.sgExp <-  cowplot::plot_grid(p.query.clust, plt.em, ncol = 1, align = "v", rel_heights = c(1,3))
-
-  } else {
-
-    max.query <- max(em.merge$query, na.rm = T)
-    em.merge.sum <- em.merge %>%
-      group_by(group) %>%
-      summarize(ef = mean(query > 0),
-                ev = mean(query, na.rm = T))
-    plt.sgExp <- ggplot() +
-      geom_bar(data = em.merge.sum, aes(x = group, y = ef, fill = group), stat = "identity", alpha = 0.5) +
-      coord_cartesian(ylim = c(0, 1)) +
-      geom_violin(data = em.merge, aes(x = group, y = query/max.query, fill = group)) +
-      geom_point(data = em.merge.sum, aes(x = group, y = (ev)/max.query, fill = group)) +
-      theme_miko() +
-      xlab(x.label)  +
-      scale_y_continuous(sec.axis = sec_axis(~., name = "Expression (violin)"), name = "Expressing Fraction (bar)") +
-      theme(plot.margin = unit(c(0, 1, 0, 1), "cm"),
-            legend.position = "none")
-
-    if (!is.null(x.label.angle) && is.numeric(x.label.angle)){
-      plt.em <- plt.em + theme(axis.text.x = element_text(angle = x.label.angle, hjust = 1))
-    }
-  }
-
-  return(plt.sgExp)
-
-}
-
-
-```
-
 
 ```{r single cell expression, fig.width=10, fig.height=4, include = FALSE, warning = FALSE}
 
-
+message("Violin plots...")
 # clean up
 try({ rm(exp.mat); rm(exp.mat.2); rm(exp.mat.complete) }, silent = T)
 
@@ -1169,7 +840,7 @@ f.mat.bc <- avgGroupExpression(
   so.query,
   which.data = "data",
   which.center = "fraction",
-  which.group = "Barcode"
+  which.group = "bc"
 )
 try({rownames(f.mat.bc) <- rownames(e.mat.log)}, silent = T)
 
@@ -1185,7 +856,7 @@ for (i in 1:length(available_markers)){
   is.success <- F
   try({
     plt.sgExp.barcode <- expression.Plot(so = so.query, e.mat = e.mat.log, f.mat = f.mat.bc, 
-                                             which.gene = available_markers[i], which.group = "Barcode", which.data = "data",
+                                             which.gene = available_markers[i], which.group = "bc", which.data = "data",
                                               x.label = "Sample", x.label.angle = 25) +  
       labs(title = "", subtitle = "Samples", caption = "violin = normalized expression\ndot = expression mean\nbar = expressin fraction")  
       
@@ -1200,7 +871,7 @@ for (i in 1:length(available_markers)){
   
   plt.sgExp.all[[available_markers[i]]] <- plt.sgExp
   
-  if (print.inline){
+  if (parameter.list$general.print.inline){
     print(plt.sgExp.all[[available_markers[i]]])
   }
 }
@@ -1210,18 +881,21 @@ for (i in 1:length(available_markers)){
 ```
 
 
-```{r symbol2entrez, warning = FALSE, message = FALSE}
+```{r symbol2entrez, warning = FALSE, message = FALSE, include = FALSE}
 
 # get symbol to entrez mapping
 my.symbol <- as.vector(rownames(so.query))
-my.entrez <- sym2entrez(my.symbol, my.species = which.species )
+my.entrez <- sym2entrez(my.symbol, my.species = parameter.list$general.species )
 my.entrez <- my.entrez[complete.cases(my.entrez), ]
 
 ```
 
+
+
 ```{r get correlations, message=FALSE, warning=FALSE}
 
-which.data <- correlation.settings$which.data
+message("Computing correlations...")
+which.data <- parameter.list$cor.which.data
 stopifnot(which.data %in% c("data", "scale"))
 
 if (which.data == "data"){
@@ -1231,10 +905,10 @@ if (which.data == "data"){
 }
 
 # check for pre-computed matrix
-if (!meta.module.flag && correlation.settings$check.existing && (query.cor %in% names(so.query@misc))){
+if (!meta.module.flag && parameter.list$cor.check.existing && (query.cor %in% names(so.query@misc))){
   # get existing cor mat
   query.cor.mat <- so.query@misc[[query.cor]][["similarity.matrix"]]
-  cor.method <- so.query@misc[[query.cor]][["metric"]]
+  parameter.list$cor.method <- so.query@misc[[query.cor]][["metric"]]
   
   # check if pre-computed cor mat includes query genes
   n.query <- length(available_markers)
@@ -1246,7 +920,7 @@ if (!meta.module.flag && correlation.settings$check.existing && (query.cor %in% 
       warning("Only subset of queried features are avaialble in precomputed corr matrix")
     }
     
-    if (correlation.settings$recompute.existing.if.query.missing){
+    if (parameter.list$cor.recompute.existing.if.query.missing){
       compute.cor <- T
       query.cor.mat <- NULL
     } else {
@@ -1270,23 +944,7 @@ if (compute.cor) {
   
   n.var <- 3000 # specify number of variable genes
   if (use.var){
-    # scale down number of variable features
-    # df.meta <- so.query@assays[[current.assay]]@meta.features
-    # df.meta$genes <- rownames(df.meta)
-    # 
-    # if (current.assay == "SCT"){
-    #   df.meta <- df.meta[order(-df.meta$sct.residual_variance), ]
-    #   top.var <- df.meta$genes[1:n.var]
-    #   so.query@assays[[current.assay]]@var.features <- top.var
-    # } else if (current.assay == "RNA"){
-    #   df.meta <- df.meta[order(-df.meta$vst.variance.standardized), ]
-    #   top.var <- df.meta$genes[1:n.var]
-    #   so.query@assays[[current.assay]]@var.features <- top.var
-    # }
-    # 
-    # exp.mat <- getExpressionMatrix(so.query, only.variable = use.var,
-    #                                which.data = which.data, use.additional.genes = available_markers)
-    # e.mat <- so.query@assays[["RNA"]]@data
+
     
     is.exp <- exp.mat.complete > 0
     p.exp <- rowMeans(is.exp)
@@ -1299,7 +957,7 @@ if (compute.cor) {
   }
   
   # ensure no negative values (necessary condition for proportionality association metrics)
-  if ((min(exp.mat.complete) < 0) & (cor.method == "rho_p")) {
+  if ((min(exp.mat.complete) < 0) & (parameter.list$cor.method == "rho_p")) {
     exp.mat <- exp.mat + abs(min(exp.mat.complete))
     exp.mat.complete <- exp.mat.complete + abs(min(exp.mat.complete))
   }
@@ -1307,19 +965,8 @@ if (compute.cor) {
   df.cor.list <- NULL
   
   query.cor.list <- list()
-  
-  # if (use.var){
-  #   which.missing <- available_markers[!(available_markers %in% rownames(exp.mat) )]
-  #   if (length(which.missing) > 0){
-  #     for (i in 1:length(which.missing)){
-  #       exp.missing <- exp.mat.complete[rownames(exp.mat.complete) %in% which.missing[i], ]
-  #       exp.mat <- rbind(exp.mat, exp.missing)
-  #       rownames(exp.mat)[rownames(exp.mat) %in% "exp.missing"] <- which.missing[i]
-  #     }      
-  #   }
-  # } else {
+
     which.missing <- c()
-  # }
   
   if (which.data == "data"){
     t.exp.mat <- scMiko::sparse2dense(exp.mat, block.size = 10000, transpose = T)    
@@ -1327,15 +974,15 @@ if (compute.cor) {
     t.exp.mat <- t(exp.mat)
   }
   
-  if (cor.method == "rho_p"){
+  if (parameter.list$cor.method == "rho_p"){
     query.cor.object <-  propr::perb(t.exp.mat, select = colnames(t.exp.mat))
     query.cor.mat <- query.cor.object@matrix
-  } else if (cor.method == "spearman"){
+  } else if (parameter.list$cor.method == "spearman"){
     
     exp.map.av <- t.exp.mat[ , toupper(colnames(t.exp.mat)) %in% toupper(available_markers)]
     query.cor.mat <-  cor(t.exp.mat, exp.map.av, method = "spearman")
-    # query.cor.mat <-  dismay::dismay(t.exp.mat, metric = cor.method)
-  } else if (cor.method == "pearson"){
+    # query.cor.mat <-  dismay::dismay(t.exp.mat, metric = parameter.list$cor.method)
+  } else if (parameter.list$cor.method == "pearson"){
     exp.map.av <- t.exp.mat[ , colnames(t.exp.mat) %in% available_markers]
     query.cor.mat <-  cor(t.exp.mat, exp.map.av)    
   }
@@ -1364,8 +1011,77 @@ df.cor.list <- df.cor.list[ ,c("genes", which.available.markers)]
 ```
 
 
+```{r Variance Decomposition}
+
+message("Performing variance decomposition...")
+
+# prep covariate list ##########################################################
+vd_covariates <- parameter.list$vd.covariates
+vd_interactions <- parameter.list$vd.interactions
+
+# sequence coverage correction
+if (DefaultAssay(so.query) == "RNA"){
+  seq.coverage <- "nCount_RNA"
+} else if ((DefaultAssay(so.query) == "SCT")) {
+  seq.coverage <- "nCount_SCT"
+}
+
+vd_covariates <- unique(c(vd_covariates, seq.coverage))
+
+# variance decomp pipeline #####################################################
+
+# step 1: model formulation
+vd_model.list <- vd_Formula(object = so.query, 
+                            covariates = vd_covariates, 
+                            interactions = vd_interactions)
+
+# step 2: prep model inputs
+vd_inputs.list <- vd_Inputs(so.query, vd_model.list = vd_model.list, features = which.available.markers, 
+                            pct.min =  0, variable.features = F, subsample.factor = 1)
+
+# step 3: run variance decomposition
+vd.workers <- parameter.list$vd.n.workers
+if (vd.workers > length(which.available.markers)) vd.workers <- length(which.available.markers)
+vd_results.list <- vd_Run(vd_inputs.list, n.workers = vd.workers)
+
+# remove results that are no longer required
+rm(vd_inputs.list)
+rm(vd_model.list)
+invisible({gc()})
+
+# visualize results ############################################################
+vd.df <- as.data.frame(vd_results.list[["varPart.format2"]])
+rownames(vd.df) <- vd.df$gene
+vd.df <- vd.df %>% dplyr::select(-c("gene"))
+
+
+plt.vd.list <- list()
+for (i in 1:nrow(vd.df)){
+  
+  gene.name <- rownames(vd.df)[i]
+  vd.df.t <- as.data.frame(t(vd.df[i, ]))
+  colnames(vd.df.t) <- "x"
+  vd.df.t$cov <- rownames(vd.df.t)
+  
+  residual.var <- signif(vd.df.t$x[vd.df.t$cov == "Residuals"], 3) * 100
+    plt.vd.list[[gene.name]] <- vd.df.t %>%
+    dplyr::filter(cov != "Residuals") %>%
+    ggplot(aes(x = x*100, y = reorder(cov, x))) + 
+    theme_miko(legend = F) + 
+    geom_bar(stat = "identity", color = "black", fill = "grey50")   + 
+    labs(title = "Variance Decomposition", subtitle = paste0("Unexplained Variance = ", residual.var, "%")) +
+    xlab("Variance Explained (%)") +
+    ylab("Explanatory Covariates")
+}
+
+
+```
+
+
 
 ```{r prep ranking lists, warning = FALSE}
+
+message("Preparing data for GSEA...")
 
 # Rank by LFC if DEG
 if (which.input$query_input_format == 3){
@@ -1412,18 +1128,25 @@ if (!is.null(df2enrich)){
 
 ```{r get pathways, warning = FALSE}
 
+message("Retrieving pathway genesets...")
+
 # all.genes <-df2enrich$genes
 all.genes <- rownames(so.query)
 
 match.ind <- match(all.genes, my.entrez$SYMBOL)
 all.genes.entrez <- as.character(my.entrez$ENTREZID[match.ind]) 
 
-pathways.subset <- getAnnotationPathways(all.genes.entrez, db = which.annotation.db, ontology = "BP", species = which.species)
+pathways.subset <- getAnnotationPathways(all.genes.entrez, 
+                                         db = parameter.list$gsea.database, 
+                                         ontology = parameter.list$gsea.ontology, 
+                                         species = parameter.list$general.species)
 
 ```
 
 
 ```{r gsea enrichment, warning = FALSE}
+
+message("Running GSEA...")
 
 # get pathways relevant to current gene set
 gse.pathway.combined <- NULL
@@ -1434,17 +1157,18 @@ single.path.of.interest <- NULL
 plt.enrichment <- list()
 
 # specify analysis parameters
-if (which.species == "Hs") {
+if (parameter.list$general.species == "Hs") {
   org <- "human"
   db <- org.Hs.eg.db
-} else if (which.species == "Mm"){
+} else if (parameter.list$general.species == "Mm"){
   org <- "mouse"
   db <- org.Mm.eg.db
 }
 
 # start cluster
-if (n.workers$gsea > length(enrich.groups)) n.workers$gsea <- length(enrich.groups)
-cl <- parallel::makeCluster(n.workers$gsea)
+
+if (parameter.list$gsea.n.workers > length(enrich.groups)) parameter.list$gsea.n.workers <- length(enrich.groups)
+cl <- parallel::makeCluster(parameter.list$gsea.n.workers)
 doParallel::registerDoParallel(cl)
 
 score.results <- foreach(i = 1:length(enrich.groups), .packages = c("fgsea", "plyr"))  %dopar% {
@@ -1472,11 +1196,11 @@ score.results <- foreach(i = 1:length(enrich.groups), .packages = c("fgsea", "pl
     
     gse.pathway$query <- enrich.groups[i]
 
-    if(which.results$gsea.threshold == 1){
+    if(parameter.list$gsea.threshold == 1){
       gse.pathway.filtered <- gse.pathway[gse.pathway$padj < 0.1, ]
-    } else if (which.results$gsea.threshold == 2){
+    } else if (parameter.list$gsea.threshold == 2){
       gse.pathway.filtered <- gse.pathway[((gse.pathway$pval < 0.05) & (abs(gse.pathway$NES) > 0.8)), ]
-    } else if (which.results$gsea.threshold == 3){
+    } else if (parameter.list$gsea.threshold == 3){
       gse.pathway.filtered <- gse.pathway %>% top_n(3, NES)
     }
 
@@ -1517,6 +1241,7 @@ for (i in 1:length(enrich.groups)){
 
 ```{r gsea barplot, warning = FALSE}
 
+message("GSEA plots...")
 
 plt.top.gsea <- list()
 for (i in 1:length(available_markers)){
@@ -1538,12 +1263,8 @@ for (i in 1:length(available_markers)){
  
  df.set1 <- current.paths %>% dplyr::filter(NES > 0) %>% dplyr::arrange(log10(pval))
   df.set2 <- current.paths %>% dplyr::filter(NES < 0) %>% dplyr::arrange(log10(pval))
- current.paths <- bind_rows(df.set1[1:which.results$gsea.top.n, ] %>% dplyr::arrange(-NES),
-                            df.set2[1:which.results$gsea.top.n, ] %>% dplyr::arrange(NES))
- 
- 
- # current.paths <- bind_rows(current.paths %>% dplyr::top_n(which.results$gsea.top.n , NES) %>% dplyr::arrange(-NES), 
-                            # current.paths %>% dplyr::top_n(which.results$gsea.top.n , -NES) %>% dplyr::arrange(NES))
+ current.paths <- bind_rows(df.set1[1:parameter.list$gsea.top.n, ] %>% dplyr::arrange(-NES),
+                            df.set2[1:parameter.list$gsea.top.n, ] %>% dplyr::arrange(NES))
 
  current.paths$pathway <- stringr::str_trunc(current.paths$pathway, 40)
  
@@ -1557,59 +1278,57 @@ for (i in 1:length(available_markers)){
    viridis::scale_fill_viridis(option = "B", limits = c(min(abs(current.paths$NES)),max(abs(current.paths$NES))))
  
  
- if (print.inline){
+ if (parameter.list$general.print.inline){
    plt.top.gsea[[available_markers[i]]]
  }
 }
 
-# plt.top.gsea[[available_markers[2]]]
-
-# 
-# length(plt.top.gsea)
-# 
-# names(length)
-
-# plt.top.gsea
 
 ```
 
 
-```{r common enrichments, warning = FALSE}
+```{r common enrichments, warning = FALSE, include = FALSE}
+
+gse.pathway.combined.tally <- NULL
+try({
+  
 
 # summarize enrichments
   gse.pathway.combined.label <- gse.pathway.combined
-  
+
   if (!is.null(gse.pathway.combined.label)){
-    
+
     which.enrich <- gse.pathway.combined.label$NES > 0
     which.enrich[is.na(which.enrich)] <- FALSE
     which.deplete <- gse.pathway.combined.label$NES < 0
     which.deplete[is.na(which.deplete)] <- FALSE
     gse.pathway.combined.label$pathway[which.enrich] <- paste("Enriched-", gse.pathway.combined.label$pathway[which.enrich], sep = "")
     gse.pathway.combined.label$pathway[which.deplete] <- paste("Depleted-", gse.pathway.combined.label$pathway[which.deplete], sep = "")
-    
+
     gse.pathway.combined.tally <- gse.pathway.combined.label %>%
       dplyr::filter(pval < 0.01, abs(NES) > 1) %>%
       dplyr::group_by(pathway) %>%
       summarise(queries = list(query))
-    
+
     gse.pathway.combined.tally$n <- lapply(gse.pathway.combined.tally$queries, length)
     gse.pathway.combined.tally$n <- as.numeric(gse.pathway.combined.tally$n)
     gse.pathway.combined.tally$set <- lapply(gse.pathway.combined.tally$queries, paste,collapse = ", ")
     gse.pathway.combined.tally <- gse.pathway.combined.tally %>%
       dplyr::select(-c("queries")) %>%
       dplyr::arrange(n)
-    
+
   } else {
     gse.pathway.combined.tally <- NULL
   }
 
+# 
+}, silent = T)
 
 ```
 
 ```{r cormat heatmap, warning = FALSE}
 
-
+message("Correlation heamap...")
 if (exists("df.cor.list")) {
   
   df.cor.list.mat <- df.cor.list
@@ -1619,7 +1338,7 @@ if (exists("df.cor.list")) {
   cor.mat <- as.matrix(df.cor.list.mat)
   
   
-  top.n.cor <- which.results$cor.top.n
+  top.n.cor <- parameter.list$cor.top.n
   n.per.query <- ceiling(0.5*top.n.cor/ncol(cor.mat))
   
   filter.cor <- T
@@ -1648,6 +1367,7 @@ if (exists("df.cor.list")) {
 
 ```{r gene.expression tables, warning = FALSE}
 
+message("Constructig expression tables...")
 data.all <- as.data.frame(so.query@assays[[DefaultAssay(so.query)]]@data[rownames(so.query@assays[[DefaultAssay(so.query)]]@data) %in% available_markers, ])
 data.rownames <- rownames(data.all)
 match.ind <- data.rownames %in% available_markers
@@ -1655,7 +1375,7 @@ data.subset <- as.data.frame(t(data.all[match.ind, ]))
 
 groups.of.interest <- list(cluster = "seurat_clusters",
                            batch = "batch",
-                           barcode = "Barcode",
+                           barcode = "bc",
                            stratify.group = "stratify.group")
 
 df.expression.list <- list()
@@ -1676,15 +1396,15 @@ for (i in 1:length(groups.of.interest)){
   if (groups.of.interest[[i]] %in%  names(so.query@meta.data)){
     df.expression.list[[names(groups.of.interest)[i]]] <- data.subset.long %>%
       group_by(gene, get(names(groups.of.interest)[i])) %>%
-      summarize(mean.exp = signif(mean(expression),3), 
-                median.exp = signif(median(expression),3),
-                sd.exp = signif(sd(expression),3),
+      summarize(mean.exp = signif(log(mean(expm1(expression)+ 1)),3), 
+                median.exp = signif(log(median(expm1(expression)+ 1)),3),
+                sd.exp = signif(sd(((expression))),3),
                 pct.exp = signif(mean(expression > 0),3),
                 n.cells = length(expression))
     
     colnames( df.expression.list[[names(groups.of.interest)[i]]])[2] <- names(groups.of.interest)[i]
     
-    if (print.inline) datatable(df.expression.list[[names(groups.of.interest)[i]]], filter = "top")
+    if (parameter.list$general.print.inline) datatable(df.expression.list[[names(groups.of.interest)[i]]], filter = "top")
   }
 }   
 
@@ -1692,26 +1412,39 @@ if (all(c("seurat_clusters", "batch") %in%  names(so.query@meta.data))){
   cur.entry <- "cluster x batch"
   df.expression.list[[cur.entry]] <- data.subset.long %>%
     group_by(gene, cluster, batch) %>%
-    summarize(mean.exp = signif(mean(expression),3), 
-              median.exp = signif(median(expression),3),
-              sd.exp = signif(sd(expression),3),
+    summarize(mean.exp = signif(log(mean(expm1(expression)+ 1)),3), 
+              median.exp = signif(log(median(expm1(expression)+ 1)),3),
+              sd.exp = signif(sd(((expression))),3),
               pct.exp = signif(mean(expression > 0),3),
               n.cells = length(expression))
   
-  if (print.inline) datatable(df.expression.list[[cur.entry]], filter = "top")
+  if (parameter.list$general.print.inline) datatable(df.expression.list[[cur.entry]], filter = "top")
 }
 
 if (all(c("seurat_clusters", "stratify.group") %in%  names(so.query@meta.data))){
   cur.entry <- "cluster x stratify.group"
   df.expression.list[[cur.entry]] <- data.subset.long %>%
     group_by(gene, cluster, stratify.group) %>%
-    summarize(mean.exp = signif(mean(expression),3), 
-              median.exp = signif(median(expression),3),
-              sd.exp = signif(sd(expression),3),
+    summarize(mean.exp = signif(log(mean(expm1(expression)+ 1)),3), 
+              median.exp = signif(log(median(expm1(expression)+ 1)),3),
+              sd.exp = signif(sd(((expression))),3),
               pct.exp = signif(mean(expression > 0),3),
               n.cells = length(expression))
   
-  if (print.inline) datatable(df.expression.list[[cur.entry]], filter = "top")
+  if (parameter.list$general.print.inline) datatable(df.expression.list[[cur.entry]], filter = "top")
+}
+
+if (all(c("seurat_clusters", "bc") %in%  names(so.query@meta.data))){
+  cur.entry <- "cluster x Barcode"
+  df.expression.list[[cur.entry]] <- data.subset.long %>%
+    group_by(gene, cluster, barcode) %>%
+    summarize(mean.exp = signif(log(mean(expm1(expression)+ 1)),3), 
+              median.exp = signif(log(median(expm1(expression)+ 1)),3),
+              sd.exp = signif((sd((expression))),3),
+              pct.exp = signif(mean(expression > 0),3),
+              n.cells = length(expression))
+  
+  if (parameter.list$general.print.inline) datatable(df.expression.list[[cur.entry]], filter = "top")
 }
 
 if (grouping_var != "seurat_clusters"){
@@ -1720,17 +1453,71 @@ if (grouping_var != "seurat_clusters"){
     cur.entry <- grouping_var
     df.expression.list[[cur.entry]] <- data.subset.long %>%
       group_by(gene, get(cur.entry)) %>%
-      summarize(mean.exp = signif(mean(expression),3), 
-                median.exp = signif(median(expression),3),
-                sd.exp = signif(sd(expression),3),
+      summarize(mean.exp = signif(log(mean(expm1(expression)+ 1)),3), 
+                median.exp = signif(log(median(expm1(expression)+ 1)),3),
+                sd.exp = signif(sd(((expression)+ 1)),3),
                 pct.exp = signif(mean(expression > 0),3),
                 n.cells = length(expression))
     
-    if (print.inline) datatable(df.expression.list[[cur.entry]], filter = "top")
+    if (parameter.list$general.print.inline) datatable(df.expression.list[[cur.entry]], filter = "top")
   }
   
 }
 
+
+```
+
+```{r cluster by barcode expression heatmaps, include = FALSE}
+
+cb.hm.list <- list()
+
+
+if ("cluster x Barcode"  %in% names(df.expression.list)){
+  message("Constructing cluster x barcode expression heatmap(s)...")
+  df.expression.cb <- df.expression.list[["cluster x Barcode"]]
+  u.gene.cb <- unique(df.expression.cb$gene)
+  
+  for (i in 1:length(u.gene.cb)){
+    gene.name <- u.gene.cb[i]
+    df.ecb.cur <-   df.expression.cb %>%
+      dplyr::filter(gene %in% gene.name) %>%
+      dplyr::select(c("cluster", "barcode", "mean.exp")) %>%
+      pivot_wider(names_from = "cluster", values_from ="mean.exp")
+    df.ecb.cur <- as.data.frame(df.ecb.cur)
+    rownames(df.ecb.cur) <- df.ecb.cur$barcode
+    df.ecb.cur <- as.matrix(df.ecb.cur %>% dplyr::select(-c("gene", "barcode")))
+    df.ecb.cur[is.na(df.ecb.cur)] <- 0
+    colnames(df.ecb.cur) <- paste0("c", colnames(df.ecb.cur))
+    
+    is.success <- F
+    if (nrow(df.ecb.cur) == 1){
+      try({
+        plt.hm.cb <- ggplotify::as.ggplot(pheatmap::pheatmap(t(df.ecb.cur), color = inferno(100), silent = T, cluster_cols = F)) +
+          labs(title = "Expression", subtitle = "Cluster x Sample") + 
+          theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))   
+        is.success <- T
+      }, silent = T)
+    } else {
+      try({
+        plt.hm.cb <- ggplotify::as.ggplot(pheatmap::pheatmap(t(df.ecb.cur), color = inferno(100), silent = T)) +
+          labs(title = "Expression", subtitle = "Cluster x Sample") + 
+          theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))   
+        is.success <- T
+      }, silent = T)
+    }
+    
+    if (!is.success)  plt.hm.cb <- NULL
+    
+    if (parameter.list$general.print.inline){
+      print(plt.hm.cb)
+    }
+    
+    cb.hm.list[[gene.name]] <- plt.hm.cb + theme_miko(legend = T)
+    
+  }
+} else {
+  cb.hm.list <- NULL
+}
 
 ```
 
@@ -1739,6 +1526,8 @@ if (grouping_var != "seurat_clusters"){
 
 # fitered correlation matrix
   if (class(cor.mat.sub) == "matrix") {
+    
+   cor.mat.sub <- cor.mat.sub[ ,!(is.na(apply(cor.mat.sub, 2, function(x) var(x))))] 
     plt.heat <- ggplotify::as.ggplot(pheatmap::pheatmap(cor.mat.sub, 
                                                         main = "Query x Gene Correlations\nx=query, y=genes, z=correlation",
                                                          border_color = NA, silent = T))
@@ -1748,7 +1537,7 @@ if (grouping_var != "seurat_clusters"){
   } else {
     plt.heat <- NULL
   }
-  
+
 ```
 
 ```{r ranked correlations, fig.height=13, fig.width=10, include = FALSE}
@@ -1756,11 +1545,11 @@ if (grouping_var != "seurat_clusters"){
 
 # if (length(markers_of_interest) == 1){
 
-  if (cor.method == "rho_p") {
+  if (parameter.list$cor.method == "rho_p") {
     fill.label <- "Proportionality Metric"
-  } else if (cor.method == "spearman") {
+  } else if (parameter.list$cor.method == "spearman") {
     fill.label <- "Spearman R"
-  } else if (cor.method == "pearson") {
+  } else if (parameter.list$cor.method == "pearson") {
     fill.label <- "Pearson R"
   }
 
@@ -1771,7 +1560,7 @@ for (i in 1:length(available_markers)){
   df.cor.all <-  data.frame(genes = rownames(cor.mat), r = as.vector(cor.mat[ ,colnames(cor.mat) %in% available_markers[i]]))
   colnames(df.cor.all) <- c("genes", "r")
   df.cor.all <-  df.cor.all[df.cor.all$genes != available_markers[i], ]
-  
+  plt.heat
     plt.cor.dist <- df.cor.all %>%
     ggplot(aes(x = r)) +
     geom_density(fill = "grey") + 
@@ -1779,17 +1568,17 @@ for (i in 1:length(available_markers)){
     xlab(fill.label) + 
     theme_classic() + 
       geom_vline(xintercept = 0, linetype = "dashed") + 
-    labs(title = paste0(available_markers[i], " Correlations"), subtitle = "all variable genes") + 
-    theme(axis.text.y = element_blank())
-  
-  # top corr
-    if (class(cor.mat.sub) == "numeric"){
-  df.cor.sub <-  data.frame(genes = names(cor.mat.sub), 
-                            r = cor.mat.sub)
-    } else {
-  df.cor.sub <-  data.frame(genes = names((cor.mat.sub[ ,colnames(cor.mat.sub) %in% available_markers[i]])), 
-                            r = (cor.mat.sub[ ,colnames(cor.mat.sub) %in% available_markers[i]]))      
-    }
+    labs(title = "Correlations", subtitle = available_markers[i]) + 
+    theme(axis.text.y = element_blank()) + 
+     theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+
+    
+    # get top genes to visualize
+    gene.up <- (df2enrich %>% dplyr::arrange(get(available_markers[i])))[1:35,"genes"]
+    gene.down <- (df2enrich %>% dplyr::arrange(-get(available_markers[i])))[1:35 ,"genes"]
+    r.up <- (df2enrich %>% dplyr::arrange(get(available_markers[i])))[1:35,available_markers[i]]
+    r.down <- (df2enrich %>% dplyr::arrange(-get(available_markers[i])))[1:35 ,available_markers[i]]
+    df.cor.sub <- data.frame(genes = c(gene.up, gene.down), r = c(r.up, r.down))
 
   colnames(df.cor.sub) <- c("genes", "r")
   df.cor.sub <-  df.cor.sub[!(df.cor.sub$genes %in%  available_markers[i]), ]
@@ -1803,9 +1592,9 @@ for (i in 1:length(available_markers)){
     theme_classic() + 
     labs( subtitle = "Top Correlations") 
   
-  cor.list[[available_markers[i]]] <-  cowplot::plot_grid(plt.cor.dist, plt.ranked.cor.sub, ncol = 1, rel_heights = c(1,2.5), align = "hv")
+  cor.list[[available_markers[i]]] <-  cowplot::plot_grid(plt.cor.dist, plt.ranked.cor.sub, ncol = 1, rel_heights = c(1,4.5), align = "hv")
   
-  if (print.inline){
+  if (parameter.list$general.print.inline){
     print( cor.list[[available_markers[i]]])
   }
   # }
@@ -1814,9 +1603,10 @@ for (i in 1:length(available_markers)){
 ```
 
 
-```{r combine expression plots, fig.height=10, fig.width=30, include = FALSE}
+```{r combine expression plots, fig.height=12, fig.width=30, include = FALSE}
 
 dash.list <- list()
+message("Consolidating results into summary report...")
 
 # helper to remove plot elements
 rmv.plt.elements <- function(plt){
@@ -1839,29 +1629,42 @@ for (i in 1:length(available_markers)){
   
   # get component plots
   if (!(check.1 & check.2 & check.3 & check.4)) next
-  top.lq <- cowplot::plot_grid(
-    plt.umap.1[[available_markers[i]]] + 
-      theme_miko(legend = F) + labs(title = "UMAP", subtitle = "Clusters"), 
-    plt.umap.2[[available_markers[i]]]+ theme_miko(legend = F) + 
-      labs(title = "", subtitle = paste0(available_markers[i], " Expression")),
-    ncol = 2
+  
+  # specify function for combining plots
+  # combo.function <- cowplot::plot_grid()
+  combo.function <- gridExtra::grid.arrange
+  # combo.function <- ggpubr::ggarrange
+  
+  p1 <- plt.umap.1[[available_markers[i]]] + 
+    theme_miko(legend = F) + labs(title = "UMAP", subtitle = "Clusters")
+  p2 <- plt.umap.2[[available_markers[i]]]+ 
+    theme_miko(legend = F) + labs(title = "", subtitle = paste0(available_markers[i], " Expression"))
+  p3 <- plt.vd.list[[available_markers[i]]] 
+  top.lq <- combo.function(grobs = list(p1, p2, p3),
+                           ncol = 3, nrow = 1, widths =  c(2,2, 1.5)#, "C" , 0.5 , labels = c("A", "B", "C")
   )
   
   low.lq <- plt.sgExp.all[[available_markers[i]]]
-  lq <- cowplot::plot_grid(plotlist = list(top.lq, low.lq), ncol = 1, rel_heights = c(2,2))
-  plt.gsea <-  plt.top.gsea[[available_markers[i]]] + theme_miko(legend = F) 
-  mq <- cowplot::plot_grid(plotlist = list(lq,
-                                           cor.list[[available_markers[i]]],
-                                           plt.gsea),
-                           ncol = 3, rel_widths = c( 5,2, 3))
+  lq <- combo.function( top.lq, low.lq, ncol = 1,  heights = c(2,2)) #, labels = c("", "D") # , rel_heights = c(2,2), labels = c("", "D")
+  plt.gsea <-  plt.top.gsea[[available_markers[i]]] + theme_miko(legend = F)
+  
+  cb.hm.list[[available_markers[i]]] <-  rmv.plt.elements(cb.hm.list[[available_markers[i]]]) +  
+    theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+  mc <- combo.function(cb.hm.list[[available_markers[i]]], cor.list[[available_markers[i]]], plt.gsea, ncol = 3, widths = c(1,1,1)
+                      ) # labels = c("E", "F", "G")
+  
+  mq <- combo.function(lq, mc,  widths = c( 3,3),
+                       ncol = 2)   
   
   # store final plot
   dash.list[[available_markers[i]]] <- mq
   
 }
 
-# mq
 
+# plt.vd.list
+# plot(dash.list)
+# plot(mq)
 ```
 
 ```{r cluster-wise expression data}
@@ -1964,33 +1767,8 @@ plt.dot.list <- list()
                                         cols="RdBu" ) + 
     RotatedAxis() + ylab(group_name) +
     theme(axis.text.x=element_text(size=xlab.size, angle = 75)) + ggtitle("All Query Genes")
-  if (print.inline) print( plt.dot.list[["Dot.All"]])
-  
-  
-  # create dotplot
-  try({
-    
-    
-    if (!is.null(all.markers.sig)){
-      
-      gene.order.av.deg <- unique(gene.order.av[gene.order.av %in% all.markers.sig$gene])
-      
-      if (length(gene.order.av.deg) > 0){
-        
-        # if (length(gene.order.av.deg) == 1) gene.order.av.deg <- c(gene.order.av.deg, gene.order.av.deg)
-        xlab.size <- get.dot.size(gene.order.av.deg)
-        plt.dot.list[["Dot.DEG"]] <-  DotPlot(so.query, features = factor(gene.order.av.deg, levels = gene.order.av.deg), 
-                                              group.by = grouping_var, 
-                                              dot.scale = 8,
-                                              cols="RdBu" ) + 
-          RotatedAxis() + ylab(group_name) +
-          theme(axis.text.x=element_text(size=xlab.size, angle = 75)) + ggtitle("Top Genes")
-        if (print.inline) print( plt.dot.list[["Dot.DEG"]])
-      }
-    }
-  }, silent = T)
-  
- # plt.dot.list[["Dot.DEG"]]
+  if (parameter.list$general.print.inline) print( plt.dot.list[["Dot.All"]])
+
 ```
 
 ```{r central log}
@@ -2001,7 +1779,7 @@ if (!exists("user")) user <- "guest"
 
 clog.update.success <- F
 try({
-  run.id <-  updateCentralLog(Module = "M09", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
+  run.id <-  updateCentralLog(Module = "M09", input.data = input.file, input.subset = NA, pdf.flag = parameter.list$general.save.pdf)
   clog.update.success <-  T
 }, silent = F)
 if (is.null(run.id))  {
@@ -2021,12 +1799,12 @@ output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys
 # create output directories
 dir.create(output.path)
 dir.create(paste0(output.path, "Tables/"))
-if (save.pdf) dir.create(paste0(output.path, "PDF/"))
+if (parameter.list$general.save.pdf) dir.create(paste0(output.path, "PDF/"))
 
 ```
 
 
-1) cluster UMAP
+1) UMAP
 ===================================== 
 
 Uniform manifold projection and approximation (UMAP) used to dimensionally reduce and visualize data while maintaining global transcriptomic structure. Clusters were determined using unsupervised Louvain community detection. 
@@ -2039,7 +1817,7 @@ Row {.tabset}
 ```{r plt.umap_by_c}
 print(plt.umap_by_cluster) 
 savePDF(file.name = paste0(output.path, "PDF/", "M09_umap_cluster.pdf"), plot.handle = plt.umap_by_cluster, 
-        fig.width = 7, fig.height = 5, save.flag = save.pdf)
+        fig.width = 7, fig.height = 5, save.flag = parameter.list$general.save.pdf)
 ```
 
 ### Barcodes
@@ -2047,7 +1825,7 @@ savePDF(file.name = paste0(output.path, "PDF/", "M09_umap_cluster.pdf"), plot.ha
 ```{r plt.umap_by_b}
 print(plt.umap_by_barcode) 
 savePDF(file.name = paste0(output.path, "PDF/", "M09_umap_barcode.pdf"), plot.handle = plt.umap_by_barcode, 
-        fig.width = 7, fig.height = 5, save.flag = save.pdf)
+        fig.width = 7, fig.height = 5, save.flag = parameter.list$general.save.pdf)
 ```
 
 
@@ -2088,7 +1866,7 @@ for (i in 1:length(plt.dot.list)){
   plot.name <- paste0("M09_expression_dotplot_", names(plt.dot.list)[i] ,".pdf")
   savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
           plot.handle =  plt.dot.list[[i]], 
-          fig.width = 20, fig.height = 20, save.flag = save.pdf)
+          fig.width = 20, fig.height = 20, save.flag = parameter.list$general.save.pdf)
 }
 
 ```
@@ -2102,7 +1880,7 @@ if (!is.null(plt.heat.availableGenes)) {
   print(plt.heat.availableGenes)
   
   savePDF(file.name = paste0(output.path, "PDF/", "M09_expression_heatmap.pdf"), plot.handle = plt.heat.availableGenes, 
-          fig.width = 20, fig.height = 20, save.flag = save.pdf)
+          fig.width = 20, fig.height = 20, save.flag = parameter.list$general.save.pdf)
   
 }
 
@@ -2117,7 +1895,7 @@ if (exists("plt.sgExp.list")){
     print(cowplot::plot_grid(plotlist = plt.sgExp.list))
       savePDF(file.name = paste0(output.path, "PDF/", "M09_expression_violin.pdf"), 
               plot.handle = cowplot::plot_grid(plotlist = plt.sgExp.list), 
-          fig.width = 10, fig.height = 4, save.flag = save.pdf)
+          fig.width = 10, fig.height = 4, save.flag = parameter.list$general.save.pdf)
   }
 }
 
@@ -2130,7 +1908,7 @@ if (exists("plt.sgExp.list")){
     print(cowplot::plot_grid(plotlist = plt.sgExp.list))
           savePDF(file.name = paste0(output.path, "PDF/", "M09_expression_violin.pdf"), 
               plot.handle = cowplot::plot_grid(plotlist = plt.sgExp.list), 
-          fig.width = 5, fig.height =5, save.flag = save.pdf)
+          fig.width = 5, fig.height =5, save.flag = parameter.list$general.save.pdf)
   }
 }
 
@@ -2139,21 +1917,22 @@ if (exists("plt.sgExp.list")){
 3) Results
 ===================================== 
 
-Summary report for each query gene(set). Top left: Expression values projected onto UMAP and corresponding cluster memberships. Bottom left: Normalized expression strafied by clusters or sample barcodes. Groups were hierarchially-clustered using normalized expression, expressing fraction and expression variance. Right: Query gene(set) correlations were computed and correlation-based ranks were used as input into gene set enrichment analysis (GSEA) to identify query-associated enrichments. 
+Query gene(set) summary report. A,B) Cluster memberships (A) and expression (B) projected onto UMAP. C) Variance decomposition analysis. D) Cluster- and barcode-level violin plots. Groups were hierarchially-clustered using normalized expression, expressing fraction and expression variance. E) Heatmap visualizing expression stratified by barcode and cluster. F, G) Query gene(set) correlations (F) were computed and correlation-based ranks were used as input into gene set enrichment analysis (GSEA; G) to identify query-associated enrichments. 
 
 Row {.tabset}
 -------------------------------------
 
 
-```{r dash}
+```{r dash, fig.width=30, fig.height=12}
 
 try({
 
     out <- lapply(seq_along(dash.list), function(i) {
       
       a1 <- knitr::knit_expand(text = sprintf("### %s\n", names(dash.list)[i])) # tab header
-      a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=25, fig.height=12}", paste(i, "dash"))) 
-      a3 <- knitr::knit_expand(text = sprintf("\nprint(dash.list[[%d]])", i)) 
+      a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=30, fig.height=12}", 
+                                              paste(i, "dash")))  #, fig.width=50, fig.height=30
+      a3 <- knitr::knit_expand(text = sprintf("\nplot(dash.list[[%d]])", i))
       a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
       
       paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
@@ -2173,9 +1952,9 @@ try({
 
 for (i in 1:length(dash.list)){
   plot.name <- paste0("M09_summary_", names(dash.list)[i] ,".pdf")
-  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
-          plot.handle =  (dash.list[[i]]), 
-          fig.width = 25, fig.height = 12, save.flag = save.pdf)
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name),
+          plot.handle =  (dash.list[[i]]),
+          fig.width = 30, fig.height = 12, save.flag = parameter.list$general.save.pdf)
 }
 
 ```
@@ -2221,13 +2000,13 @@ try({
     
     savePDF(file.name = paste0(output.path, "PDF/", "M09_ranked_correlations.pdf"), 
             plot.handle = plt.dis.rank.cor, 
-            fig.width = 10, fig.height =13, save.flag = save.pdf)
+            fig.width = 10, fig.height =13, save.flag = parameter.list$general.save.pdf)
     
     print(plt.dis.rank.cor)
   } else {
         savePDF(file.name = paste0(output.path, "PDF/", "M09_correlation_heatmap.pdf"), 
             plot.handle = plt.heat, 
-            fig.width = 10, fig.height =13, save.flag = save.pdf)
+            fig.width = 10, fig.height =13, save.flag = parameter.list$general.save.pdf)
     
     plt.heat
   }
@@ -2310,19 +2089,37 @@ for (i in 1:length(df.expression.list)){
 }
 ```
 
-7) DEG
-===================================== 
 
-Differential expression statistics for gene(set) queries. 
 
-### DEG Query Genes
+
 
 ```{r DEG query }
-write.csv(all.markers, file = paste0(output.path, "Tables/", "differential_expression_analysis.csv"), row.names = F) 
-flex.asDT(all.markers)
+
+# 7) DEG
+# ===================================== 
+# Differential expression statistics for gene(set) queries. 
+### DEG Query Genes
+# write.csv(all.markers, file = paste0(output.path, "Tables/", "differential_expression_analysis.csv"), row.names = F) 
+# flex.asDT(all.markers)
 ```
 
-8) Marker List
+7) Variance Decomposition
+===================================== 
+
+Variance decomposition analysis. Proprtion of variance explained by each covariate is summarized in tables. 
+
+### Variance Decomposition
+
+```{r}
+
+
+vd.df2 <- as.data.frame(t(apply(vd.df, 1, function(x) signif(x, 3))))
+
+write.csv(vd.df2, file = paste0(output.path, "Tables/", "variance_decomposition.csv"), row.names = F) 
+flex.asDT(vd.df2)
+```
+
+8) Genes
 ===================================== 
 
 Gene(set) tables used in analysis. 
@@ -2340,7 +2137,7 @@ flex.asDT(moi.df)
 # Update analysis log
 n.cells.analyzed <- ncol(so.query)
 df.log <- addLogEntry("N Cells", n.cells.analyzed, df.log, "n.cells.analyzed")
-df.log <- addLogEntry("Correlation Metric", cor.method, df.log, "cor.method")
+df.log <- addLogEntry("Correlation Metric", parameter.list$cor.method, df.log, "cor.method")
 df.log <- addLogEntry("Query Markers", markers_of_interest, df.log, "markers_of_interest")
 df.log <- addLogEntry("Seurat Assay", DefaultAssay(so.query), df.log, "DefaultAssay(so.query)")
 if (exists("exp.mat")) df.log <- addLogEntry("N genes for correlation", nrow(cor.mat), df.log, "nrow(cor.mat)")
@@ -2384,14 +2181,14 @@ try({
 ```{r merge pdfs, include = FALSE}
 
 # combine pdfs into single binder
-if (save.pdf){
-  try({
-    pdf.list <- list.files (path = paste0(output.path, "PDF/") )
-    pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
-    
-    pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
-  }, silent = T)
-}
+# if (parameter.list$general.save.pdf){
+#   try({
+#     pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+#     pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+#     
+#     pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+#   }, silent = T)
+# }
 
 
 ```

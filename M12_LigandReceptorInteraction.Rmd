@@ -40,13 +40,14 @@ lapply(packages2load, library, character.only = TRUE)
 ```{r specify parameters}
 
 # query input
-input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
+# input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
 # input.file <- "Module1_Suva2019.Rdata"
+ input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
 
 which.species <- "Mm"
-cluster.resolution = 0.5
+cluster.resolution = 1
 
 print.inline <- F
 
@@ -55,7 +56,7 @@ which.data <- "data" # options: data, scale
 data.type  <- "mean count" # options: mean count, DEG
 
 # downsampling
-subsample_factor <- 0.5
+subsample_factor <- 1
 
 # subset
 which.subset <- "no.subset"
@@ -300,7 +301,7 @@ res.LR.list2 <- list()
 
 ```{r NEW single cell signal R, fig.width = 8, fig.height = 4}
 
-do.scsr <- T
+do.scsr <- F
 
 if (do.scsr){
   
@@ -383,7 +384,7 @@ print(plt.method.comparisons)
 
 
 
-flex.asDT(df.merge.scores)
+# flex.asDT(df.merge.scores)
 
 ```
 

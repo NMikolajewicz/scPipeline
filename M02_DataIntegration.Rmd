@@ -44,7 +44,7 @@ invisible({lapply(packages2load, library, character.only = TRUE)})
 
 save.flag <- T
 
-save.filename <- "allGBM_211020"
+save.filename <- "allGBM_281020"
 
 k.filter <-  200 # lower k.filter value (e.g., 50) if there is few cells. Default = 200
 
@@ -56,11 +56,11 @@ print.inline <- FALSE
 
 n.workers <- list(
   import = 3,
-  integration = 3 #(limit to 1 for cluster)
+  integration = 2 #(limit to 1 for cluster)
 )
 
   do.memory.limit <- T # specify whether to limit max memory (set T if local)
-  max.memory <- 400 # numeric, in terms of Gb (set to 100 for cluster)
+  max.memory <- 200 # numeric, in terms of Gb (set to 100 for cluster)
 
 
 

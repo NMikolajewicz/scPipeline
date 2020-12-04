@@ -67,7 +67,7 @@ input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
 do.reprojection <- T
 
 # Data subsampling
-subsample_factor <- 0.3  # OPTIONAL; range 0 to 1 (default = 1)
+subsample_factor <- 0.2  # OPTIONAL; range 0 to 1 (default = 1)
 
 # specify cluster resolution
 cluster.resolution <- 0.5
@@ -4802,6 +4802,8 @@ for (i in 1:length(u.lineage)){
     signal.characteristics <- apply(signal.characteristics, 2, rescaleValues)
     sc.mat <- as.matrix(signal.characteristics)
     
+  sc.mat[is.na(sc.mat)] <- 0
+    
     # cluster data
     ce<-clusterMany(t(sc.mat), clusterFunction="pam", ks=2:n.cluster, 
                     minSizes=3, isCount = F,nFilterDims=c(100,500,1000),
@@ -5152,6 +5154,16 @@ if (length(module.membership.list) < n.workers$GO.enrich) n.workers$GO.enrich <-
 cl <- makeCluster(n.workers$GO.enrich)
 registerDoParallel(cl)
 
+  # get gene universe
+  if (which.universe == "all"){
+    gene.uni <- as.vector(rownames(so.query))
+  } 
+
+# else if (which.universe == "subset"){
+#     gene.uni <- as.vector(unlist(module.gene.list))
+#   }
+
+
 enrich.results <- foreach(i = 1:length(module.membership.list), .packages = c("dplyr", "ggplot2", "scMiko")) %dopar% {
   
   try({
@@ -5160,10 +5172,8 @@ enrich.results <- foreach(i = 1:length(module.membership.list), .packages = c("d
   lineage.name <- names(module.membership.list)[i]
   module.gene.list <- module.membership.list[[lineage.name]]
   
-  # get gene universe
-  if (which.universe == "all"){
-    gene.uni <- as.vector(rownames(so.query))
-  } else if (which.universe == "subset"){
+
+  if (which.universe == "subset"){
     gene.uni <- as.vector(unlist(module.gene.list))
   }
   

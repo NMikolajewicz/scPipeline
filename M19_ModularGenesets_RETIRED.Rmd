@@ -24,7 +24,7 @@ packages2load <- c("Seurat", "sctransform",
                    "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "readxl", "MAST", "future", "cluster", "ReactomePA", "clusterProfiler")
 
 # load packages
-lapply(packages2load, library, character.only = TRUE)
+# lapply(packages2load, library, character.only = TRUE)
 
 
 ```
