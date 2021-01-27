@@ -54,10 +54,14 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 ```{r parameter specification}
 
+
+# R339 Meg3, Gm37899
+# R266 
+
 # INPUT FILE ###################################################################
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
-# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "Module1_p7_mesoderm_110620.Rdata"
 # input.file <- "Module1_m27_p7_mesoderm_070420.Rdata"
@@ -65,9 +69,11 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 # input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
 # input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
-input.file <- "R304_M27_NM2_M02_BC2_allGBM_tumorStringent_tier1_251120.Rdata"
+# input.file = "Module1_p9_GBM_PR_noFilter_270620.Rdata"
+# input.file <- "R304_M27_NM2_M02_BC2_allGBM_tumorStringent_tier1_251120.Rdata"
 # input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
 # input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
+# input.file <- "R291_M01_NM2_Rambow_Melanoma_221120.Rdata"
 
 
 # QUERY SPECIFICATION ##########################################################
@@ -81,15 +87,12 @@ which.input <- list(
   #   4: top N cluster markers
   #   5: M09_type5_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
-  query_input_format = 1,
+  query_input_format = 0,
   do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
-  which.gene.set =c("GBM_HH_261120") # character (e.g., sex.specific)
+  which.gene.set =c('Mirg', "Rian", "Meg3") # character (e.g., sex.specific)
 )
-
-# GBM_HH_261120
-
 
 # PARAMETER SPECIFICATION ######################################################
 
@@ -97,14 +100,15 @@ parameter.list <- list(
   # General parameters #########################################################
   general.cluster.resolution = 1,    # Numeric [0, Inf]
   general.subsample.factor = 1,      # Numeric (0,1]
-  general.subset = data.frame(field = "seurat_clusters", subgroups = c(0:20)),   # 'no.subset' if unspecified
+  general.subset = "no.subset",
+  # general.subset = data.frame(field = "seurat_clusters", subgroups = c(0:7, 9:20)),   # 'no.subset' if unspecified
   general.species = "Mm",            # Options: 'Mm', 'Hs'
   general.clean.clusters = F,        # Logical. 
   general.save.pdf = T,              # Logical. 
   general.print.inline = F,          # Logical. 
   general.barcode.recode = list(     # new names (list names); old names (list entires). Empty list if no recoding. 
-    GL261 = "GL261",
-    CT2A = "CT2A"
+    # GL261 = "GL261",
+    # CT2A = "CT2A"
   ),
   
   # Correlation parameters #####################################################
@@ -122,7 +126,7 @@ parameter.list <- list(
   gsea.n.workers = 12,               # Numeric [1,n.available.cores]
   
   # Variance decomposition parameters ##########################################
-  vd.n.workers = 20,                 # Numeric [1,n.available.cores]
+  vd.n.workers = 8,                 # Numeric [1,n.available.cores]
   vd.covariates = c("seurat_clusters", "percent.mt", "bc", "Phase", "seq.coverage"),
   vd.interactions = c("bc:seurat_clusters"),
   
@@ -130,6 +134,17 @@ parameter.list <- list(
   expression.do.hex = F              # Logical. Specify whether to generate hex UMAPs (schex package)
 )
 
+  # general.barcode.recode = list(     # new names (list names); old names (list entires). Empty list if no recoding. 
+    # GL261 = "GL261",
+    # CT2A = "CT2A"
+  # ),
+
+    # WT = "WT",
+    # C15 = "C15",
+    # C2 = "C2", 
+    # C68 = "C68", 
+    # C76 = "C76", 
+    # C50 = "C50"
 ```
 
 ```{r assertions, include = FALSE}
@@ -656,105 +671,70 @@ if (parameter.list$expression.do.hex){
 
 ```{r umap expression plots, message=FALSE, warning=FALSE, include = FALSE}
 
-# initialize variables
-plt.umap.1 <- list()
-plt.umap.2 <- list()
-gNames <- gNames.list
-available_markers <- c()
-
-message("UMAP expression plots...")
-# check if point size adjustment is necessary
-if (ncol(so.query)> 50000) {
-  aps <- F
-  pt.size <- autoPointSize(ncol(so.query))
-} else {
-  aps <- T
-  pt.size <- 1
-}
-
-if (class(markers_of_interest) == "data.frame") markers_of_interest <- as.vector(markers_of_interest[,1])
-if (group.by == 1)u_groups <- as.character(as.numeric(u_groups)[order(as.numeric(u_groups))])
-
-query_genes_by_group <- data.frame(u_groups)
-input.marker.list <- markers_of_interest
-
-# sort genes by group
-for (i in 1:length(markers_of_interest)){
-  query_genes_by_group[ ,ncol(query_genes_by_group)+1] <- rep(markers_of_interest[i], nrow(query_genes_by_group))
-}
-
-# plot top differentially expressed genes per cluster and compare to cluster membership
-for (i in c(1:(length(markers_of_interest)))) {
+suppressMessages({
   
-  # empty list where plts will be stored
-  all_plts <- list()
+  # initialize variables
+  plt.umap.1 <- list()
+  plt.umap.2 <- list()
+  gNames <- gNames.list
+  available_markers <- c()
   
-  # highlight cluster plot
-  all_plts[[1]]  <- DimPlot(so.query, reduction = "umap", pt.size = aps, group.by = grouping_var, 
-                            label = TRUE, repel = TRUE)  + 
-    ggtitle(label = "UMAP") + xlab("UMAP 1") +  ylab("UMAP 2")
-  
-  # marker plot (try mouse and human formats)
-  
-  if (meta.module.flag){
-    cur.marker <- markers_of_interest[i]
+  message("UMAP expression plots...")
+  # check if point size adjustment is necessary
+  if (ncol(so.query)> 50000) {
+    aps <- F
+    pt.size <- autoPointSize(ncol(so.query))
   } else {
-    cur.marker <-  speciesConvert(markers_of_interest[i], 
-                                  rownames(so.query@assays[[DefaultAssay(so.query)]]@data), 
-                                  parameter.list$general.species)
+    aps <- T
+    pt.size <- 1
   }
   
-  markers_of_interest[i] <- cur.marker
+  if (class(markers_of_interest) == "data.frame") markers_of_interest <- as.vector(markers_of_interest[,1])
+  if (group.by == 1)u_groups <- as.character(as.numeric(u_groups)[order(as.numeric(u_groups))])
   
-  if (!is.na(cur.marker)){
+  query_genes_by_group <- data.frame(u_groups)
+  input.marker.list <- markers_of_interest
+  
+  # sort genes by group
+  for (i in 1:length(markers_of_interest)){
+    query_genes_by_group[ ,ncol(query_genes_by_group)+1] <- rep(markers_of_interest[i], nrow(query_genes_by_group))
+  }
+  
+  # plot top differentially expressed genes per cluster and compare to cluster membership
+  for (i in c(1:(length(markers_of_interest)))) {
     
-    if (parameter.list$expression.do.hex){
-      all_plts[[length(all_plts)+1]] <- schex::plot_hexbin_feature(so.query, feature=cur.marker, 
-                                                                   action="mean", xlab="UMAP1", ylab="UMAP2", 
-                                                                   title=cur.marker,
-                                                                   mod = DefaultAssay(so.query),
-                                                                   type = "data")
+    # empty list where plts will be stored
+    all_plts <- list()
+    
+    # highlight cluster plot
+    all_plts[[1]]  <- DimPlot(so.query, reduction = "umap", pt.size = aps, group.by = grouping_var, 
+                              label = TRUE, repel = TRUE)  + 
+      ggtitle(label = "UMAP") + xlab("UMAP 1") +  ylab("UMAP 2")
+    
+    # marker plot (try mouse and human formats)
+    
+    if (meta.module.flag){
+      cur.marker <- markers_of_interest[i]
     } else {
-
-      # only use nebulosa for single gene expression profiles.
-      if (meta.module.flag){
-        all_plts[[length(all_plts)+1]] <- scExpression.UMAP(
-          so.query,
-          cur.marker,
-          x.label = "UMAP 1",
-          y.label = "",
-          plot.name = NULL,
-          adjust.pt.size = aps) +
-          theme_miko(legend = T) +
-          viridis::scale_color_viridis(option = "A") +
-          labs(title = "", subtitle =cur.marker)
+      cur.marker <-  speciesConvert(markers_of_interest[i], 
+                                    rownames(so.query@assays[[DefaultAssay(so.query)]]@data), 
+                                    parameter.list$general.species)
+    }
+    
+    markers_of_interest[i] <- cur.marker
+    
+    if (!is.na(cur.marker)){
+      
+      if (parameter.list$expression.do.hex){
+        all_plts[[length(all_plts)+1]] <- schex::plot_hexbin_feature(so.query, feature=cur.marker, 
+                                                                     action="mean", xlab="UMAP1", ylab="UMAP2", 
+                                                                     title=cur.marker,
+                                                                     mod = DefaultAssay(so.query),
+                                                                     type = "data")
       } else {
         
-        is.success.plot <- F
-        try({
-          all_plts[[length(all_plts)+1]] <- Nebulosa::plot_density(
-            object = so.query,
-            features = cur.marker,
-            slot = "data",
-            joint = FALSE,
-            reduction = "umap",
-            dims = c(1, 2),
-            method = c("ks", "wkde"),
-            adjust = 1,
-            size = pt.size,
-            shape = 16,
-            combine = TRUE,
-            pal = "inferno"
-          )  +
-            theme_miko(legend = T) +
-            viridis::scale_color_viridis(option = "A") +
-            labs(title = "", subtitle =cur.marker)  
-          
-          is.success.plot <- T
-        }, silent = T)
-        
-        
-        if (!is.success.plot){
+        # only use nebulosa for single gene expression profiles.
+        if (meta.module.flag){
           all_plts[[length(all_plts)+1]] <- scExpression.UMAP(
             so.query,
             cur.marker,
@@ -765,29 +745,69 @@ for (i in c(1:(length(markers_of_interest)))) {
             theme_miko(legend = T) +
             viridis::scale_color_viridis(option = "A") +
             labs(title = "", subtitle =cur.marker)
+        } else {
+          
+          is.success.plot <- F
+          try({
+            all_plts[[length(all_plts)+1]] <- Nebulosa::plot_density(
+              object = so.query,
+              features = cur.marker,
+              slot = "data",
+              joint = FALSE,
+              reduction = "umap",
+              dims = c(1, 2),
+              method = c("ks", "wkde"),
+              adjust = 1,
+              size = pt.size,
+              shape = 16,
+              combine = TRUE,
+              pal = "inferno"
+            )  +
+              theme_miko(legend = T) +
+              viridis::scale_color_viridis(option = "A") +
+              labs(title = "", subtitle =cur.marker)  
+            
+            is.success.plot <- T
+          }, silent = T)
+          
+          
+          if (!is.success.plot){
+            all_plts[[length(all_plts)+1]] <- scExpression.UMAP(
+              so.query,
+              cur.marker,
+              x.label = "UMAP 1",
+              y.label = "",
+              plot.name = NULL,
+              adjust.pt.size = aps) +
+              theme_miko(legend = T) +
+              viridis::scale_color_viridis(option = "A") +
+              labs(title = "", subtitle =cur.marker)
+          }
+          
         }
-        
       }
+      
     }
     
+    if (length(all_plts) == 2){
+      
+      current.ind <- length(plt.umap.1)+1
+      plt.umap.1[[current.ind]] <- all_plts[[1]]
+      plt.umap.2[[current.ind]] <- all_plts[[2]]
+      available_markers[length(available_markers)+1] <- markers_of_interest[i]
+      
+      if (parameter.list$general.print.inline) print((CombinePlots(all_plts, ncol = length(all_plts), legend = 'none')))
+    }
   }
   
-  if (length(all_plts) == 2){
-    
-    current.ind <- length(plt.umap.1)+1
-    plt.umap.1[[current.ind]] <- all_plts[[1]]
-    plt.umap.2[[current.ind]] <- all_plts[[2]]
-    available_markers[length(available_markers)+1] <- markers_of_interest[i]
-    
-    if (parameter.list$general.print.inline) print((CombinePlots(all_plts, ncol = length(all_plts), legend = 'none')))
-  }
-}
-
-# remove NA entries
-available_markers <- available_markers[!is.na(available_markers)]
-
-# assign names marker names to each plot
-names(plt.umap.1) <- names(plt.umap.2) <- available_markers
+  # remove NA entries
+  available_markers <- available_markers[!is.na(available_markers)]
+  
+  # assign names marker names to each plot
+  names(plt.umap.1) <- names(plt.umap.2) <- available_markers
+  
+  
+})
 
 ```
 
@@ -804,9 +824,13 @@ if( ! is(v.mat, "sparseMatrix")){
   if( countNA > 0 ){
     stop("There are ", countNA, " NA/NaN/Inf values in exprObj\nMissing data is not allowed")
   }
+  if (is.numeric(v.mat)){
+    rv = var(v.mat)
+  } else {
+    rv = apply(v.mat, 1, var)
+  }
   
-  rv = apply(v.mat, 1, var)
-}else{
+} else{
   rv = c()
   for( i in seq_len(nrow(v.mat)) ){
     rv[i] = var(v.mat[i,])
@@ -835,6 +859,8 @@ f.mat.clust <- avgGroupExpression(
   which.group = "seurat_clusters"
 )
 try({rownames(f.mat.clust) <- rownames(e.mat.log)}, silent = T)
+
+invisible({gc()})
 
 f.mat.bc <- avgGroupExpression(
   so.query,
@@ -981,6 +1007,7 @@ if (compute.cor) {
     
     exp.map.av <- t.exp.mat[ , toupper(colnames(t.exp.mat)) %in% toupper(available_markers)]
     query.cor.mat <-  cor(t.exp.mat, exp.map.av, method = "spearman")
+   
     # query.cor.mat <-  dismay::dismay(t.exp.mat, metric = parameter.list$cor.method)
   } else if (parameter.list$cor.method == "pearson"){
     exp.map.av <- t.exp.mat[ , colnames(t.exp.mat) %in% available_markers]
@@ -988,7 +1015,10 @@ if (compute.cor) {
   }
 }
 
-query.cor.mat.all <- query.cor.mat[!(rownames(query.cor.mat) %in% available_markers),colnames(query.cor.mat) %in% available_markers]
+ if ((dim(query.cor.mat)[2] == 1) & length(available_markers) == 1) colnames(query.cor.mat) <- available_markers
+
+# !(rownames(query.cor.mat) %in% available_markers)
+query.cor.mat.all <- query.cor.mat[,colnames(query.cor.mat) %in% available_markers]
 
 if (!is.null(dim(query.cor.mat.all)) && ncol(query.cor.mat.all) == 0) stop("Correlation matrix is missing query features. If precomputed cor mat (M27) was used, try recomputing in current module (M09)")
 
@@ -1006,6 +1036,13 @@ if (!("genes" %in% colnames(df.cor.list)))  df.cor.list$genes <- rownames(df.cor
 which.available.markers <- available_markers[available_markers %in% colnames(df.cor.list)]
 df.cor.list <- df.cor.list[ ,c("genes", which.available.markers)]
 
+# set auto-correlations to zero
+for (i in 1:ncol(df.cor.list)){
+  if (colnames(df.cor.list)[i] == "genes") next
+  current.gene <- colnames(df.cor.list)[i]
+  which.match <- df.cor.list$genes %in% colnames(df.cor.list)[i]
+  df.cor.list[which.match,current.gene] <- NA
+}
 
 
 ```
@@ -1073,7 +1110,6 @@ for (i in 1:nrow(vd.df)){
     xlab("Variance Explained (%)") +
     ylab("Explanatory Covariates")
 }
-
 
 ```
 
@@ -1519,15 +1555,16 @@ if ("cluster x Barcode"  %in% names(df.expression.list)){
   cb.hm.list <- NULL
 }
 
+
 ```
 
 
 ```{r create cor heatmap, include= F}
 
 # fitered correlation matrix
-  if (class(cor.mat.sub) == "matrix") {
+  if ((class(cor.mat.sub) == "matrix") && (dim(cor.mat.sub)[2] > 0)) {
     
-   cor.mat.sub <- cor.mat.sub[ ,!(is.na(apply(cor.mat.sub, 2, function(x) var(x))))] 
+   cor.mat.sub <- cor.mat.sub[ ,!(is.na(apply(cor.mat.sub, 2, function(x) var(x, na.rm = T))))] 
     plt.heat <- ggplotify::as.ggplot(pheatmap::pheatmap(cor.mat.sub, 
                                                         main = "Query x Gene Correlations\nx=query, y=genes, z=correlation",
                                                          border_color = NA, silent = T))
@@ -1537,6 +1574,7 @@ if ("cluster x Barcode"  %in% names(df.expression.list)){
   } else {
     plt.heat <- NULL
   }
+
 
 ```
 
@@ -1620,7 +1658,15 @@ rmv.plt.elements <- function(plt){
   return(plt)
 }
 
+# printProgress <- function(
+#   
+# )
+
 for (i in 1:length(available_markers)){
+  
+  if (((100*(signif(i/length(available_markers)))) %% 5) == 0){
+    message(paste0("Consolidation progress: ", 100*(signif(i/length(available_markers))), "%")) 
+  }
   
   check.1 <- available_markers[i] %in% names(plt.umap.1)
   check.2 <- available_markers[i] %in% names(plt.umap.2)
@@ -1710,6 +1756,8 @@ if (class(exp.mat.av) == "matrix") {
     gene.order.av <- rownames(mat.reconstruct.av)
     cluster.order.av <- colnames(mat.reconstruct.av)
     plt.heat.availableGenes <- ggplotify::as.ggplot(pheatmap::pheatmap(exp.mat.av))
+    plt.heat.availableGenes <- ggplotify::as.ggplot(pheatmap::pheatmap(exp.mat.av,
+                                                                       color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlGn")))(100)))
     clust.success <- T
   }, silent = T)
   
