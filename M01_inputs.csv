@@ -40,3 +40,5 @@ pilot11.Mm,Mm,pilot11_mouseParallelMapped_sci_summary.RData,HH11_pcr_barcodes_20
 pilot10.Mm,Mm,pilot10_mouseParallelMapped_sci_summary.RData,HH10_pcr_barcodes_20200816_96used.txt,HH10_rt_barcodes_20200816NewFormat_192used.txt,Raw_Datasets/pilots/,1
 pilot12.Hs,Hs,pilot12_ParallelMapped_sci_summary.RData,HH12_pcr_barcodes_20201006_96used.txt,HH12_rt_barcodes_20201006NewFormat_192used.txt,Raw_Datasets/pilots/,1
 Rambow.Melanoma,Hs,GSE116237_scRNAseq_expressionMatrix.txt,,,Raw_Datasets/Expression_matrix/Rambow_2018_Melanoma/,3
+richards.gbm,Hs,Richards_NatureCancer_GBM_scRNAseq_counts.csv,,,Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/,3
+richards.gsc,Hs,Richards_NatureCancer_GSC_scRNAseq_counts.csv,,,Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/,3
