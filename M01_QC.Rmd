@@ -40,12 +40,12 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # specify parameters
 analysis.parameters <- analysisParameters(
-  which.data = c("Rambow.Melanoma"),
+  which.data = c("pilot12.Hs"),
   # which.strata = c("LM.trouble"),
   organism.filter.flag = F,                             
   organism.include = c("Hs"),
   save.flag = T,                                                              # OPTIONAL; logical (default = T)  # save results
-  save.filename = "Rambow_Melanoma_221120.Rdata", # note that prefix containing module number and run ID is appended to save file. 
+  save.filename = "pilot12_meso_v2_160421.Rdata", # note that prefix containing module number and run ID is appended to save file. 
   save.directory = "Preprocessed_Datasets/",
   cluster.resolution = 1,
   gene.upperlimit = 9000, #9000
@@ -250,7 +250,7 @@ loadMat.dev <- function(import_set, input_organisms, dir) {
   
   # import expression matrix data
   
-  which.set <- "rambow" # options: "kumal", "rambow"
+  which.set <- "richards" # options: "kumal", "rambow", richards
   # is.kumal <- F # specificy fixes made to accomodate Kumal 2018 EMT6 data
   if (which.set == "kumal"){
     expression_matrix<-read.csv(import_set_path[1],header=F, stringsAsFactors = F)
@@ -266,8 +266,13 @@ loadMat.dev <- function(import_set, input_organisms, dir) {
     e2g.list <- my.symbol$SYMBOL; names(e2g.list) <- my.symbol$ENSEMBL
     rownames(expression_matrix) <- make.unique(e2g.list[ rownames(expression_matrix)])
     expression_matrix$GENE <- rownames(expression_matrix)
-  }
-  else {
+  } else if (which.set == "richards"){
+    expression_matrix<-read.csv(import_set_path[1],header=T, stringsAsFactors = F)
+    expression_matrix$GENE <- expression_matrix$X
+    expression_matrix <- col2rowname(expression_matrix, "X")
+    
+    # expression_matrix <- as.data.frame((expression_matrix))    
+  } else {
     expression_matrix<-read.table(import_set_path[1],header=TRUE)
   }
   
@@ -1300,15 +1305,24 @@ if (analysis.parameters$print.inline) {
 
 if (normalization_method_ps == "SCT"){
   df.var.meta <- so@assays[["SCT"]]@meta.features
-  df.var.meta <- df.var.meta[df.var.meta$sct.variable == T, ]
-  df.var.meta <- bind_cols(data.frame(genes = rownames(df.var.meta)), df.var.meta)
-  df.var.meta <- df.var.meta %>% dplyr::arrange(-sct.residual_variance)
+  df.var.model <- so@assays[["SCT"]]@SCTModel.list[["model1"]]@feature.attributes
+  var.gene <- so@assays[["SCT"]]@var.features
+  df.var.model$ENSEMBLE <- df.var.meta$ENSEMBLE
+  df.var.model$SYMBOL <- df.var.meta$SYMBOL
+  so@assays[["SCT"]]@SCTModel.list[["model1"]]@feature.attributes <- df.var.model
+  df.var.meta <- df.var.model %>% dplyr::filter(SYMBOL %in% var.gene)
+  # df.var.meta <- df.var.meta[df.var.meta$sct.variable == T, ]
+  # df.var.meta <- bind_cols(data.frame(genes = rownames(df.var.meta)), df.var.meta)
+  df.var.meta <- df.var.meta %>% dplyr::arrange(-residual_variance)
   
-  which.round <- colnames(df.var.meta)[ !(colnames(df.var.meta) %in% c("genes", "sct.variable"))]
+  which.round <- colnames(df.var.meta)[ !(colnames(df.var.meta) %in% c("ENSEMBLE", "SYMBOL", "genes_log_gmean_step1", "step1_theta", "step1_(intercept)", "step1_log_umi"))]
   try({df.var.meta[which.round] <- signif(df.var.meta[which.round], 3)}, silent = T)
 } else {
   df.var.meta <- NULL
 }
+
+
+
 
 ```
 
