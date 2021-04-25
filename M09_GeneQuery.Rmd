@@ -55,13 +55,12 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 ```{r parameter specification}
 
 
-# R339 Meg3, Gm37899
-# R266 
-
 # INPUT FILE ###################################################################
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
+input.file <- "R416_M02_NM2_p12_meso_integrated_170421.Rdata"
 # input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
-input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
+# input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
+# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "Module1_p7_mesoderm_110620.Rdata"
 # input.file <- "Module1_m27_p7_mesoderm_070420.Rdata"
@@ -87,28 +86,35 @@ which.input <- list(
   #   4: top N cluster markers
   #   5: M09_type5_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
-  query_input_format = 0,
+  query_input_format = 3,
   do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
-  which.gene.set =c('Mirg', "Rian", "Meg3") # character (e.g., sex.specific)
+  which.gene.set =c('MesoList_240421') # character (e.g., sex.specific)
 )
+
+# cgr8_cluster_markers
 
 # PARAMETER SPECIFICATION ######################################################
 
 parameter.list <- list(
   # General parameters #########################################################
-  general.cluster.resolution = 1,    # Numeric [0, Inf]
-  general.subsample.factor = 1,      # Numeric (0,1]
+  general.cluster.resolution = 0.5,    # Numeric [0, Inf]
+  general.subsample.factor = 0.2,      # Numeric (0,1]
   general.subset = "no.subset",
   # general.subset = data.frame(field = "seurat_clusters", subgroups = c(0:7, 9:20)),   # 'no.subset' if unspecified
-  general.species = "Mm",            # Options: 'Mm', 'Hs'
+  general.species = "Hs",            # Options: 'Mm', 'Hs'
   general.clean.clusters = F,        # Logical. 
   general.save.pdf = T,              # Logical. 
   general.print.inline = F,          # Logical. 
-  general.barcode.recode = list(     # new names (list names); old names (list entires). Empty list if no recoding. 
-    # GL261 = "GL261",
-    # CT2A = "CT2A"
+  general.barcode.recode = list(     # new names (list names); old names (list entires). Empty list if no recoding.
+  D0 = "D0",
+  D1 = "D1",
+  D2 = "D2",
+  D3 = "D3",
+  D4 = "D4",
+   D5 = "D5",
+  D6 = "D6"
   ),
   
   # Correlation parameters #####################################################
@@ -134,10 +140,28 @@ parameter.list <- list(
   expression.do.hex = F              # Logical. Specify whether to generate hex UMAPs (schex package)
 )
 
-  # general.barcode.recode = list(     # new names (list names); old names (list entires). Empty list if no recoding. 
+  # general.barcode.recode = list(     # new names (list names); old names (list entires). Empty list if no recoding.
+  # WT = "WT",
+  # C15 = "C15",
+  # C2 = "C2",
+  # C68 = "C68",
+  # C76 = "C76",
+  # C50 = "C50"
+  # )
+  # 
+
+
+  # general.barcode.recode = list(     # new names (list names); old names (list entires). Empty list if no recoding.
+  # WT = "WT",
+  # C15 = "C15",
+  # C2 = "C2",
+  # C68 = "C68",
+  # C76 = "C76",
+  #  C50 = "C50"
+  # ),
+
     # GL261 = "GL261",
     # CT2A = "CT2A"
-  # ),
 
     # WT = "WT",
     # C15 = "C15",
@@ -246,7 +270,9 @@ if (which.input$query_input_format==0){
   dir.geneset <- gene.sets.type2[[which.gene.set]][["directory"]]
   meta.module.flag <- meta.module.helper( which.input$do.module,gene.sets.type2[[which.gene.set]][["module"]])
   prefix.label <- gene.sets.type2[[which.gene.set]][["prefix.label"]]
-} else if ((which.input$query_input_format==3) | (which.input$query_input_format==4)) {
+} else if ((which.input$query_input_format==3)) {
+  meta.module.flag <- meta.module.helper( which.input$do.module,F)
+} else if ((which.input$query_input_format==4)) {
   meta.module.flag <- meta.module.helper( which.input$do.module,T)
 } else if (which.input$query_input_format==5){
   stopifnot(which.gene.set %in% gene.sets.type5$term)
@@ -488,16 +514,19 @@ if (which.input$query_input_format == 3){
   message("Running differential gene analysis...")
   orig.ident <-  Idents(so.query) 
   Idents(so.query) <- grouping_var
-  deg.gene <- FindAllMarkers(so.query, 
-                             assay = DefaultAssay(so.query),
-                             slot = "data",
-                             only.pos = F, 
-                             min.pct = 0,
-                             test.use = "MAST",
-                             logfc.threshold = 0.15, 
-                             max.cells.per.ident = 200,
-                             return.thresh = 1, #1 ensures all genes are returned
-                             verbose = F)
+  # deg.gene <- FindAllMarkers(so.query, 
+  #                            assay = DefaultAssay(so.query),
+  #                            slot = "data",
+  #                            only.pos = F, 
+  #                            min.pct = 0,
+  #                            test.use = "MAST",
+  #                            logfc.threshold = 0.15, 
+  #                            max.cells.per.ident = 200,
+  #                            return.thresh = 1, #1 ensures all genes are returned
+  #                            verbose = F)
+  
+  
+  deg.gene <- presto::wilcoxauc(so.query, group_by = grouping_var, seurat_assay = DefaultAssay(so.query))
   Idents(so.query) <- orig.ident
 } 
 
@@ -508,33 +537,40 @@ if (which.input$query_input_format == 3){
 
 if (which.input$query_input_format == 3){
   
-  p.threshold <- 0.05
-  lfc.threshold <- 0.25
-  pct.threshold <- 0.25
+  top.n.deg <- 10
+  # p.threshold <- 0.05
+  # lfc.threshold <- 0.25
+  # pct.threshold <- 0.25
+  
+  deg.gene <- deg.gene %>% dplyr::arrange(auc)
+  deg.gene.top <- deg.gene %>%
+    dplyr::group_by(group) %>%
+    dplyr::top_n(top.n.deg, auc)
   
   # filter by threshold
-  deg.gene.sig <- deg.gene[ (deg.gene$p_val_adj<p.threshold) & 
-                              (abs(deg.gene$avg_log2FC)>lfc.threshold) & 
-                              (deg.gene$pct.1 > pct.threshold) & 
-                              (deg.gene$pct.2 > pct.threshold), ]
+  # deg.gene.sig <- deg.gene[ (deg.gene$p_val_adj<p.threshold) & 
+  #                             (abs(deg.gene$avg_log2FC)>lfc.threshold) & 
+  #                             (deg.gene$pct.1 > pct.threshold) & 
+  #                             (deg.gene$pct.2 > pct.threshold), ]
+  # 
+  # # subset and label (up vs down), merge after
+  # deg.gene.sig.up <- deg.gene.sig[deg.gene.sig$avg_log2FC>0, ]
+  # deg.gene.sig.up$cluster <- as.character(paste("c", deg.gene.sig.up$cluster, ".up", sep = ""))
+  # deg.gene.sig.down <- deg.gene.sig[deg.gene.sig$avg_log2FC<0, ]
+  # deg.gene.sig.down$cluster <- as.character(paste("c", deg.gene.sig.down$cluster, ".down", sep = ""))
+  # deg.gene.sig.all <- bind_rows(deg.gene.sig.up, deg.gene.sig.down)
+  # 
+  # # pivot to wide (accomodate uneven col numbers)
+  # deg.gene.sig.all.subset <- unique(data.frame(cluster = deg.gene.sig.all$cluster, gene = deg.gene.sig.all$gene))
+  # deg.gene.sig.all.subset$cluster <- as.character(deg.gene.sig.all.subset$cluster)
+  # deg.all.wide <- deg.gene.sig.all.subset %>%
+  #   group_by(cluster) %>%
+  #   mutate(row = row_number()) %>%
+  #   tidyr::pivot_wider(names_from = cluster, values_from = gene) %>%
+  #   dplyr::select(-row)
   
-  # subset and label (up vs down), merge after
-  deg.gene.sig.up <- deg.gene.sig[deg.gene.sig$avg_log2FC>0, ]
-  deg.gene.sig.up$cluster <- as.character(paste("c", deg.gene.sig.up$cluster, ".up", sep = ""))
-  deg.gene.sig.down <- deg.gene.sig[deg.gene.sig$avg_log2FC<0, ]
-  deg.gene.sig.down$cluster <- as.character(paste("c", deg.gene.sig.down$cluster, ".down", sep = ""))
-  deg.gene.sig.all <- bind_rows(deg.gene.sig.up, deg.gene.sig.down)
-  
-  # pivot to wide (accomodate uneven col numbers)
-  deg.gene.sig.all.subset <- unique(data.frame(cluster = deg.gene.sig.all$cluster, gene = deg.gene.sig.all$gene))
-  deg.gene.sig.all.subset$cluster <- as.character(deg.gene.sig.all.subset$cluster)
-  deg.all.wide <- deg.gene.sig.all.subset %>%
-    group_by(cluster) %>%
-    mutate(row = row_number()) %>%
-    tidyr::pivot_wider(names_from = cluster, values_from = gene) %>%
-    dplyr::select(-row)
-  
-  markers_of_interest <- as.data.frame(deg.all.wide)
+  # markers_of_interest <- as.data.frame(deg.all.wide)
+  markers_of_interest <- unique(as.character(deg.gene.top$feature))
   
   
 } else if (which.input$query_input_format == 4){
