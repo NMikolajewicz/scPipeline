@@ -44,7 +44,7 @@ start.time <- proc.time()
 packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", "grid",
                    "DT", "flexdashboard", "ggpmisc", "future", "foreach", "doParallel",
                    "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "ggplot2", "reactome.db",
-                   "schex", "RColorBrewer", "cowplot", "viridis", "viridisLite")
+                   "schex", "RColorBrewer", "cowplot", "viridis", "viridisLite", "presto", "variancePartition", "lme4", "ggdendro")
 
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE))
@@ -100,12 +100,12 @@ which.input <- list(
 parameter.list <- list(
   # General parameters #########################################################
   general.cluster.resolution = 0.5,    # Numeric [0, Inf]
-  general.subsample.factor = 0.2,      # Numeric (0,1]
+  general.subsample.factor = 1,      # Numeric (0,1]
   general.subset = "no.subset",
   # general.subset = data.frame(field = "seurat_clusters", subgroups = c(0:7, 9:20)),   # 'no.subset' if unspecified
   general.species = "Hs",            # Options: 'Mm', 'Hs'
   general.clean.clusters = F,        # Logical. 
-  general.save.pdf = T,              # Logical. 
+  general.save.pdf = F,              # Logical. 
   general.print.inline = F,          # Logical. 
   general.barcode.recode = list(     # new names (list names); old names (list entires). Empty list if no recoding.
   D0 = "D0",
@@ -122,6 +122,7 @@ parameter.list <- list(
   cor.top.n = 70,
   cor.which.data = "data",
   cor.check.existing = T,            # Logical. 
+  cor.min.expr = 0.05,               # min expressing fraction to be included in correlation
   cor.recompute.existing.if.query.missing = T,
   
   # GSEA parameters #############################################################
@@ -140,26 +141,6 @@ parameter.list <- list(
   expression.do.hex = F              # Logical. Specify whether to generate hex UMAPs (schex package)
 )
 
-  # general.barcode.recode = list(     # new names (list names); old names (list entires). Empty list if no recoding.
-  # WT = "WT",
-  # C15 = "C15",
-  # C2 = "C2",
-  # C68 = "C68",
-  # C76 = "C76",
-  # C50 = "C50"
-  # )
-  # 
-
-
-  # general.barcode.recode = list(     # new names (list names); old names (list entires). Empty list if no recoding.
-  # WT = "WT",
-  # C15 = "C15",
-  # C2 = "C2",
-  # C68 = "C68",
-  # C76 = "C76",
-  #  C50 = "C50"
-  # ),
-
     # GL261 = "GL261",
     # CT2A = "CT2A"
 
@@ -174,7 +155,7 @@ parameter.list <- list(
 ```{r assertions, include = FALSE}
 
 # check if all parameters specified
-expected.parameters <- c('general.cluster.resolution', 'general.subsample.factor', 'general.subset', 'general.species', 'general.clean.clusters', 'general.save.pdf', 'general.print.inline', 'general.barcode.recode', 'cor.method', 'cor.top.n', 'cor.which.data', 'cor.check.existing', 'cor.recompute.existing.if.query.missing', 'gsea.top.n', 'gsea.threshold', 'gsea.database', 'gsea.ontology', 'gsea.n.workers', 'vd.n.workers', 'vd.covariates', 'vd.interactions', 'expression.do.hex')
+expected.parameters <- c('general.cluster.resolution', 'general.subsample.factor', 'general.subset', 'general.species', 'general.clean.clusters', 'general.save.pdf', 'general.print.inline', 'general.barcode.recode', 'cor.method', 'cor.top.n', 'cor.which.data', 'cor.check.existing', 'cor.recompute.existing.if.query.missing', 'gsea.top.n', 'gsea.threshold', 'gsea.database', 'gsea.ontology', 'gsea.n.workers', 'vd.n.workers', 'vd.covariates', 'vd.interactions', 'expression.do.hex', "cor.min.expr")
 
 which.parameters.missing <- names(parameter.list)[!(names(parameter.list) %in% expected.parameters)]
 if (length(which.parameters.missing) > 0){
@@ -455,6 +436,10 @@ if ("data.frame" %in% class(parameter.list$general.subset)){
 } else if ("character" %in% class(parameter.list$general.subset)){
   df.log <- addLogEntry("Which Subset Groups", parameter.list$general.subset, df.log, "subset.df")    
 }
+
+
+
+df.log <- addLogEntry("Min expr. fraction for cor. analysis", parameter.list$cor.min.expr, df.log, "cor.min.expr")
 
 df.log <- addLogEntry("Clusters cleaned", parameter.list$general.clean.clusters, df.log, "general.clean.clusters")
 df.log <- addLogEntry("Cluster Resolution", parameter.list$general.cluster.resolution, df.log, "general.cluster.resolution")
@@ -784,27 +769,32 @@ suppressMessages({
         } else {
           
           is.success.plot <- F
-          try({
-            all_plts[[length(all_plts)+1]] <- Nebulosa::plot_density(
-              object = so.query,
-              features = cur.marker,
-              slot = "data",
-              joint = FALSE,
-              reduction = "umap",
-              dims = c(1, 2),
-              method = c("ks", "wkde"),
-              adjust = 1,
-              size = pt.size,
-              shape = 16,
-              combine = TRUE,
-              pal = "inferno"
-            )  +
-              theme_miko(legend = T) +
-              viridis::scale_color_viridis(option = "A") +
-              labs(title = "", subtitle =cur.marker)  
-            
-            is.success.plot <- T
-          }, silent = T)
+          do.nebullosa <- F
+          
+          if (do.nebullosa){
+            try({
+              all_plts[[length(all_plts)+1]] <- Nebulosa::plot_density(
+                object = so.query,
+                features = cur.marker,
+                slot = "data",
+                joint = FALSE,
+                reduction = "umap",
+                dims = c(1, 2),
+                method = c("ks", "wkde"),
+                adjust = 1,
+                size = pt.size,
+                shape = 16,
+                combine = TRUE,
+                pal = "inferno"
+              )  +
+                theme_miko(legend = T) +
+                viridis::scale_color_viridis(option = "A") +
+                labs(title = "", subtitle =cur.marker)
+              
+              is.success.plot <- T
+            }, silent = T)            
+          }
+          
           
           
           if (!is.success.plot){
@@ -1011,7 +1001,7 @@ if (compute.cor) {
     is.exp <- exp.mat.complete > 0
     p.exp <- rowMeans(is.exp)
     # p.exp <- apply(exp.mat.complete, 1, function(x) mean(x > 0))
-    which.keep <- rownames(exp.mat.complete)[which(p.exp > 0.1)]
+    which.keep <- rownames(exp.mat.complete)[which(p.exp > parameter.list$cor.min.expr)]
     which.keep2 <-  rownames(exp.mat.complete)[rownames(exp.mat.complete) %in% available_markers]
     exp.mat <- exp.mat.complete[rownames(exp.mat.complete) %in% unique(c(which.keep, which.keep2)), ]
   } else {
@@ -1156,16 +1146,19 @@ for (i in 1:nrow(vd.df)){
 message("Preparing data for GSEA...")
 
 # Rank by LFC if DEG
-if (which.input$query_input_format == 3){
-  deg.gene.enrich <- deg.gene[ ,c("cluster", "avg_log2FC", "gene")]
-  colnames(deg.gene.enrich) <- c("cluster", "avg_log2FC", "genes")
-  deg.gene.enrich$cluster <- paste("c", deg.gene.enrich$cluster , sep = "")
-  deg.gene.enrich.wide <- pivot_wider(deg.gene.enrich, names_from = cluster, values_from = avg_log2FC)
+# 
+# if (which.input$query_input_format == 3){
+#   deg.gene.enrich <- deg.gene[ ,c("cluster", "avg_log2FC", "gene")]
+#   colnames(deg.gene.enrich) <- c("cluster", "avg_log2FC", "genes")
+#   deg.gene.enrich$cluster <- paste("c", deg.gene.enrich$cluster , sep = "")
+#   deg.gene.enrich.wide <- pivot_wider(deg.gene.enrich, names_from = cluster, values_from = avg_log2FC)
+#   
+#   df2enrich <- as.data.frame(deg.gene.enrich.wide)
+#   
+#   # Rank by Correlations if query genes
+# } else 
   
-  df2enrich <- as.data.frame(deg.gene.enrich.wide)
-  
-  # Rank by Correlations if query genes
-} else if (which.input$query_input_format == 4){
+if (which.input$query_input_format == 4){
   
   exp.gene.enrich.wide <- pivot_wider(df.avg.exp.sub, names_from = cluster, values_from = exp)
   df2enrich <- as.data.frame(exp.gene.enrich.wide)
