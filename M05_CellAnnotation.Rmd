@@ -41,6 +41,35 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 ```
 
+```{r}
+# 
+# a <- msigdbr_collections()
+# df.msd <- msigdbr(species = msd.species, category = msigdb.collection)
+# getAnnotationPathways()
+# 
+# 
+# cell.types <- msigdbr(species = "Homo sapiens", category = "C8")
+# 
+# 
+# # colnames(cell.types)
+# gs <- cell.types[ ,c("gs_name", "gene_symbol")]
+# 
+# 
+# # gs.wide <- pivot_wider(names_from = "gs_name", values_from = "gene_symbol")
+# u.set <- unique(gs$gs_name)
+# 
+# gene.list <- list()
+# for (i in 1:length(u.set)){
+#   gene.list[[u.set[i]]] <- gs$gene_symbol[gs$gs_name %in% u.set[i]]
+# }
+# 
+# 
+# df.wide <- namedList2wideDF(gene.list)
+# 
+# # msigdb_cell_types_mouse.csv
+# flex.asDT(df.wide)
+
+```
 
 
 ```{r analysis specifications}
@@ -51,11 +80,12 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 # input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
-input.file <- "R308_M27_NM2_M02_BC2_allGBM_immune_tier2_251120.Rdata"
+# input.file <- "R308_M27_NM2_M02_BC2_allGBM_immune_tier2_251120.Rdata"
 # input.file <- "R304_M27_NM2_M02_BC2_allGBM_tumorStringent_tier1_251120.Rdata"
 # input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
 # input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 # input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
+input.file <- "R410_M02_NM2_celsius_all_renca_rpca_filtered_240321.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
 # input.file <- "R291_M01_NM2_Rambow_Melanoma_221120.Rdata"
@@ -63,15 +93,13 @@ input.file <- "R308_M27_NM2_M02_BC2_allGBM_immune_tier2_251120.Rdata"
 # "neural.dif.HH", 
 # specify reference genesets
 # "MCA_50", "Zhang_2019", "Panglao.Mm", "VastDB",  "cycling.seurat",, , "neural.dif.HH"
-which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm",   "VastDB", "cycling.seurat", "immune.Monaco",  "invitro.GBM", "Zeisel2018_brainDev", "brain.GBM.R103", "GBM.invitro.fig1")
 
-# , "invitro.GBM", "Zeisel2018_brainDev" "brain.GBM.R103",
+# ,  "invitro.GBM", "Zeisel2018_brainDev"
+which.references <- c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  "MCA_50", "Zhang_2019", "Panglao.Mm",   "VastDB", "cycling.seurat", "immune.Monaco", "Kidney_Healthy_Mm", "msigdb_Mm")
 
-# which.references <- "TRRUSTv2_Hs_reg"
-# which.references <- "brain.GBM.R103", "neural.dif.HH"
 
 # specify cluster resolution
-cluster.resolution <- 1 # OPTIONAL; range 0 to inf (default = 1)
+cluster.resolution <- 0.4 # OPTIONAL; range 0 to inf (default = 1)
 
 so.input.species <- "Mm" # eREQUIRED; Hs, Mm
 
@@ -129,8 +157,13 @@ if (!exists("input.file")) stop("input.file is not specified")
 
 # load query dataset
 warning("Importing data...")
-if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
-load(paste(data.path, dir.preprocessed, input.file, sep = ""));
+if ((!grepl(".Rdata|.RData", input.file)) & !(grepl(".rds", input.file))) input.file <- paste0(input.file, ".Rdata")
+if (grepl(".Rdata|.RData", input.file)){
+  load(paste(data.path, dir.preprocessed, input.file, sep = ""));
+} else if (grepl(".rds", input.file)) {
+  so <- readRDS(paste(data.path, dir.preprocessed, input.file, sep = ""))
+}
+
 
 if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 

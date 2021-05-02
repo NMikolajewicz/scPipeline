@@ -55,11 +55,15 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # input.file <- "M01_NM2_R1_test_300720.Rdata"
 # input.file <- "R4_M02_BC2_M02_p467891011_Mm_allGBM_010920.Rdata"
 # input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
-input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
+# input.file <- "Module16_UHN_0238_filtered_aggr_labledv2_300120.Rdata"
 # input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 # input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
 # input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
 # input.file = "R291_M01_NM2_Rambow_Melanoma_221120.Rdata"
+# input.file <- "R304_M27_NM2_M02_BC2_allGBM_tumorStringent_tier1_251120.Rdata"
+# input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
+# input.file <- "Module1_p9_GBM_PR_noFilter_270620.Rdata"
+input.file <- "R416_M02_NM2_p12_meso_integrated_170421.Rdata"
 
 subsample_factor <- 1
 # specify cluster resolution
@@ -67,18 +71,21 @@ cluster.resolution <- 0.5 # OPTIONAL; range 0 to inf (default = 1)
 
 which.species <- "Hs" # eREQUIRED; Hs, Mm
 
-
+# cluster ids to include/omit
+# set include and omit entries to NULL
+filter.parameters <- list(
+  # include = c(0:7, 9:20),
+  include = NULL,
+  omit = NULL
+  # omit = c(9,12)    # e.g., c(19, 2) c(6,8,13) c(8,10)
+)
 
 # print inline
 print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 
-# specify number of workers for parallelization
-# n.workers <- list(
-#   # scoring = 12,
-#   # deg = 12
-# )
-
-
+subset.df <- "no.subset"
+# subset.df <- data.frame(field = "seurat_clusters", subgroups = c(0:7, 9:20))
+# subset.df <- data.frame(field = "Barcode", subgroups = "GL261")
 # save PDF
 save.pdf <- T
 
@@ -120,7 +127,7 @@ t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "integration.anchors")
 
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
-                         species = which.species, resolution= cluster.resolution, subset.data = NULL, 
+                         species = which.species, resolution= cluster.resolution, subset.data = subset.df, 
                          subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
                          terms2drop = t2d, rmv.pattern = "so", keep.default.assay.only = T)
 
@@ -131,6 +138,20 @@ current.assay <- prep.list$assay
 n.cells <- prep.list$n.cell
 rm(prep.list);
 invisible({gc()})
+
+```
+
+```{r filter clusters}
+
+
+if (exists("filter.parameters")){
+  so.query <- clusterFilter(so.query, include = filter.parameters$include, omit = filter.parameters$omit)
+  # 
+  # # TODO ensure that refactorization does not renumber values
+  # so.query@meta.data[["seurat_clusters"]] <- factor(as.character(so.query@meta.data[["seurat_clusters"]]))
+  # Idents(object = so.query) <- 'seurat_clusters'
+}
+
 
 ```
 
@@ -207,12 +228,15 @@ exp.mat <- getExpressionMatrix(
   which.assay = DefaultAssay(so.query),
   which.data = "data",
   use.additional.genes = NA,
-  as.dense = T
+  as.dense = F
 )
 
+# exp.mat <- scMiko::sparse2dense(exp.mat)
+ exp.mat <- as.matrix(exp.mat)
 pct.rep <- apply(exp.mat, 1, function(x) mean(x>0))
 which.rep <- names(pct.rep)[pct.rep > 0.2]
 exp.mat <- exp.mat[rownames(exp.mat) %in% which.rep, ]
+# exp.mat <- sparse2dense(exp.mat)
 
 # specfiy genesets ###########################################################
 gene.names <- rownames(exp.mat)
