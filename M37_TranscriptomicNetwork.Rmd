@@ -5,6 +5,11 @@ output:
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: fill
+    source_code: embed
+    theme: flatly
+    navbar:
+      - { title: "scPipeline", href: "https://github.com/NMikolajewicz/scPipeline" }
+      - { title: "scMiko", href: "https://github.com/NMikolajewicz/scMiko" }     
 editor_options: 
   chunk_output_type: inline
 knit: (function(inputFile, encoding) {
@@ -32,11 +37,12 @@ invisible({gc()})
 start.time <- proc.time()
 
 # List of packages to load
-packages2load <- c("Seurat", "scMiko", "DT", "lme4", "variancePartition",
+packages2load <- c("Seurat", "scMiko", "DT", "scales", 
                    "dplyr", "tidyr", "RColorBrewer", "ggplot2", 
                    "flexdashboard", "future", "BiocParallel",
                    "parallel", "doParallel", "foreach", "iterators")
 
+# "lme4", "variancePartition",
 # load packages
 suppressMessages(suppressWarnings(lapply(packages2load, library, character.only = TRUE, quietly = T)))
 
@@ -49,15 +55,15 @@ suppressMessages(suppressWarnings(lapply(packages2load, library, character.only 
 # parameter specification
 parameter.list <- list(
   # input.file = "R304_M27_NM2_M02_BC2_allGBM_tumorStringent_tier1_251120.Rdata",
-  input.file = "R71_M01_NM2_p10_CGR8_310820.Rdata",
+  # input.file = "branch_p12_meso_020521.rds",
+  # input.file = 	"R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
   # input.file = "R416_M02_NM2_p12_meso_integrated_170421.Rdata",
-  cluster.resolution = 0.5,
+  input.file = "M01_NM2_R1_test_300720.Rdata",
+  cluster.resolution = 0.3,
   subsample_factor = 1,
-  # subset.data = data.frame(field = "Barcode", subgroups = "GL261"),
   subset.data = NA,
-  species = "Mm",
-  min.pct = 0.5, # large net: 0.1; small net: 0.5 -  min gene expression (applicable only if variable.only = F)
-  variable.only = T, # variable genes only?
+  min.pct = 0.7, # large net: 0.1; small net: 0.5 -  min gene expression (applicable only if variable.only = F)
+  variable.only = F, # variable genes only?
   purity.optimization.step.size = 0.05,
   pathway.db = "Bader", #Bader, GO
   
@@ -78,43 +84,19 @@ parameter.list <- list(
   general.cluster.purity = 0.9
 )
 
-
-# barcode.list = list(
-# GL261 = "GL261",
-# CT2A = "CT2A"
-# )
-
 filter.parameters <- list(
   include = NULL,
   omit = NULL
 )
 
-
 # print inline
 print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 
 # save PDF
-save.pdf <- F
-update.log <- T
+save.pdf <- update.log <- T
 
-
-
-# 
-# paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y"))
-# 
-# format(Sys.time(), "%a %b %d %X %Y")
-# 
-# format(Sys.Date(), "%d%m%y")
-# 
-# format(Sys.time(), "%h%m%s")
-# 
-# Sys.time()
-
-
-# _02_Sep_2018_20.29.50
 
 ```
-
 
 
 
@@ -133,8 +115,14 @@ if (!exists("data.path") & !exists("user")) {
 
 # load query dataset
 input.file <- parameter.list$input.file
-if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
-load(paste(data.path, dir.preprocessed, input.file, sep = ""));
+if ((!grepl(".Rdata|.RData", input.file)) & !(grepl(".rds", input.file))) input.file <- paste0(input.file, ".Rdata")
+
+if (grepl(".Rdata|.RData", input.file)){
+  load(paste(data.path, dir.preprocessed, input.file, sep = ""));
+} else if (grepl(".rds", input.file)) {
+  so <- readRDS(paste(data.path, dir.preprocessed, input.file, sep = ""))
+}
+
 
 if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 
@@ -155,6 +143,7 @@ n.cells <- prep.list$n.cell
 rm(prep.list);
 invisible({gc()})
 
+parameter.list$species <- detectSpecies(so.query)
 
 ```
 
@@ -292,12 +281,24 @@ which.red <- "pca"
 
 # prep expression matrices
 expr.mat <- so.query@assays[[DefaultAssay(so.query)]]@data
-expr.mat.tf <- t(expr.mat[rownames(expr.mat) %in% which.TF, ])
-expr.mat <- t(expr.mat[rownames(expr.mat) %in% which.rep.common, ])
+
+e.mat.success <- F
+try({
+  expr.mat.tf <- t(expr.mat[rownames(expr.mat) %in% which.TF, ])
+  expr.mat <- t(expr.mat[rownames(expr.mat) %in% which.rep.common, ])
+  e.mat.success <- T
+}, silent = T)
+
+if (!e.mat.success){
+  expr.mat.tf <- t(as.matrix(expr.mat[rownames(expr.mat) %in% which.TF, ]))
+  expr.mat <- t(as.matrix(expr.mat[rownames(expr.mat) %in% which.rep.common, ]))
+}
+
 
 
 # general network
 message("Generating general network...")
+suppressMessages(suppressWarnings({
 so.gene <- CreateSeuratObject(expr.mat)
 so.gene <- so.gene[ ,colnames(so.gene) %in% which.rep.common]
 so.gene <- ScaleData(so.gene, do.scale = parameter.list$general.do.scale, do.center = parameter.list$general.do.center, verbose = F)
@@ -307,11 +308,13 @@ n.dim <- min(which(df.prop$pc.cum_sum > parameter.list$general.pca.cum.sum))
 so.gene <- FindNeighbors(so.gene, dims = 1:n.dim, reduction = which.red, verbose = F)
 so.gene <- RunUMAP(so.gene, dims = 1:n.dim, n.neighbors = parameter.list$general.umap.knn, reduction  = "pca")
 so.gene <- FindClusters(so.gene, resolution = 1, verbose = F)
+}))
 
 if (print.inline) cluster.UMAP(so.gene)
 
 # TF-network only
 message("Generating transcription factor network...")
+suppressMessages(suppressWarnings({
 so.tf <- CreateSeuratObject(expr.mat.tf)
 so.tf <- so.tf[ ,colnames(so.tf) %in% which.TF]
 so.tf <- ScaleData(so.tf, do.scale = parameter.list$tf.do.scale, do.center = parameter.list$tf.do.center, verbose = F)
@@ -321,6 +324,7 @@ n.dim <- min(which(df.prop$pc.cum_sum > parameter.list$tf.pca.cum.sum))
 so.tf <- FindNeighbors(so.tf, dims = 1:n.dim, reduction = which.red, verbose = F)
 so.tf <- RunUMAP(so.tf, dims = 1:n.dim, n.neighbors = parameter.list$tf.umap.knn, reduction  = "pca")
 so.tf <- FindClusters(so.tf, resolution = 1, verbose = F)
+}))
 
 if (print.inline) cluster.UMAP(so.tf)
 
@@ -336,10 +340,6 @@ getICAGenes <- function(feature.loading, fdr.cutoff = 0.0001, local.fdr = T, ass
   ica.kme <- apply(ica.kme, 2, function(x) (x)/sd(x, na.rm = T))
 
   if (assert.positive.skew){
-    # median.loading <- apply(ica.kme, 2, median)
-    # mean.loading <- apply(ica.kme, 2, mean)
-    # pos.skew <- mean.loading > median.loading
-    
     median.loading <- abs(apply(ica.kme, 2, min))
     mean.loading <- abs(apply(ica.kme, 2, max))
     
@@ -659,7 +659,7 @@ df.wnn.umap.meso <- wnnUMAP.list.meso$df.umap
 
 df.wnn.umap.meso.sum  <- df.wnn.umap.meso %>%
   dplyr::group_by(seurat_clusters) %>%
-  dplyr::summarize(x.mean = median(x), y.mean = median(y))
+  dplyr::summarize(x.mean = median(x), y.mean = median(y), .groups = 'drop')
 plt.wnn.umap.meso <- wnnUMAP.list.meso$plt.umap +
   xlab("geneUMAP 1") + ylab("geneUMAP 2") +
   geom_text(data = df.wnn.umap.meso.sum, aes(x = x.mean, y = y.mean, label = seurat_clusters), inherit.aes = F) + 
@@ -678,7 +678,7 @@ df.wnn.umap.tf <- wnnUMAP.list.tf$df.umap
 
 df.wnn.umap.tf.sum  <- df.wnn.umap.tf %>%
   dplyr::group_by(seurat_clusters) %>%
-  dplyr::summarize(x.mean = median(x), y.mean = median(y))
+  dplyr::summarize(x.mean = median(x), y.mean = median(y), .groups = 'drop')
 plt.wnn.umap.tf <- wnnUMAP.list.tf$plt.umap +
   xlab("geneUMAP 1") + ylab("geneUMAP 2") +
   geom_text(data = df.wnn.umap.tf.sum, aes(x = x.mean, y = y.mean, label = seurat_clusters), inherit.aes = F) + 
@@ -758,10 +758,8 @@ plt.net.expr.tf <- networkExpression(so.query, so.tf)
 plt.net.expr.general <- networkExpression(so.query, so.gene)
 
 ```
+
 ```{r Network analysis - 6 - combine network expression plots, fig.width= 35, fig.height=30, warning = FALSE}
-
-
-
 
 plt.clut.net.tf.highlight <- cowplot::plot_grid(plotlist = plt.net.expr.tf, ncol = 3)
 if (print.inline) plt.clut.net.tf.highlight
@@ -863,7 +861,7 @@ maHM <- function(cell.object, df.wnn.umap, mod.res, k.row = 2, k.col = 2){
     
     df.auc.cur.sum <- df.auc.cur %>%
       dplyr::group_by(cluster) %>%
-      dplyr::summarize(z.mean = mean(z))
+      dplyr::summarize(z.mean = mean(z), .groups = 'drop')
     
     df.auc.cur.sum$module <- mod.name
     
@@ -903,8 +901,8 @@ maHM <- function(cell.object, df.wnn.umap, mod.res, k.row = 2, k.col = 2){
 }
 
 # # generate modular activity HM (stratified by cell cluster)
-plt.hm.tf <- maHM(cell.object = so.query, df.wnn.umap = df.wnn.umap.tf, mod.res = mod.res.tf, k.row = 3, k.col = 3)
-plt.hm.meso <- maHM(cell.object = so.query, df.wnn.umap = df.wnn.umap.meso, mod.res = mod.res.meso, k.row = 3, k.col = 5)
+plt.hm.tf <- maHM(cell.object = so.query, df.wnn.umap = df.wnn.umap.tf, mod.res = mod.res.tf, k.row = NA, k.col = NA)
+plt.hm.meso <- maHM(cell.object = so.query, df.wnn.umap = df.wnn.umap.meso, mod.res = mod.res.meso, k.row = NA, k.col = NA)
 
 if (print.inline) plt.hm.tf
 if (print.inline) plt.hm.meso
@@ -972,64 +970,64 @@ meso.connectivity.list <- prepConnectivityObjects(so.gene)
 
 ```{r  Network analysis - 10 - enrich and plot subnetworks, fig.width=13, fig.height=8}
 
-
-plotEnrichSubnetwork <- function(cell.object, df.wnn.umap, df.snn.umap, df.umap.merge, col.pal, species){
-  
-  # get gene lists ###############################################################
-  u.clust.all <- as.numeric(as.character(unique(df.wnn.umap$seurat_clusters)))
-  u.clust.all <- u.clust.all[order(u.clust.all)]
-  gene.cluster.list <- list()
-  
-  for (j in 1:length(u.clust.all)){
-    gene.cluster.list[[paste0("m", u.clust.all[j])]] <- df.wnn.umap.meso$var[df.wnn.umap$seurat_clusters %in% u.clust.all[j]]
-  }
-  
-  # subnetwork plots #############################################################
-  
-  plt.snn.umap.subnet.list <- list()
-  for (i in 1:length(gene.cluster.list)){
-    
-    mod.name <- names(gene.cluster.list)[i]
-    clust.name <- gsub("m", "", mod.name)
-    
-    df.snn.umap.cur <- df.snn.umap %>% dplyr::filter(seurat_clusters %in% clust.name)
-    
-    df.snn.umap.cur.top <- df.snn.umap.cur %>% dplyr::top_n(10, wi)
-    
-    df.snn.umap.cur$do.label[df.snn.umap.cur$genes %in% df.snn.umap.cur.top$genes] <- T
-    
-    
-    plt.snn.umap.subnet <-  ggplot() + 
-      geom_segment(data = df.umap.merge, aes(x = x.start, y = y.start,
-                                             xend = x.end, yend= y.end,
-      ), color = "black", alpha = 0.015) +  
-      geom_point(data = df.snn.umap.cur , aes(x = x, y = y,  size = wi, fill =  seurat_clusters), 
-                 shape = 21, color = "grey", alpha = 0.8) + theme_miko(legend = F) + 
-      scale_size_continuous(range = c(1, 5)) +
-      theme(
-        panel.border = element_blank(),
-        axis.text = element_blank(),
-        panel.grid = element_blank(),
-        
-        axis.ticks = element_blank()
-      ) + xlab("") + ylab("") +
-      scale_fill_manual(values = col.pal[clust.name]) + 
-      ggrepel::geom_text_repel(data = df.snn.umap.cur %>% dplyr::filter(do.label), aes(x = x, y = y, label = genes))
-    
-    plt.snn.umap.subnet.list[[mod.name]] <- plt.snn.umap.subnet
-    
-  }
-
-  for (i in 1:length(gene.cluster.list)){
-    mod.name <- names(gene.cluster.list)[i]
-  plt.snn.umap.subnet.list[[mod.name]] <- plt.snn.umap.subnet.list[[mod.name]] + labs(title=  mod.name)
-  }
-  
-  return(plt.snn.umap.subnet.list)
-  # return(mod.enrich.plt.list)
-  
-}
-
+# 
+# plotEnrichSubnetwork <- function(cell.object, df.wnn.umap, df.snn.umap, df.umap.merge, col.pal, species){
+#   
+#   # get gene lists ###############################################################
+#   u.clust.all <- as.numeric(as.character(unique(df.wnn.umap$seurat_clusters)))
+#   u.clust.all <- u.clust.all[order(u.clust.all)]
+#   gene.cluster.list <- list()
+#   
+#   for (j in 1:length(u.clust.all)){
+#     gene.cluster.list[[paste0("m", u.clust.all[j])]] <- df.wnn.umap.meso$var[df.wnn.umap$seurat_clusters %in% u.clust.all[j]]
+#   }
+#   
+#   # subnetwork plots #############################################################
+#   
+#   plt.snn.umap.subnet.list <- list()
+#   for (i in 1:length(gene.cluster.list)){
+#     
+#     mod.name <- names(gene.cluster.list)[i]
+#     clust.name <- gsub("m", "", mod.name)
+#     
+#     df.snn.umap.cur <- df.snn.umap %>% dplyr::filter(seurat_clusters %in% clust.name)
+#     
+#     df.snn.umap.cur.top <- df.snn.umap.cur %>% dplyr::top_n(10, wi)
+#     
+#     df.snn.umap.cur$do.label[df.snn.umap.cur$genes %in% df.snn.umap.cur.top$genes] <- T
+#     
+#     
+#     plt.snn.umap.subnet <-  ggplot() + 
+#       geom_segment(data = df.umap.merge, aes(x = x.start, y = y.start,
+#                                              xend = x.end, yend= y.end,
+#       ), color = "black", alpha = 0.015) +  
+#       geom_point(data = df.snn.umap.cur , aes(x = x, y = y,  size = wi, fill =  seurat_clusters), 
+#                  shape = 21, color = "grey", alpha = 0.8) + theme_miko(legend = F) + 
+#       scale_size_continuous(range = c(1, 5)) +
+#       theme(
+#         panel.border = element_blank(),
+#         axis.text = element_blank(),
+#         panel.grid = element_blank(),
+#         
+#         axis.ticks = element_blank()
+#       ) + xlab("") + ylab("") +
+#       scale_fill_manual(values = col.pal[clust.name]) + 
+#       ggrepel::geom_text_repel(data = df.snn.umap.cur %>% dplyr::filter(do.label), aes(x = x, y = y, label = genes))
+#     
+#     plt.snn.umap.subnet.list[[mod.name]] <- plt.snn.umap.subnet
+#     
+#   }
+# 
+#   for (i in 1:length(gene.cluster.list)){
+#     mod.name <- names(gene.cluster.list)[i]
+#   plt.snn.umap.subnet.list[[mod.name]] <- plt.snn.umap.subnet.list[[mod.name]] + labs(title=  mod.name)
+#   }
+#   
+#   return(plt.snn.umap.subnet.list)
+#   # return(mod.enrich.plt.list)
+#   
+# }
+# 
 
 
 # enrich and generate subnetwork plots
@@ -1168,7 +1166,7 @@ connectivityUMAP <- function(object, col.pal, graph = "RNA_snn", umap.key = "uma
   
   df.wnn.umap.sum <- df.wnn.umap %>% 
     dplyr::group_by(seurat_clusters) %>%
-    dplyr::summarize(x.mean = median(x), y.mean = median(y)) 
+    dplyr::summarize(x.mean = median(x), y.mean = median(y), .groups = 'drop') 
   
   plt.wnn.umap.connectivity.net.all <- df.wnn.umap %>%
     ggplot(aes(x = x, y = y)) + 
@@ -1183,7 +1181,7 @@ connectivityUMAP <- function(object, col.pal, graph = "RNA_snn", umap.key = "uma
       panel.grid = element_blank(),
       axis.ticks = element_blank()
     ) + xlab("") + ylab("") + 
-    ggrepel::geom_text_repel(data = df.wnn.umap.sum2, aes(x = x, y = y, label = var), size = label.size) + 
+    # ggrepel::geom_text_repel(data = df.wnn.umap.sum2, aes(x = x, y = y, label = var), size = label.size) + 
     geom_text(data = df.wnn.umap.sum, aes(x = x.mean, y = y.mean, label = seurat_clusters), inherit.aes = F, size = 5) + 
     labs(size = "Degree", alpha = "Weight", fill = "Module") + 
     
@@ -1302,10 +1300,30 @@ if (save.pdf) dir.create(paste0(output.path, "PDF/"))
 
 ```
 
-Cell UMAP
+Sample Overview
 ===================================== 
 
-Uniform manifold projection and approximation (UMAP) used to dimensionally reduce and visualize data while maintaining global transcriptomic structure. Clusters were determined using unsupervised Louvain community detection. 
+Sidebar {.sidebar}
+-------------------------------------
+
+**Uniform manifold approximation and projection** (UMAP) used to dimensional reduce and visualize data while maintaining global transcriptomic structure. Clusters were determined using unsupervised Louvain community detection.
+
+**Sample Overview**\
+Cells, n: `r ncol(so.query)`\
+Genes, n: `r nrow(so.query)`\
+Variable genes, n: `r length(VariableFeatures(so.query))`\
+
+UMI/cell, median: `r round(median(so.query@meta.data[["nCount_RNA"]]))`\
+genes/cell, median: `r round(median(so.query@meta.data[["nFeature_RNA"]]))`\
+
+Clusters, n: `r ulength(so.query$seurat_clusters)`\
+Resolution: `r parameter.list$cluster.resolution`\
+Species: `r parameter.list$species`
+
+Row 
+-------------------------------------
+
+### UMAP
 
 ```{r plt.umap_by_c, fig.width=7, fig.height=6}
 
@@ -1315,10 +1333,25 @@ savePDF(file.name = paste0(output.path, "PDF/", "M37_umap_cluster.pdf"), plot.ha
         fig.width = 7, fig.height = 6, save.flag = save.pdf)
 ```
 
-General Network | Graph & Annotation
+General Network 
 ===================================== 
 
-Row {.tabset}
+Sidebar {.sidebar}
+-------------------------------------
+
+**General Transcription Network**
+
+**Description**: General transcriptional network with connectivity and functional annotations. 
+
+**Method**: Network was constructed by embedding genes in UMAP representation using principal components. In network graph, each node represents individual gene, and linkages represent shared nearest neighbor similarity, computed as jaccard similarity of KNN graph. Network modules and IC-derived gene-sets were functionally annotated using hypergeometric over-representation analysis. Modular activities were computed using `Seurat::AddModuleScore()` and average cluster-level expression was visualized on heatmap, or cell-level activities were projected onto cellular UMAP. 
+
+**Suffix Legend**:\
+"m": network modules\
+"ICM": independent-component-derived module\
+"c": cell cluster
+
+
+Row {.tabset data-height=600}
 -------------------------------------
 
 ### Network Graph
@@ -1376,11 +1409,8 @@ out <- lapply(seq_along(plt.ica.gene), function(i) {
 
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
-General Network | Activity
-===================================== 
 
-
-Row {.tabset}
+Row {.tabset data-height=400}
 -------------------------------------
 
 ### Network Expression 
@@ -1433,11 +1463,24 @@ out <- lapply(seq_along(plt.net.expr.general), function(i) {
 
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
-TF Network | Graph & Annotation
+TF Network 
 ===================================== 
 
+Sidebar {.sidebar}
+-------------------------------------
 
-Row {.tabset}
+**Transcription Factor (TF) Network**
+
+**Description**: Transcription-factor subset of general transcriptional network with connectivity and functional annotations. 
+
+**Method**: Network was constructed by embedding TF genes in UMAP representation using principal components. In network graph, each node represents individual gene, and linkages represent shared nearest neighbor similarity, computed as jaccard similarity of KNN graph. Network modules and IC-derived gene-sets were functionally annotated using hypergeometric over-representation analysis. Modular activities were computed using `Seurat::AddModuleScore()` and average cluster-level expression was visualized on heatmap, or cell-level activities were projected onto cellular UMAP. 
+
+**Suffix Legend**:\
+"m": network modules\
+"ICM": independent-component-derived module\
+"c": cell cluster
+
+Row {.tabset data-height=600}
 -------------------------------------
 
 ### Network Graph
@@ -1452,7 +1495,6 @@ savePDF(file.name = paste0(output.path, "PDF/", "M37_tf_network_graph.pdf"), plo
         fig.width=7, fig.height=6, save.flag = save.pdf)
 
 ```
-
 
 
 ```{r TF network annotation - modules}
@@ -1501,12 +1543,7 @@ out <- lapply(seq_along(plt.ica.tf), function(i) {
 `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
 
-TF Network | Expression
-===================================== 
-
-
-
-Row {.tabset}
+Row {.tabset data-height=400}
 -------------------------------------
 
 
@@ -1679,5 +1716,14 @@ try({
   write.csv(df.log_Module_37, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
     row.names = F)  
 }, silent = T)
+
+```
+
+System Info
+=====================================
+
+```{r}
+
+pander::pander(sessionInfo())
 
 ```
