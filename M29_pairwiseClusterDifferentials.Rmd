@@ -53,7 +53,7 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 # input.file <- "R111_M27_NM2_M02_p467891011_tumorImmune_tier1_150920.Rdata"
 # input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
 # input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
-input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
+input.file <- "R416_M02_NM2_p12_meso_integrated_170421.Rdata"
 
 # data prep parameters #########################################################
 
@@ -78,13 +78,13 @@ which.msigdb.subcollection <- "TFT"
 # DEG ANALYSIS #####################################################
 
 # Rapid marker finding (logical flag) t
-quick_markers <- F 
+# quick_markers <- F 
 
 # which markers to return
-only.pos <- F# 
+# only.pos <- F# 
 
 # DEG test
-DEG.test <- "MAST" #options: wilcox, bimod, roc, t, poisson, negbinom, LR, MAST, DESeq2
+# DEG.test <- "MAST" #options: wilcox, bimod, roc, t, poisson, negbinom, LR, MAST, DESeq2
 
 # vector specifying pairwise comparisons of interest (cluster id); set to NA for all comparisons
 # which.clusters <- c(1,5)
@@ -137,8 +137,15 @@ set.seed(seed)
 
 # load data
 warning("Importing data...")
-if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
-load(paste(data.path, dir.preprocessed, input.file, sep = ""))
+input.file <- parameter.list$input.file
+if ((!grepl(".Rdata|.RData", input.file)) & !(grepl(".rds", input.file))) input.file <- paste0(input.file, ".Rdata")
+
+if (grepl(".Rdata|.RData", input.file)){
+  load(paste(data.path, dir.preprocessed, input.file, sep = ""));
+} else if (grepl(".rds", input.file)) {
+  so <- readRDS(paste(data.path, dir.preprocessed, input.file, sep = ""))
+}
+
 
 
 if (!exists("gNames.list")) gNames.list <- prepGeneList(so.query, objects())
@@ -186,15 +193,15 @@ if (is.na(which.clusters)){
 }
 
 df.log <- addLogEntry("Subsample Factor", (subsample_factor), df.log, "subsample_factor")
-df.log <- addLogEntry("Quick DEG analysis", (quick_markers), df.log, "quick_markers")
+# df.log <- addLogEntry("Quick DEG analysis", (quick_markers), df.log, "quick_markers")
 df.log <- addLogEntry("schex binning", (do.schex), df.log, "do.schex")
 df.log <- addLogEntry("Species", (which.species), df.log, "which.species")
 df.log <- addLogEntry("Enrichment DB", (which.annotation.db), df.log, "which.annotation.db")
 df.log <- addLogEntry("DEG performed", (run.deg), df.log, "run.deg")
 df.log <- addLogEntry("N workers (GSEA)", (n.workers$gsea), df.log, "gsea")
 df.log <- addLogEntry("N workers (DEG)", (n.workers$deg), df.log, "deg")
-df.log <- addLogEntry("Only positive DEGs", (only.pos), df.log, "only.pos")
-df.log <- addLogEntry("DEG test", (DEG.test), df.log, "DEG.test")
+# df.log <- addLogEntry("Only positive DEGs", (only.pos), df.log, "only.pos")
+# df.log <- addLogEntry("DEG test", (DEG.test), df.log, "DEG.test")
 df.log <- addLogEntry("Max number of paths to visualize", (max.paths), df.log, "max.paths")
 df.log <- addLogEntry("Seed", (seed), df.log, "seed")
 df.log <- addLogEntry("gsea.p.threshold", (gsea.p.threshold), df.log, "gsea.p.threshold")
@@ -281,28 +288,34 @@ if (run.deg){
     
     deg.res <- NULL
     
-      
-      if (quick_markers == TRUE){
-        deg.res <- FindMarkers(object = so.query, 
-                               ident.1 = all.pair.ordered.u$cluster.1[j], ident.2 = all.pair.ordered.u$cluster.2[j], 
-                               test.use = DEG.test,
-                               only.pos = only.pos,
-                               max.cells.per.ident = 200,
-                               logfc.threshold = lfc.threshold,
-                               min.pct = 0.25)
-        deg.res$pct.dif <- deg.res$pct.1 - deg.res$pct.2
-        deg.res <- deg.res %>% dplyr::filter(p_val_adj < p.threshold)
-        
-      } else {
-        deg.res <- FindMarkers(object = so.query, 
-                               ident.1 = all.pair.ordered.u$cluster.1[j], ident.2 = all.pair.ordered.u$cluster.2[j], 
-                               test.use = DEG.test,
-                               only.pos = only.pos,
-                               logfc.threshold = 0.01,
-                               min.pct = 0.01)  
-        deg.res$pct.dif <- deg.res$pct.1 - deg.res$pct.2
-        deg.res <- deg.res %>% dplyr::filter(p_val_adj < p.threshold)
-      }
+    
+    
+      deg.res <- presto::wilcoxauc(so.query[ ,c(which.cells.i, which.cells.j)], group_by = "seurat_clusters", seurat_assay = DefaultAssay(so.query))
+      deg.res$gene <- deg.res$feature
+      deg.res <- deg.res %>% dplyr::filter(padj < p.threshold, auc > 0.5, logFC > lfc.threshold)
+
+      # deg.reg$pair <- NA
+      # if (quick_markers == TRUE){
+      #   deg.res <- FindMarkers(object = so.query, 
+      #                          ident.1 = all.pair.ordered.u$cluster.1[j], ident.2 = all.pair.ordered.u$cluster.2[j], 
+      #                          test.use = DEG.test,
+      #                          only.pos = only.pos,
+      #                          max.cells.per.ident = 200,
+      #                          logfc.threshold = lfc.threshold,
+      #                          min.pct = 0.25)
+      #   deg.res$pct.dif <- deg.res$pct.1 - deg.res$pct.2
+      #   deg.res <- deg.res %>% dplyr::filter(p_val_adj < p.threshold)
+      #   
+      # } else {
+      #   deg.res <- FindMarkers(object = so.query, 
+      #                          ident.1 = all.pair.ordered.u$cluster.1[j], ident.2 = all.pair.ordered.u$cluster.2[j], 
+      #                          test.use = DEG.test,
+      #                          only.pos = only.pos,
+      #                          logfc.threshold = 0.01,
+      #                          min.pct = 0.01)  
+      #   deg.res$pct.dif <- deg.res$pct.1 - deg.res$pct.2
+      #   deg.res <- deg.res %>% dplyr::filter(p_val_adj < p.threshold)
+      # }
       
     # }, silent = T)
     
@@ -310,8 +323,8 @@ if (run.deg){
       
       # try({
         pair.name <- paste0(clust.i.name, "-", clust.j.name)
-        deg.res$pair <-pair.name
-        deg.res <- bind_cols(data.frame(genes = rownames(deg.res)), deg.res)
+        deg.res$pair <- pair.name
+        # deg.res <- bind_cols(data.frame(genes = rownames(deg.res)), deg.res)
         return(list(deg.res = deg.res, pair.name = pair.name, clust.i.name = clust.i.name, clust.j.name = clust.j.name))
       # }, silent = T)
     } else {
@@ -335,7 +348,8 @@ if (run.deg){
     deg.res$cluster.2 <- clust.j.name
     deg.res.all <- bind_rows(deg.res.all, deg.res)   
   }
-  which.round <- c("p_val", "avg_logFC","pct.1","pct.2","p_val_adj","pct.dif")
+  deg.res.all$pct.dif <- deg.res.all$pct_in - deg.res.all$pct_out
+  which.round <- c("avgExpr", "pval", "logFC","pct_in","pct_out","padj","pct.dif", "auc", "statistic")
   deg.res.all[ , which.round]<- signif(deg.res.all[ , which.round], 3)
   
 }
@@ -403,6 +417,7 @@ if (run.deg){
   plt.n.deg <- NULL
 }
 
+
 ```
 
 
@@ -465,6 +480,7 @@ logfc.mat <- logfc.mat[ ,!which.same]
 
 ```{r pairwise-DEG heatmaps, include = FALSE, fig.height = 8, fig.width = 8}
 
+message("Generating expression heatmaps...")
 all.pairs <- unique(deg.res.all$pair)
 
 so.clust <- as.numeric(as.character(so.query@meta.data[["seurat_clusters"]])) 
@@ -481,8 +497,8 @@ for (i in 1:length(all.pairs)){
   cluster.2 <- current.pair.split[[1]][2]; cluster.2 <- as.numeric(gsub("c", "", cluster.2))
   doi <- deg.res.all[deg.res.all$pair %in% current.pair, ]
   doi <- doi %>%
-    group_by(sign(avg_logFC)) %>%
-    top_n(25, abs(avg_logFC))
+    group_by(sign(logFC)) %>%
+    top_n(25, abs(logFC))
   if (nrow(doi) == 0) next
   
   which.1 <- which(so.clust %in% cluster.1);
@@ -498,7 +514,7 @@ for (i in 1:length(all.pairs)){
   } else {
     which.2 <- c(which.2, sample(which.2,n.cells - length(which.2) , replace = T))
   }
-  
+  doi$genes <- doi$feature
   ef.mat.genesub <- ef.mat[rownames(ef.mat) %in% doi$genes, ]
   if (is.null(dim(ef.mat.genesub))) {
     next
@@ -515,18 +531,28 @@ for (i in 1:length(all.pairs)){
   ann.color = list(cluster =  c("black", "grey"))
   names(ann.color$cluster) <- c(paste0("c", cluster.1), paste0("c", cluster.2))
   
-  plt.pairwise.deg.map <- ggplotify::as.ggplot(pheatmap::pheatmap(emat.current, 
+  
+  plt.pairwise.deg.map <- tryCatch({
+        ggplotify::as.ggplot(pheatmap::pheatmap(emat.current, 
                                                                   show_colnames = F, 
                                                                   color = viridis::inferno(20), 
                                                                   annotation_col = df.ann,
+                                                                  silent = T,
                                                                   annotation_colors = ann.color,
                                                                   main = paste0(current.pair)))
+  }, error = function(e){
+    
+    return(NULL)
+  })
+    
+
   
   if (print.inline) print(plt.pairwise.deg.map)
   
   plt.deg.map[[current.pair]] <- plt.pairwise.deg.map
   
 }
+
 
 ```
 
@@ -837,7 +863,6 @@ for (j in 1:length(top.gsea.u)){
   
 }
 
-# gsea.cluster.plot.list
 ```
 
 ```{r, fig.width = 14, fig.height = 10, include = FALSE}

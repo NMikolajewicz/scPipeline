@@ -5,14 +5,21 @@ output:
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: fill
+    source_code: embed
+    theme: flatly
+    navbar:
+      - { title: "scPipeline", href: "https://github.com/NMikolajewicz/scPipeline" }
+      - { title: "scMiko", href: "https://github.com/NMikolajewicz/scMiko" }  
 editor_options: 
   chunk_output_type: inline
 knit: (function(inputFile, encoding) {
     rmarkdown::render(input = inputFile,
       encoding = encoding,
       output_file = if (exists("user")){paste0(
-        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
-      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", format(Sys.Date(), "%d%m%y"), '.html')},
+        xfun::sans_ext(inputFile), '_',user, "_", 
+        paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", 
+      paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html')},
       output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
     )
   })
@@ -32,8 +39,7 @@ start.time <- proc.time()
 # List of packages to load
 packages2load <- c("Seurat", "sctransform",
                     "dplyr", "tidyr", "RColorBrewer", "ggplot2", "gridExtra", 
-                   "DT", "flexdashboard", "future", "biomaRt", "foreach", "parallel", "doParallel", "scMiko", "reshape2")
-
+                   "DT", "flexdashboard", "future", "biomaRt", "foreach", "parallel", "doParallel", "scMiko", "reshape2", "glmGamPoi")
 # load packages
 invisible({lapply(packages2load, library, character.only = TRUE)})
 
@@ -42,112 +48,91 @@ invisible({lapply(packages2load, library, character.only = TRUE)})
 
 ```{r parameter specification }
 
-save.flag <- T
-
-save.filename <- "celsius_renca_rpca_filtered_030321"
-
-k.filter <-  200 # lower k.filter value (e.g., 50) if there is few cells. Default = 200
-
-n.anchors <- 3000  # number of features used for data integration # if datasets are divergent, may need fewer genes to align with (e.g., 1000)
-
-integration_method <- "CCA" # "CCA" for small datasets, "rPCA" for large datasets
-
-print.inline <- FALSE
-
-n.workers <- list(
-  import = 4,
-  integration = 1 #(limit to 1 for cluster)
+parameter.list <- list(
+  save.filename = "p9_GBM_PR_integrated_SCTrerun_110521",
+  integration.k.filter =  200, # lower integration.k.filter value (e.g., 50) if there is few cells. Default = 200
+  integration.n.genes = 3000,  # number of genes for integration: 1000-3000 recommended
+  integration.method = "rPCA", # options: CCA, rPCA
+  integration.limit.memory = T, # specify whether to limit max memory (set T if local)
+  integration.max.memory = 150, # numeric, in terms of Gb (set to 100 for cluster)
+  integration.cluster.resolution = 0.5, 
+  integration.rerun.SCT = F,
+  n.workers = list(
+    import = 4,
+    integration = 2 #(limit to 1 for cluster)
+  ),
+  print.inline = FALSE,
+  save.integrated.object = T,
+  save.pdf = T,
+  update.log = T
 )
 
-  do.memory.limit <- T # specify whether to limit max memory (set T if local)
-  max.memory <- 150 # numeric, in terms of Gb (set to 100 for cluster)
+subset.all <- 1
+input.data <- list(
+  R1 = list(
+    file = "Module1_p9_GBM_PR_noFilter_270620.Rdata",
+    integrate.by = "Barcode",
+    subsample = subset.all,
+    grouping.field = NA,
+    groups = NA))
 
 
 
-target.species <- "Mm" #if mixed input, specify target as 'Hs' for best performance
-target.cluster.resolution <- 0.3
+# input.data <- list(
+#   p13.renca = list(
+#     file = "R415_M01_NM2_pilot12_meso_v2_160421.Rdata",
+#     cluster.resolution = 0.5,
+#     integrate.by = "Barcode",
+#     species = "Hs",
+#     subsample = subset.all,
+#     grouping.field = NA,
+#     groups = NA))
 
 
-subset.all <- 0.025
+# save.integrated.object <- T
+# 
+# save.filename <- "p12_meso_integrated_170421"
+# 
+# integration.k.filter <-  200 # lower integration.k.filter value (e.g., 50) if there is few cells. Default = 200
+# 
+# integration.n.genes <- 2000  # number of features used for data integration # if datasets are divergent, may need fewer genes to align with (e.g., 1000)
+# 
+# integration.method <- "rPCA" # "CCA" for small datasets, "rPCA" for large datasets
+# 
+# print.inline <- FALSE
+
+# n.workers <- list(
+#   import = 4,
+#   integration = 1 #(limit to 1 for cluster)
+# )
+
+  # integration.limit.memory <- T # specify whether to limit max memory (set T if local)
+  # integration.max.memory <- 150 # numeric, in terms of Gb (set to 100 for cluster)
+
+
+
+# target.species <- "Hs" #if mixed input, specify target as 'Hs' for best performance
+
+
+
+
 
 # input data specification
 # input.data list headers: file, cluster.resolution, integrate.by, species, subsample, grouping.field, groups
 
-input.data <- list(
-  p13.renca = list(
-    file = "R398_M01_NM2_pilot13_celsius_renca_230221.Rdata",
-    cluster.resolution = 1,
-    integrate.by = "Barcode",
-    species = "Mm",
-    subsample = subset.all,
-    grouping.field = NA,
-    groups = NA)
-)
-# R397_M01_NM2_pilot13_celsius_renca_230221.Rdata # filter
-# R398_M01_NM2_pilot13_celsius_renca_230221.Rdata # no filter
-
-# 
 # input.data <- list(
-#   nuc_09_T1 = list(
-#     file = "Module1_09-CID003556-filtered_190220.Rdata",
-#     cluster.resolution = 1,
-#     # integrate.by = NA,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = NA,
-#     groups = NA),
-#   nuc_11_T2 = list(
-#     file = "Module1_11-CID003558-filtered_190220.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = NA,
-#     groups = NA),
-#   cell_10_T1 = list(
-#     file = "Module1_10-CID003557-filtered_190220.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = NA,
-#     groups = NA),
-#   cell_12_T2 = list(
-#     file = "Module1_12-CID003559-filtered_190220.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = NA,
-#     groups = NA),
-#   sci_T1 = list(
-#     file = "Module1_Celsuis_sci_Renca_tumorOnly_T1_230220.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = NA,
-#     groups = NA),
-#   sci_T2 = list(
-#     file = "Module1_Celsuis_sci_Renca_tumorOnly_T2_230220.Rdata",
-#     cluster.resolution = 1,
-#     species = "Mm",
-#     subsample = subset.all,
-#     grouping.field = NA,
-#     groups = NA),
 #   p13.renca = list(
-#     file = "R398_M01_NM2_pilot13_celsius_renca_230221.Rdata",
-#     cluster.resolution = 1,
+#     file = "R397_M01_NM2_pilot13_celsius_renca_230221.Rdata",
+#     cluster.resolution = 0.3,
+#     integrate.by = "Barcode",
 #     species = "Mm",
 #     subsample = subset.all,
 #     grouping.field = NA,
 #     groups = NA)
 # )
+# R397_M01_NM2_pilot13_celsius_renca_230221.Rdata # filter
+# R398_M01_NM2_pilot13_celsius_renca_230221.Rdata # no filter
 
-
-
-
-
-
-
-# save PDF
-save.pdf <- T
 
 
 ```
@@ -158,21 +143,21 @@ save.pdf <- T
 
 dir <- "Preprocessed_Datasets/"
 
-if (exists("k.filter")){
-  stopifnot(is.numeric(k.filter))
-} else {k.filter <- 200}
+if ("integration.k.filter" %in% names(parameter.list)){
+  stopifnot(is.numeric(parameter.list$integration.k.filter))
+} else {parameter.list$integration.k.filter <- 200}
 
 # ensure output file is specified 
-if (save.flag){
-  stopifnot(exists("save.filename"))
-  if (!(grepl(".Rdata", save.filename))){
-    save.filename <- paste0(save.filename, ".Rdata")
+if (parameter.list$save.integrated.object){
+  stopifnot("save.filename" %in% names(parameter.list))
+  if (!(grepl(".Rdata", parameter.list$save.filename))){
+    parameter.list$save.filename <- paste0(parameter.list$save.filename, ".Rdata")
   }
 }
 
 n.cor.available <- parallel::detectCores()
-for (i in 1:length(n.workers)){
-  if (n.workers[[i]] > n.cor.available) n.workers[[i]] <- n.cor.available
+for (i in 1:length(parameter.list$n.workers)){
+  if (parameter.list$n.workers[[i]] > n.cor.available) parameter.list$n.workers[[i]] <- n.cor.available
 }
 
 input.labels <- names(input.data)
@@ -185,9 +170,9 @@ input.files <- c()
 for (i in 1:length(input.data)){
   
   input.list <- input.data[[i]]
-  
-  if (!all(c("file", "species", "cluster.resolution") %in% names(input.list))){
-    stop("file, species and cluster.resolution must be specied for each input dataset")
+  # , "species", "cluster.resolution" , species and cluster.resolution
+  if (!all(c("file") %in% names(input.list))){
+    stop("file must be specied for each input dataset")
   }
   
   if (!(c("subsample") %in% names(input.list))) input.list$subsample <- 1
@@ -203,21 +188,22 @@ for (i in 1:length(input.data)){
 
 
 ```{r analysis log}
-
+message("Updating analysis log...")
 # generate analysis log
 df.log <- initiateLog("2, Data Integration")
 df.log <- addLogEntry("Number of datasets", n.datasets, df.log, "n.datasets")
-df.log <- addLogEntry("input species", (as.vector(unlist(lapply(input.data, function(x) x$species)))), df.log, "")
-df.log <- addLogEntry("target species", (target.species), df.log, "target.species")
 df.log <- addLogEntry("Subsample Factor", (as.vector(unlist(lapply(input.data, function(x) x$subsample)))), df.log, "")
 df.log <- addLogEntry("Integrated Data (.Rdata)", ((as.vector(unlist(lapply(input.data, function(x) x$file))))), df.log, "input.data")
 df.log <- addLogEntry("Integrated by", ((as.vector(unlist(lapply(input.data, function(x) x$integrate.by))))), df.log, "input.data")
 df.log <- addLogEntry("Data Labels", (input.labels), df.log, "input.labels")
-df.log <- addLogEntry("Cluster Resolution",(as.vector(unlist(lapply(input.data, function(x) x$cluster.resolution)))), df.log, "")
-df.log <- addLogEntry("K Filter", (k.filter), df.log, "k.filter")
-df.log <- addLogEntry("N Integration Anchors", (n.anchors), df.log, "n.anchors")
-df.log <- addLogEntry("N workers", (paste(names(n.workers), "=", (purrr::map_dbl(n.workers,  1)), "workers",  collapse = "; ")), df.log, "n.workers")
-df.log <- addLogEntry("max memory (Gb)",max.memory, df.log, "max.memory")
+df.log <- addLogEntry("K Filter", (parameter.list$integration.k.filter), df.log, "integration.k.filter")
+df.log <- addLogEntry("N Integration Genes", (parameter.list$integration.n.genes), df.log, "integration.n.genes")
+df.log <- addLogEntry("N workers", (paste(names(parameter.list$n.workers), "=", 
+                                          (purrr::map_dbl(parameter.list$n.workers,  1)), "workers",  collapse = "; ")), df.log, "n.workers")
+df.log <- addLogEntry("max memory (Gb)",parameter.list$integration.rerun.SCT, df.log, "integration.rerun.SCT")
+df.log <- addLogEntry("max memory (Gb)",parameter.list$integration.cluster.resolution, df.log, "integration.cluster.resolution")
+df.log <- addLogEntry("max memory (Gb)",parameter.list$integration.limit.memory, df.log, "integration.limit.memory")
+df.log <- addLogEntry("max memory (Gb)",parameter.list$integration.max.memory, df.log, "integration.max.memory")
 
 ```
 
@@ -294,7 +280,7 @@ return(so)
 if (!exists("data.path") & !exists("user")) {
   stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
 }
-warning("Importing data...")
+message("Importing data...")
 
 # get input file paths
 input.files <- (as.vector(unlist(lapply(input.data, function(x) x$file))))
@@ -307,7 +293,7 @@ if (!all(file.exists(input.files))) stop("Not all input files exist\n")
 import.list <- list()
 
 # start cluster
-cl <- parallel::makeCluster(if (n.workers$import > n.datasets) n.datasets else n.workers$import)
+cl <- parallel::makeCluster(if (parameter.list$n.workers$import > n.datasets) n.datasets else parameter.list$n.workers$import)
 doParallel::registerDoParallel(cl)
 
 
@@ -326,8 +312,12 @@ import.list <- foreach(i = 1:length(input.files), .packages = c("scMiko", "Seura
   load(input.files[i])
   so <- prepSeurat(so)
   
+   try({
+    so <- UpdateSCTAssays(so) # required after Seurat 3.1.2 update
+  }, silent = T)
+  
   # set correct cluster resolution
-  so <- setResolution(so, input.data[[input.label]]$cluster.resolution)
+  # so <- setResolution(so, input.data[[input.label]]$cluster.resolution)
   
   # assign batch name
   so@meta.data[["batch"]] <- input.label
@@ -357,15 +347,10 @@ import.list <- foreach(i = 1:length(input.files), .packages = c("scMiko", "Seura
   # subsample 
   if (input.data[[input.label]]$subsample < 1)  so <- downsampleSeurat(so, input.data[[input.label]]$subsample)
   
-  # store results
-  # import.list[[i]] <- list(so = so,
-  #      gList = gNames.list,
-  #      gNames = names(gNames.list),
-  #      input.label = input.label
-  # )
   return(list(so = so,
        gList = gNames.list,
        gNames = names(gNames.list),
+       species = detectSpecies(so),
        input.label = input.label
   ))
 }
@@ -383,6 +368,7 @@ for (i in 1:length(import.list)){
   so.list[[input.label]] <- import.list[[i]]$so
   gList[[input.label]] <- import.list[[i]]$gList
   gNames[[input.label]] <- import.list[[i]]$gNames
+  input.data[[input.label]][["species"]] <- import.list[[i]]$species
 }
 
 # remove excess baggage
@@ -392,19 +378,20 @@ rm(import.list)
 ```
 
 
-```{r data split}
+```{r data split, warning = FALSE}
 
 # split seurat object by 'integrate.by' variable
-for (i in 1:length(input.data)){
+input.data2 <- input.data
+for (i in 1:length(input.data2)){
   
-  set.name <- names(input.data)[i]
+  set.name <- names(input.data2)[i]
   
-  if (is.na(input.data[[set.name]]$integrate.by)) next
+  if (is.na(input.data2[[set.name]]$integrate.by)) next
   
   
-  integrate.by <- input.data[[set.name]]$integrate.by
+  integrate.by <- input.data2[[set.name]]$integrate.by
   message(paste0("Splitting '", set.name, "' by '", integrate.by, "'..."))
-  input.data.current <- input.data[[set.name]]
+  input.data.current <- input.data2[[set.name]]
   gList.current <- gList[[set.name]]
   gNames.current <-  gNames[[set.name]]
   
@@ -441,6 +428,27 @@ for (i in 1:length(input.data)){
 }
 
 n.datasets <- length(so.list)
+```
+
+
+```{r rerun SCT}
+
+if (parameter.list$integration.rerun.SCT){
+  
+  message("Running SCTransform normalization...")
+  
+  pmt.present <- all(unlist(lapply(X = so.list, FUN = function(x) "percent.mt" %in% colnames(x@meta.data))))
+  if (pmt.present){
+    var2reg <- "percent.mt"
+  } else {
+    var2reg <- NULL
+  }
+  
+  so.list <- lapply(X = so.list, FUN = SCTransform, method = "glmGamPoi", verbose = F, 
+                    vars.to.regress = var2reg, variable.features.n = parameter.list$integration.n.genes)
+  
+}
+
 ```
 
 
@@ -529,7 +537,7 @@ plt.common.bar <- df.common.genes %>%
   geom_bar(stat = "identity") + 
   theme_miko(legend = T, x.axis.rotation = 45) + 
   xlab("Dataset") + ylab( paste0("Gene Count" )) + 
-  labs(fill = paste0("Gene Rep.\n(","/",length(input.files), " datasets)" ),
+  labs(fill = paste0("Gene Rep.\n(","/",as.integer(length(so.list)), " datasets)" ),
       subtitle = "Stacked counts") + 
   scale_fill_manual(values = categoricalColPal(n = length(so.list)))
   # ggthemes::scale_fill_gdocs()
@@ -539,7 +547,7 @@ gene.av.df <- namedList2wideDF(gene.av.list)
 
 # merge plots
 plt.common.gene.plot <- cowplot::plot_grid(plt.gene.av.tally, plt.common.bar, ncol = 2, align = "hv", rel_widths = c(1.5, 2))
-if (print.inline){
+if (parameter.list$print.inline){
   print(plt.common.gene.plot)
 }
 
@@ -564,59 +572,6 @@ names(gNames.list) <- gList.cu$ens
 ```
 
 
-```{r get top n genes for integrations}
-
-# warning("Identifying top candidate genes for integration...\n")
-
-  # external panels ######################################
-  # get L1000 panel
-  # uni.panels <- geneSets[["universal_literaturePanel"]]
-  # L1000.panel <- uni.panels$Subramanian2017_L1000_Universal
-  # L1000.panel <- L1000.panel[!is.na(L1000.panel)]
-  # 
-  # # get cell cycle marker panel
-  # s.genes <- cc.genes$s.genes
-  # g2m.genes <- cc.genes$g2m.genes
-  # 
-  # # ensure proper representation
-  # which.species <- unique(target.species)
-  # 
-  # if (length(unique(which.species)) > 1){
-  #   s.genes <-  toupper(s.genes)
-  #   g2m.genes <-  toupper(g2m.genes)
-  #   L1000.panel <-  toupper(L1000.panel)
-  # } else if (unique(which.species) == "Mm"){
-  #   s.genes <-  firstup(s.genes)
-  #   g2m.genes <-  firstup(g2m.genes)
-  #   L1000.panel <-  firstup(L1000.panel)
-  # } else if (unique(which.species) == "Hs"){
-  #   s.genes <-  toupper(s.genes)
-  #   g2m.genes <-  toupper(g2m.genes)
-  #   L1000.panel <-  toupper(L1000.panel)
-  # }
-  
-  # combine external panels
-  # ext.panel <- unique(c(s.genes, g2m.genes, L1000.panel))
-  
-  # internal panel ######################################
-  # get top variable genes
-  #   top.n.var.genes <- 8000
-  # var.list <- purrr::map(so.list, function(x) data.frame(genes = rownames(x@assays[[DefaultAssay(x)]]@meta.features),
-  #                                          var = x@assays[[DefaultAssay(x)]]@meta.features[["sct.residual_variance"]]))
-  # var.list <- purrr::map(var.list, function(x) x[complete.cases(x), ])
-  # var.list <- purrr::map(var.list, function(x) x %>% dplyr::arrange(-var))
-  # var.genes <- var.list %>% purrr::reduce(merge, by = "genes")
-  # colnames(var.genes)[seq(2,(length(var.list) + 1))] <- names(var.list)
-  # var.genes$mean.val <- apply(var.genes[ ,seq(2,(length(var.list) + 1))], 1, function(x) mean(x))
-  # var.genes$rank.val <- rank(-var.genes$mean.val)
-  # int.panel <- var.genes$genes[ var.genes$rank.val <= top.n.var.genes]
-  # int.panel <- as.character(int.panel)
-  # 
-  # # combine internal and external panels
-  # query.panel <- unique(c(ext.panel, int.panel))
-  
-```
-
 ```{r get original (input) umaps, fig.width=5, fig.height=7}
 
 # get original umap embedding and df meta
@@ -636,18 +591,38 @@ for (i in 1:length(so.list)){
   
 }
 
+set.labels <- unique(df.umap.orig$batch)
+plt.original_overlay <- list()
+for (i in 1:length(set.labels)){
+  
+  df.umap.orig.cur <- df.umap.orig
+  df.umap.orig.cur$is.in <- df.umap.orig.cur$batch %in% set.labels[i]
+  plt.original_overlay[[set.labels[i]]] <- df.umap.orig.cur %>%
+    dplyr::arrange(is.in) %>%
+    ggplot(aes(x = umap.x, y = umap.y, color = is.in)) + 
+    geom_point(size = autoPointSize(nrow(df.umap.orig.cur))) + 
+    scale_color_manual(values = c("TRUE" = "red", "FALSE" = "grey")) +   
+    ggtitle(label = set.labels[i]) + 
+    xlab("UMAP 1") +
+    ylab("UMAP 2") + 
+    theme_miko()
+}
+
 
 plt.umap.original <- df.umap.orig %>%
   ggplot(aes(x= umap.x, y = umap.y, color = batch)) + 
-  geom_point(size = 0.02) + 
+  geom_point(size = autoPointSize(nrow(df.umap.orig))) + 
   theme_miko(legend = T) + 
   labs(title = "Pre-Integration Data", subtitle = "UMAP") + 
    scale_fill_manual(values = categoricalColPal(n = length(so.list))) + 
   xlab("UMAP 1") + ylab("UMAP 2") + 
   theme_miko(legend = T)  + 
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom")  +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+   theme(legend.text=element_text(size=rel(0.5))) 
+  # guide_legend(size = 2)
 
-if (print.inline){
+if (parameter.list$print.inline){
   plt.umap.original
 }
 ```
@@ -671,16 +646,19 @@ plt.pie <- ggplot(cps.df, aes(x="", y=prop, fill=batch)) +
   geom_bar(stat="identity", width=1, color="white") +
   coord_polar("y", start=0) +
   theme_void() + 
-  geom_text(aes(y = ypos, label = n), color = "white", size=6) +
+  # geom_text(aes(y = ypos, label = n), color = "white", size=2) +
    scale_fill_manual(values = categoricalColPal(n = length(so.list))) + 
-  labs(title = "Number of Cells Per Dataset", subtitle = "piechart")
+  labs(title = "Cell Frequency Per Dataset", subtitle = "Piechart")
 
 
-if (length(so.list) > 10){
-  plt.pie <- plt.pie + theme(legend.position = "none")
-}
+# if (length(so.list) > 10){
+  plt.pie <- plt.pie   +
+  guides(fill = guide_legend(override.aes = list(size = 5))) + 
+   theme(legend.text=element_text(size=rel(0.5))) 
+    # theme(legend.position = "none")
+# }
 
-if (print.inline){
+if (parameter.list$print.inline){
   plt.pie
 }
 
@@ -749,7 +727,61 @@ stopifnot(length(all.cell.names) == length(unique(all.cell.names)))
 ```
 
 
-```{r integrate data}
+
+```{r update variable features, include = FALSE}
+
+# integration.n.genes <- 2000
+# integration.n.genes2 <- round(1.5 * integration.n.genes)
+
+for (i in 1:length(so.list)){
+  
+  if (!("SCT" %in% names(so.list[[i]]@assays))) stop("All objects must have 'SCT' assay. Other normalization pipelines are not supported.")
+  if (class(so.list[[i]]@assays[["SCT"]]) == "SCTAssay"){
+    df.var <-  so.list[[i]]@assays[["SCT"]]@SCTModel.list[["model1"]]@feature.attributes
+    if (!("SYMBOL" %in% colnames(df.var))){
+      
+      if (!("ENSEMBL" %in% colnames(df.var))){
+        df.var$key <- stringr::str_extract( rownames(df.var),"[0-9A-Za-z-]*")
+      }
+      # df.mapping <-  ensembl2sym(rownames(df.var), detectSpecies(so.list[[i]]))
+      e2s.success <- F
+      try({
+        df.mapping <-  ensembl2sym(df.var$key, detectSpecies(so.list[[i]]))
+        merge.by <- "ENSEMBL"
+        df.var$ENSEMBL <- df.var$key
+        e2s.success <- T
+      }, silent = T)
+      s2e.success <- F
+      try({
+        df.mapping <-  sym2ens(df.var$key, detectSpecies(so.list[[i]]))
+        merge.by <- "SYMBOL"
+        df.var$SYMBOL <- df.var$key
+        s2e.success <- T
+      }, silent = T)
+      
+      
+      df.var <- merge(df.var, df.mapping, by = merge.by)
+      
+    }
+    df.var <- df.var[!is.na(df.var$SYMBOL), ]
+    so.list[[i]]@assays[["SCT"]]@SCTModel.list[["model1"]]@feature.attributes <- df.var
+    df.var <- df.var %>% dplyr::arrange(-residual_variance)
+    so.list[[i]]@assays[["SCT"]]@var.features <- df.var$SYMBOL[1:round(1.5 * parameter.list$integration.n.genes)]   
+  } else {
+    df.var <-  so.list[[i]]@assays[["SCT"]]@meta.features 
+    df.var <- df.var %>% dplyr::arrange(-sct.residual_variance)
+    so.list[[i]]@assays[["SCT"]]@var.features <- df.var$SYMBOL[1:round(1.5 * parameter.list$integration.n.genes)]    
+  }
+  
+  
+}
+
+```
+
+
+```{r integrate data, include = FALSE}
+
+       # 
 
 if (length(so.list) > 1){ # intergrate if there are multiple datasets provided
   
@@ -762,27 +794,61 @@ if (length(so.list) > 1){ # intergrate if there are multiple datasets provided
   }
   
   # enable parallelization
-    plan(strategy = "multisession", workers = n.workers$integration)
-    if (do.memory.limit) options(future.globals.maxSize = (max.memory*20480/20 * 1024^2))    
+    plan(strategy = "multisession", workers = parameter.list$n.workers$integration)
+    if (parameter.list$integration.limit.memory) options(future.globals.maxSize = (parameter.list$integration.max.memory*20480/20 * 1024^2))    
 
 message("Selecting integration features...")
   so.features <- SelectIntegrationFeatures(object.list = so.list,
                                            assay = assay.vector,
-                                           nfeatures = n.anchors,
-                                           fvf.nfeatures = n.anchors)
+                                           nfeatures = parameter.list$integration.n.genes,
+                                           fvf.nfeatures = parameter.list$integration.n.genes)
   
   # prepare seurat object for integration
   message("Prepping seurat object for integration..")
   
-  # k.filter <- 200
+  # integration.k.filter <- 200
   so.n <- unlist(lapply(so.list, ncol))
-  which.too.small <- names(so.n)[so.n <= k.filter]
+  which.too.small <- names(so.n)[so.n <= parameter.list$integration.k.filter]
   if (length(which.too.small) > 0){
-    message(paste0(which.too.small, collapse = ", "), " were removed due to insufficient number of cells (n < ", k.filter, ")")
-    n.datasets <- sum(so.n > k.filter)
+    message(paste0(which.too.small, collapse = ", "), " were removed due to insufficient number of cells (n < ", parameter.list$integration.k.filter, ")")
+    n.datasets <- sum(so.n > parameter.list$integration.k.filter)
   }
   
-  so.list2 <- PrepSCTIntegration(object.list = so.list[so.n > k.filter ], anchor.features = so.features, verbose = FALSE)
+  
+  so.list2 <- tryCatch({
+    PrepSCTIntegration(object.list = so.list[so.n > parameter.list$integration.k.filter ], anchor.features = so.features, verbose = T)
+  }, error = function(e){
+           pmt.present <- all(unlist(lapply(X = so.list, FUN = function(x) "percent.mt" %in% colnames(x@meta.data))))
+       if (pmt.present){
+         var2reg <- "percent.mt"
+       } else {
+         var2reg <- NULL
+       }
+       
+    so.list <- lapply(X = so.list[so.n > parameter.list$integration.k.filter ], FUN = SCTransform, method = "glmGamPoi", verbose = F, 
+                       vars.to.regress = var2reg, variable.features.n = parameter.list$integration.n.genes)
+
+    so.features <- SelectIntegrationFeatures(object.list = so.list,
+                                           assay = assay.vector,
+                                           nfeatures = parameter.list$integration.n.genes,
+                                           fvf.nfeatures = parameter.list$integration.n.genes)
+     
+    so.list2 <- PrepSCTIntegration(object.list = so.list, anchor.features = so.features, verbose = T)
+    return(list(
+      so.list = so.list2,
+      so.features = so.features,
+      unpack.this = T
+    ))
+  })
+  
+  if ("unpack.this" %in% names(so.list2)){
+    so.features <- so.list2$so.features
+    so.list2 <- so.list2$so.list
+  }
+  
+  
+  #########
+  #########
   
   # Added override step
   # Note: solution to retain sct scaled values post-integration proposed by chlee-tabin (https://github.com/satijalab/seurat/issues/2590)
@@ -799,35 +865,32 @@ message("Selecting integration features...")
   rm(so.list); invisible({gc()})
   
   # ensure the k.filer is not larger than smallest dataset
-  # k.filter <- min(200, min(sapply(so.list2, ncol)))
+  # integration.k.filter <- min(200, min(sapply(so.list2, ncol)))
 
   # # find integration anchors
   message("Finding integration anchors...")
-  if (integration_method == "CCA") {
-    so.anchors <- FindIntegrationAnchors(object.list = so.list2, normalization.method = "SCT",
-                                         anchor.features = so.features, verbose = FALSE, k.filter = k.filter)
-  }else if (integration_method == "rPCA") {
-    
-    # run PCA on each object in the list (required for reicprocal PCA workflow)
-    so.list2 <- lapply(X = so.list2, FUN = function(x) {
-      x <- RunPCA(x, features = so.features, verbose = FALSE)
+  suppressMessages({
+    suppressWarnings({
+      
+      if (parameter.list$integration.method == "CCA") {
+        so.anchors <- FindIntegrationAnchors(object.list = so.list2, normalization.method = "SCT",
+                                             anchor.features = so.features, verbose = FALSE, k.filter = parameter.list$integration.k.filter)
+      }else if (parameter.list$integration.method == "rPCA") {
+        
+        # run PCA on each object in the list (required for reicprocal PCA workflow)
+        so.list2 <- lapply(X = so.list2, FUN = function(x) {
+          x <- RunPCA(x, features = so.features, verbose = FALSE)
+        })
+        # identify anchors and integrate datasets
+        so.anchors <- FindIntegrationAnchors(object.list = so.list2, normalization.method = "SCT", reduction = "rpca",
+                                             anchor.features = so.features, verbose = FALSE)
+        
+      }
     })
-    # identify anchors and integrate datasets
-    so.anchors <- FindIntegrationAnchors(object.list = so.list2, normalization.method = "SCT", reduction = "rpca",
-                                         anchor.features = so.features, verbose = FALSE)
-    
-  }
+  })
   
   rm(so.list2); invisible({gc()})
-  # which.features.integrate <- query.panel
-  # which.features.integrate <- Reduce(intersect, lapply(so.anchors@object.list, rownames))
-  # which.features.integrate <- which.features.integrate[which.features.integrate %in% query.panel]
 
-  # last chance assertions
-  # so.anchors@anchor.features <- so.anchors@anchor.features[(so.anchors@anchor.features %in% which.features.integrate)]
-  # so.anchors@command@params[["anchor.features"]] <- so.anchors@anchor.features
-  
-  
   # integrate data
   message("Integrating data...")
   so <- IntegrateData( 
@@ -844,11 +907,11 @@ message("Selecting integration features...")
   rm(so.list)
 }
 
-# n.anchors.effect <- length(which.features.integrate)
-n.anchors.effect <- n.anchors
+# integration.n.genes.effect <- length(which.features.integrate)
+n.anchors.effect <- parameter.list$integration.n.genes
 
 # remove baggage
-rm(so.anchors)
+rm(so.anchors);invisible({gc()})
 
 
 ```
@@ -859,6 +922,7 @@ rm(so.anchors)
 ```{r PCA}
 
 # Run PCA
+message("Running PCA...")
 so <- RunPCA(so, verbose = FALSE)
 
 # proportion of variance explained by each PC 
@@ -886,16 +950,17 @@ plt.scree1 <- ggplot(scree.var, aes(x = pc.id, y = pc.prop_var)) +
   theme_miko()
 
 plt.scree2 <- ggplot(scree.var, aes(x = pc.id, y = pc.cum_sum)) + 
-  geom_point() +
   theme(legend.position="right") +
   geom_vline(xintercept = pc.n_relevant_components+0.5, color = 'red') + 
+  geom_hline(yintercept =pca.var.threshold, color = 'red') + 
+    geom_point() +
   ylim(0, 1) + 
   ggtitle(paste(pc.n_relevant_components, "PCs (", round(100*pc.cum_sum[pc.n_relevant_components],2), "%) of variance")) + 
   xlab("Principal Components") + 
   ylab("Cumulative Variance Explained (proportion)") + theme_miko()
 
 
-if (print.inline){
+if (parameter.list$print.inline){
   print(plt.scree1)
   print(plt.scree2)
 }
@@ -905,10 +970,13 @@ if (print.inline){
 
 ```{r cluster data}
 # Find clusters ---------------------------------------------------------------------------
+message("Finding nearest neighbors...")
 so <- FindNeighbors(object = so, reduction = "pca", dims = 1:pc.n_relevant_components)
 
-# target.cluster.resolution <- 1
-so <- FindClusters(object = so, resolution = target.cluster.resolution, verbose = 0, algorithm = 1, modularity.fxn = 1, group.singletons = T)
+# integration.cluster.resolution <- 1
+message("Clustering data...")
+so <- FindClusters(object = so, resolution = parameter.list$integration.cluster.resolution, 
+                   verbose = 0, algorithm = 1, modularity.fxn = 1, group.singletons = T)
 
 ```
 
@@ -917,17 +985,19 @@ so <- FindClusters(object = so, resolution = target.cluster.resolution, verbose 
 # Run umap and generate plot --------------------------------------------------------------------
 nDim_umap <- pc.n_relevant_components
 so <- RunUMAP(so, dims = 1:nDim_umap)
-plt.integration <- DimPlot(so, reduction = "umap",group.by = "batch", pt.size = 0.02)  + ggtitle(label = "UMAP") +
+plt.integration <- DimPlot(so, reduction = "umap",group.by = "batch", pt.size = autoPointSize(ncol(so)))  + ggtitle(label = "UMAP") +
   xlab("UMAP 1") + ylab("UMAP 2")
 
 plt.integration <-  plt.integration + 
   theme_miko(legend = T) + 
   labs(title = "Integrated Data", subtitle = "UMAP") + 
    scale_fill_manual(values = categoricalColPal(n = n.datasets)) + 
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+   theme(legend.text=element_text(size=rel(0.5))) 
 
 
-if (print.inline){
+if (parameter.list$print.inline){
   print(plt.integration)
 }
 
@@ -942,24 +1012,37 @@ plt.integration_overlay <- list()
 
 set.labels <- unique(so@meta.data[["batch"]])
 for (i in 1:length(set.labels)){
-  plt.integration_overlay[[i]] <- DimPlot(so, 
+  plt.integration_overlay[[set.labels[i]]] <- DimPlot(so, 
                                           reduction = "umap", 
                                           label = F, cells.highlight = as.vector(which(so@meta.data[["batch"]] == set.labels[i])), 
                                           label.size = 4,
-                                          pt.size = 0.02,
-                                          sizes.highlight = 0.02)  +   
+                                          pt.size = autoPointSize(ncol(so)),
+                                          sizes.highlight = autoPointSize(ncol(so)))  +   
     ggtitle(label = set.labels[i]) + 
     xlab("UMAP 1") +
     ylab("UMAP 2") + 
     theme_miko()
 }
 
+
+plt.overlay.combine <- list()
+for (i in 1:length(plt.original_overlay)){
+  
+  set.name <- names(plt.original_overlay)[i]
+  
+  plt.overlay.combine[[set.name]] <- cowplot::plot_grid(plt.original_overlay[[set.name]] + labs(subtitle = "Pre-integration"), 
+                                                        plt.integration_overlay[[set.name]] + labs(subtitle = "Post-integration", title = ""), nrow = 1)
+  
+}
+
 plt.ncol <- if (n.datasets > 3) 4 else  n.datasets
 plt.integration_by_batch <- cowplot::plot_grid(plotlist = plt.integration_overlay, ncol = plt.ncol)
 
-if (print.inline){
+if (parameter.list$print.inline){
   print(plt.integration_by_batch)
 }
+
+# plt.integration_overlay
 
 ```
 
@@ -971,7 +1054,7 @@ plt.umap_by_cluster <- DimPlot(so,
                                reduction = "umap",  
                                label.size = 4, 
                                label = TRUE, 
-                               pt.size = 0.02)  +   
+                               pt.size = autoPointSize(ncol(so)))  +   
   ggtitle("Clusters") + 
   xlab("UMAP 1") + 
   ylab("UMAP 2") 
@@ -981,7 +1064,7 @@ plt.umap_by_cluster <- plt.umap_by_cluster +
         labs(title = "Integrated Dataset", subtitle = "UMAP stratfiied by clusters") + 
   scale_color_manual(values = categoricalColPal(n = length(unique(so@meta.data$seurat_clusters))))  
 
-if (print.inline){
+if (parameter.list$print.inline){
   print(plt.umap_by_cluster)
 }
 
@@ -996,9 +1079,11 @@ plt.umap_by_barcode <- DimPlot(so, split.by = "batch", group.by = "Barcode",  pt
   xlab("UMAP 1") + ylab("UMAP 2")+ theme(legend.position = "bottom")
 
 plt.umap_by_batch <- DimPlot(so, group.by = "batch",  pt.size = 0.02) + 
-  xlab("UMAP 1") + ylab("UMAP 2") 
+  xlab("UMAP 1") + ylab("UMAP 2")  +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+   theme(legend.text=element_text(size=rel(0.5))) 
 
-if (print.inline){
+if (parameter.list$print.inline){
   print(plt.umap_by_barcode)
   plt.umap_by_batch
 }
@@ -1081,10 +1166,16 @@ plt.cluster_composition <- ggplot(df.cluster_annotations,
   theme_miko(legend = T) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
 
+try({
+ plt.cluster_composition <- plt.cluster_composition +
+   theme(legend.position = "bottom") + 
+  guides(fill = guide_legend(override.aes = list(size = 5))) + 
+   theme(legend.text=element_text(size=rel(0.5))) 
+}, silent = T)
   # scale_fill_manual(values = my_cols) + 
 
 
-if (print.inline){
+if (parameter.list$print.inline){
   plt.cluster_composition
 }
 
@@ -1093,72 +1184,72 @@ if (print.inline){
 
 
 ```{r # pre post integration values, fig.width = 12, fig.height = 7}
-
-plt.bulk.comparison <- NULL
-try({
-
-df.exp <- NULL
-
-e.mat.integrated <- getExpressionMatrix(so, which.data = "scale", which.assay = "integrated")
-e.mat.sct <- getExpressionMatrix(so, which.data = "scale", which.assay = "SCT")
-
-df.meta <- so@meta.data
-u.batch <- unique(df.meta$batch)
-n.batches <- length(u.batch)
-
-for (i in 1:n.batches){
-  batch.name <- u.batch[i]
-  
-  df.meta.sub <- df.meta[df.meta$batch %in% batch.name, ]
-  
-  which.cells <-  rownames(df.meta.sub)
-  
-  ei.sub <- e.mat.integrated[ ,colnames(e.mat.integrated) %in% which.cells]
-  es.sub <- e.mat.sct[ ,colnames(e.mat.sct) %in% which.cells]
-  
-  # get means and sort according to genes
-  ei.mean <- rowMeans(ei.sub)
-  ei.mean <- ei.mean[order(names(ei.mean))]
-  es.mean <- rowMeans(es.sub)
-  es.mean <- es.mean[order(names(es.mean))]
-  es.mean <- es.mean[names(es.mean) %in% names(ei.mean)]
-  
-  df.exp.sub <- NULL
-  df.exp.sub <- data.frame(batch = batch.name, genes = names(es.mean), sct.expression = es.mean, integrated.expression = ei.mean)
-  
-  df.exp <- bind_rows(df.exp, df.exp.sub)
-  
-}
-
-lm_eqn <- function(df){
-    m <- lm(y ~ x, df);
-    eq <- substitute(italic(y) == a + b %.% italic(x)*","~~italic(r)^2~"="~r2, 
-         list(a = format(unname(coef(m)[1]), digits = 2),
-              b = format(unname(coef(m)[2]), digits = 2),
-             r2 = format(summary(m)$r.squared, digits = 3)))
-    as.character(as.expression(eq));
-}
-
-plt.bulk.comparison <- df.exp %>%
-  ggplot(aes(x = sct.expression, y = integrated.expression)) + 
-  geom_hline(yintercept = 0, color = "grey") + 
-   geom_vline(xintercept = 0, color = "grey") + 
-  geom_point(alpha = 0.5) + 
-  geom_smooth(method = "lm", color = "black", linetype = "dashed", se = FALSE) + 
-  ggpmisc::stat_poly_eq(formula = y~x, aes(label = paste(..rr.label.., sep = "~~~")), parse = T) + 
-  facet_wrap(~batch, ncol = 4, scales = "free") + 
-  theme_miko() + 
-  geom_abline(slope = 1, linetype = "dashed", color ="tomato") + 
-  labs(title = "Pseudobulk Expression", subtitle = "Pre- vs. Post-Integration Gene Expression") + 
-  xlab("SCT, Scaled Gene Expression") + 
-  ylab("Integrated, Scaled Gene Expression")
-
-if (print.inline) {
-  print(plt.bulk.comparison)
-}
-  
-  
-})
+# 
+# plt.bulk.comparison <- NULL
+# try({
+# 
+# df.exp <- NULL
+# 
+# e.mat.integrated <- getExpressionMatrix(so, which.data = "scale", which.assay = "integrated")
+# e.mat.sct <- getExpressionMatrix(so, which.data = "scale", which.assay = "SCT")
+# 
+# df.meta <- so@meta.data
+# u.batch <- unique(df.meta$batch)
+# n.batches <- length(u.batch)
+# 
+# for (i in 1:n.batches){
+#   batch.name <- u.batch[i]
+#   
+#   df.meta.sub <- df.meta[df.meta$batch %in% batch.name, ]
+#   
+#   which.cells <-  rownames(df.meta.sub)
+#   
+#   ei.sub <- e.mat.integrated[ ,colnames(e.mat.integrated) %in% which.cells]
+#   es.sub <- e.mat.sct[ ,colnames(e.mat.sct) %in% which.cells]
+#   
+#   # get means and sort according to genes
+#   ei.mean <- rowMeans(ei.sub)
+#   ei.mean <- ei.mean[order(names(ei.mean))]
+#   es.mean <- rowMeans(es.sub)
+#   es.mean <- es.mean[order(names(es.mean))]
+#   es.mean <- es.mean[names(es.mean) %in% names(ei.mean)]
+#   
+#   df.exp.sub <- NULL
+#   df.exp.sub <- data.frame(batch = batch.name, genes = names(es.mean), sct.expression = es.mean, integrated.expression = ei.mean)
+#   
+#   df.exp <- bind_rows(df.exp, df.exp.sub)
+#   
+# }
+# 
+# lm_eqn <- function(df){
+#     m <- lm(y ~ x, df);
+#     eq <- substitute(italic(y) == a + b %.% italic(x)*","~~italic(r)^2~"="~r2, 
+#          list(a = format(unname(coef(m)[1]), digits = 2),
+#               b = format(unname(coef(m)[2]), digits = 2),
+#              r2 = format(summary(m)$r.squared, digits = 3)))
+#     as.character(as.expression(eq));
+# }
+# 
+# plt.bulk.comparison <- df.exp %>%
+#   ggplot(aes(x = sct.expression, y = integrated.expression)) + 
+#   geom_hline(yintercept = 0, color = "grey") + 
+#    geom_vline(xintercept = 0, color = "grey") + 
+#   geom_point(alpha = 0.5) + 
+#   geom_smooth(method = "lm", color = "black", linetype = "dashed", se = FALSE) + 
+#   ggpmisc::stat_poly_eq(formula = y~x, aes(label = paste(..rr.label.., sep = "~~~")), parse = T) + 
+#   facet_wrap(~batch, ncol = 4, scales = "free") + 
+#   theme_miko() + 
+#   geom_abline(slope = 1, linetype = "dashed", color ="tomato") + 
+#   labs(title = "Pseudobulk Expression", subtitle = "Pre- vs. Post-Integration Gene Expression") + 
+#   xlab("SCT, Scaled Gene Expression") + 
+#   ylab("Integrated, Scaled Gene Expression")
+# 
+# if (parameter.list$print.inline) {
+#   print(plt.bulk.comparison)
+# }
+#   
+#   
+# })
 
 ```
 
@@ -1169,15 +1260,18 @@ run.id <- NULL
 if (!exists("user")) user <- "guest"
 
 clog.update.success <- F
-try({
+if (parameter.list$update.log){
+ try({
   run.id <-  updateCentralLog(Module = "M02", 
                               input.data = paste(unlist(lapply(input.data, function(x) x$file)), collapse = ", "), 
                               input.subset = NA, 
-                              pdf.flag = save.pdf)
+                              pdf.flag = parameter.list$save.pdf)
   clog.update.success <-  T
-}, silent = F)
+}, silent = F) 
+}
+
 if (is.null(run.id))  {
-  warning("Central log update was unsuccessful :(\n")
+  message("Central log update was unsuccessful :(\n")
   run.id <- paste("M02_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
 }
 
@@ -1192,17 +1286,31 @@ output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys
 # create output directories
 dir.create(output.path)
 dir.create(paste0(output.path, "Tables/"))
-if (save.pdf) dir.create(paste0(output.path, "PDF/"))
+if (parameter.list$save.pdf) dir.create(paste0(output.path, "PDF/"))
 
 ```
 
 Data Integration
 ===================================== 
 
-Row {.tabset}
------------------------------------------------------------------------
+Sidebar {.sidebar}
+-------------------------------------
+
+**scRNAseq Data Integration**
+
+**Description**: Create an integrated dataset for downstream scRNAseq analysis. 
+
+**Method**: Cross-dataset cell pairs (i.e., anchors) are identified based on corresponding biological states and these anchors are used to harmonize datasets into a single dataset, thereby correcting for technical differences across datasets (i.e., batch effect correction). 
+
+**Method**: Stuart, T., Butler, A., Hoffman, P., Hafemeister, C., Papalexi, E., Mauck III, W. M., ... & Satija, R. (2019). Comprehensive integration of single-cell data. *Cell*, 177(7), 1888-1902
+
+
+
+Row {.tabset data-height=500}
+-------------------------------------
 
 ### Integration
+
 ```{r plt.integration, fig.width=12, fig.height=7}
 
 umap.oi <- cowplot::plot_grid(plt.umap.original , plt.integration, align = "v",  ncol = 2)
@@ -1211,90 +1319,13 @@ print(umap.oi)
 try({
   savePDF(file.name = paste0(output.path, "PDF/", "M02_UMAP_input_vs_integrated.pdf"), 
           plot.handle = umap.oi, 
-          fig.width = 12, fig.height = 7, save.flag = save.pdf)
-}, silent = T)
-
-```
-
-### Integration by batch
-```{r plt.integration_by_batch1, fig.height=15, fig.width=14}
-
-if (n.datasets > 20){
-  print(plt.integration_by_batch)
-
-try({
-  savePDF(file.name = paste0(output.path, "PDF/", "M02_UMAP_batch.pdf"), 
-          plot.handle = plt.integration_by_batch, 
-          fig.width = 14, fig.height = 15, save.flag = save.pdf)
-}, silent = T)
-}
-
-
-```
-
-```{r plt.integration_by_batch2, fig.height=10, fig.width=14}
-
-if ((n.datasets > 10) & (n.datasets <= 20)){
-  print(plt.integration_by_batch)
-
-try({
-  savePDF(file.name = paste0(output.path, "PDF/", "M02_UMAP_batch.pdf"), 
-          plot.handle = plt.integration_by_batch, 
-          fig.width = 14, fig.height = 10, save.flag = save.pdf)
-}, silent = T)
-}
-
-
-```
-
-```{r plt.integration_by_batch3, fig.height=6, fig.width=14}
-
-if ((n.datasets <= 10) ){
-  print(plt.integration_by_batch)
-
-try({
-  savePDF(file.name = paste0(output.path, "PDF/", "M02_UMAP_batch.pdf"), 
-          plot.handle = plt.integration_by_batch, 
-          fig.width = 14, fig.height = 6, save.flag = save.pdf)
-}, silent = T)
-}
-
-
-```
-
-### Barcodes by batch
-```{r plt.umap_by_barcode, fig.height=4, fig.width=12, dpi = 72}
-
-plt.umap_by_barcode <- plt.umap_by_barcode + 
-        theme_miko(legend = T) + 
-        labs(title = "Integrated Data", subtitle = "UMAP stratified by barcodes") + 
-  scale_color_manual(values = categoricalColPal(n = n.datasets)) + 
-  theme(legend.position = "bottom")
-print(plt.umap_by_barcode)
-
-try({
-  savePDF(file.name = paste0(output.path, "PDF/", "M02_UMAP_barcode.pdf"), 
-          plot.handle = plt.umap_by_barcode, 
-          fig.width = 12, fig.height = 4, save.flag = save.pdf)
-}, silent = T)
-
-```
-
-
-### SCT vs. Integrated Bulk Expression
-```{r, fig.height=7, fig.width=12, dpi = 72}
-print(plt.bulk.comparison)
-
-try({
-  savePDF(file.name = paste0(output.path, "PDF/", "M02_input_vs_integrated_expression.pdf"), 
-          plot.handle = plt.bulk.comparison, 
-          fig.width = 12, fig.height = 4, save.flag = save.pdf)
+          fig.width = 12, fig.height = 7, save.flag = parameter.list$save.pdf)
 }, silent = T)
 
 ```
 
 ### Number of Cells per Dataset
-```{r n pie chart, dpi = 72}
+```{r n pie chart}
   plt.pie
 ```
 
@@ -1302,10 +1333,99 @@ try({
 
 try({
   savePDF(file.name = paste0(output.path, "PDF/", "M02_pie_composition.pdf"), 
-          plot.handle = plt.pie, save.flag = save.pdf)
+          plot.handle = plt.pie, save.flag = parameter.list$save.pdf)
 }, silent = T)
 
 ```
+
+
+### PCA 
+```{r plt.PCA, fig.width=8, fig.height=4, dpi = 72}
+
+# PCA & Cluster Resolution
+# ===================================== 
+# PCA
+# Row
+# -----------------------------------------------------------------------
+plt.scree.combo <- cowplot::plot_grid(plt.scree1, plt.scree2, ncol=2)
+print(plt.scree.combo)
+
+try({
+  savePDF(file.name = paste0(output.path, "PDF/", "M02_scree_plot.pdf"), 
+          plot.handle = plt.scree.combo, 
+          fig.width = 8, fig.height = 4, save.flag = parameter.list$save.pdf)
+}, silent = T)
+
+```
+
+### Integrated Clusters
+
+```{r plt.cluster_composition, fig.width = 12, fig.height = 4}
+
+plt.comp.combo <- cowplot::plot_grid(plt.umap_by_cluster + theme(legend.position = "none"), 
+                                     plt.cluster_composition, rel_widths = c(1,1.5),nrow = 1,  axes = "tb")
+print(plt.comp.combo)
+
+try({
+  savePDF(file.name = paste0(output.path, "PDF/", "M02_sample_composition.pdf"), 
+          plot.handle = plt.comp.combo, 
+          fig.width = 12, fig.height = 4, save.flag = parameter.list$save.pdf)
+}, silent = T)
+
+# Row
+# -----------------------------------------------------------------------
+# 
+# ### Principal Components
+# ```{r valuebox4}
+# valueBox(pc.n_relevant_components)
+# ```
+# 
+# ### Clusters
+# ```{r valuebox5}
+# valueBox(length(unique(so@meta.data[["seurat_clusters"]])))
+# ```
+
+```
+
+### Gene Intersection
+```{r n common geneplot, fig.width = 12, fig.height =5}
+  print(plt.common.gene.plot)
+```
+
+```{r save common gene plot}
+
+try({
+  savePDF(file.name = paste0(output.path, "PDF/", "M02_gene_intersection.pdf"), 
+          plot.handle = plt.common.gene.plot, fig.width = 12, fig.height =5, save.flag = parameter.list$save.pdf)
+}, silent = T)
+
+```
+
+
+
+Row {.tabset data-height=500}
+-------------------------------------
+
+```{r sample-specific plots}
+
+out <- lapply(seq_along(plt.overlay.combine), function(i) {
+  
+  s1 <- names(plt.overlay.combine)[i]
+  s2 <- paste0("plt.overlay.combine[[", i, "]]")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE, fig.width = 14, fig.height=6}",  #fig.width = 8, fig.height=8, 
+                                          paste("inOver_", i, sep = "")))
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
 
 Row
 -----------------------------------------------------------------------
@@ -1320,158 +1440,98 @@ valueBox(n.datasets)
 valueBox(ncol(so))
 ```
 
-### Integration Anchors (Gene N)
+### Integrated Genes
 ```{r valuebox2}
 valueBox(length(so.features))
 ```
 
-### Integrated Genes
+### Total Genes
 ```{r valuebox3}
 try({valueBox(nrow(so@assays[["RNA"]]))}, silent = T)
 ```
 
-PCA & Cluster Resolution
+
+
+
+
+
+Tables
 ===================================== 
 
-Row
------------------------------------------------------------------------
+### Integrated Genes
 
-### PCA
-
-```{r plt.PCA, fig.width=8, fig.height=4, dpi = 72}
-plt.scree.combo <- cowplot::plot_grid(plt.scree1, plt.scree2, ncol=2)
-print(plt.scree.combo)
+Genes used for data integration.
+```{r integ genes}
 
 try({
-  savePDF(file.name = paste0(output.path, "PDF/", "M02_scree_plot.pdf"), 
-          plot.handle = plt.scree.combo, 
-          fig.width = 8, fig.height = 4, save.flag = save.pdf)
+ flex.asDT(data.frame(gene = so.features))
 }, silent = T)
 
 ```
 
+### Gene Intersection Tally
+Tally of genes represented across datasets. 
+```{r available genes}
 
-Gene Intersection
-===================================== 
+try({
+ flex.asDT(av.tally)
+}, silent = T)
 
-Row {.tabset}
------------------------------------------------------------------------
+```
 
 ### Gene Intersection
-```{r n common geneplot, fig.width = 12, fig.height =5}
-  print(plt.common.gene.plot)
-```
 
-```{r save common gene plot}
+Genes represented in all datasets. 
+```{r gene int table}
 
 try({
-  savePDF(file.name = paste0(output.path, "PDF/", "M02_gene_intersection.pdf"), 
-          plot.handle = plt.common.gene.plot, fig.width = 12, fig.height =5, save.flag = save.pdf)
+ flex.asDT(gene.av.df)
 }, silent = T)
 
 ```
 
-
-### Gene Intersection Tally Table
 
 ```{r tally table}
 
 try({
- flex.asDT(av.tally) 
-}, silent = T)
-
-```
-```{r save tally table}
-
-try({
   table.name <- "gene_intersection_tally_table.csv"
-  write.csv(av.tally, file = paste0(output.path, "Tables/", table.name), 
-            row.names = F)   
+  write.csv(av.tally, file = paste0(output.path, "Tables/", table.name),
+            row.names = F)
 }, silent = T)
-
-```
-
-### Gene Intersection Table
-
-```{r list table}
-
-try({
- flex.asDT(gene.av.df) 
-}, silent = T)
-
-```
-
-```{r save list table}
 
 try({
   table.name <- "gene_intersection_table.csv"
-  write.csv(gene.av.df, file = paste0(output.path, "Tables/", table.name), 
-            row.names = F)   
+  write.csv(gene.av.df, file = paste0(output.path, "Tables/", table.name),
+            row.names = F)
 }, silent = T)
 
-```
-
-Integrated Clusters
-===================================== 
-
-Row
------------------------------------------------------------------------
-
-### Clusters
-
-
-```{r plt.cluster_composition, fig.width = 12, fig.height = 4, dpi = 72}
-
-plt.comp.combo <- cowplot::plot_grid(plt.umap_by_cluster + theme(legend.position = "none"), plt.cluster_composition, rel_widths = c(1,1.5), align = "h")
-print(plt.comp.combo)
-
-try({
-  savePDF(file.name = paste0(output.path, "PDF/", "M02_sample_composition.pdf"), 
-          plot.handle = plt.comp.combo, 
-          fig.width = 12, fig.height = 4, save.flag = save.pdf)
-}, silent = T)
-
-```
-
-
-Row
------------------------------------------------------------------------
-
-### Principal Components
-```{r valuebox4}
-valueBox(pc.n_relevant_components)
-```
-
-### Clusters
-```{r valuebox5}
-valueBox(length(unique(so@meta.data[["seurat_clusters"]])))
 ```
 
 
 ```{r save results}
 
 # Data Integration Method
-if (integration_method == "CCA"){int_method <- "CCA"} else if (integration_method == "rPCA"){int_method <- "rPCA"}
-df.log <- addLogEntry("Integration Method", int_method, df.log, "integration_method")
+if (parameter.list$integration.method == "CCA"){int_method <- "CCA"} else if (parameter.list$integration.method == "rPCA"){int_method <- "rPCA"}
+df.log <- addLogEntry("Integration Method", parameter.list$integration.method, df.log, "integration.method")
 
 end.time <- proc.time()
 elapsed.time <- round((end.time - start.time)[[3]], 2)
 df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
-df.log <- addLogEntry("Results Saved", save.flag, df.log, "save.flag")
-df.log <- addLogEntry("PDFs Saved", save.pdf, df.log, "save.pdf")
+df.log <- addLogEntry("Results Saved", parameter.list$save.integrated.object, df.log, "save.integrated.object")
+df.log <- addLogEntry("PDFs Saved", parameter.list$save.pdf, df.log, "save.pdf")
 
 df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
 df.log <- addLogEntry("User", user, df.log, "user")
 df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
 
-save.filename <- paste0(run.id, "_", save.filename)
-df.log <- addLogEntry("Output File", (save.filename), df.log, "save.filename")
+parameter.list$save.filename <- paste0(run.id, "_", parameter.list$save.filename)
+df.log <- addLogEntry("Output File", (parameter.list$save.filename), df.log, "save.filename")
 
 df.log_Module_2 <- df.log
 
-if (save.flag == TRUE){
+if (parameter.list$save.integrated.object == TRUE){
   if (!exists("dir")){dir <- ""} 
-  save(so, gNames.list, df.log_Module_2, file = paste0(data.path, dir, save.filename))
+  save(so, gNames.list, df.log_Module_2, file = paste0(data.path, dir, parameter.list$save.filename))
 }
 
 ```
@@ -1495,16 +1555,3 @@ try({
 
 ```
 
-```{r merge pdfs, include = FALSE}
-
-# combine pdfs into single binder
-if (save.pdf){
-  try({
-    pdf.list <- list.files (path = paste0(output.path, "PDF/") )
-    pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
-    pdf.list <- pdf.list[validUTF8(pdf.list)]
-    pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
-  }, silent = T)
-}
-
-```

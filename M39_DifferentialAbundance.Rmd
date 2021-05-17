@@ -1,0 +1,1821 @@
+---
+title: "Differential Abundance"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    source_code: embed
+    theme: flatly
+    navbar:
+      - { title: "scPipeline", href: "https://github.com/NMikolajewicz/scPipeline" }
+      - { title: "scMiko", href: "https://github.com/NMikolajewicz/scMiko" }  
+editor_options: 
+  chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = if (exists("user")){paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", 
+        paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", 
+      paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
+    )
+  })
+---
+
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+packages2load <- c("Seurat", "scMiko", "DT", "scales", "plyr", 
+                   "dplyr", "tidyr", "RColorBrewer", "ggplot2", 
+                   "flexdashboard", "future", "BiocParallel",
+                   "parallel", "doParallel", "foreach", "iterators")
+
+# load packages
+suppressMessages(suppressWarnings(lapply(packages2load, library, character.only = TRUE, quietly = T)))
+
+```
+
+
+
+```{r analysis specifications}
+
+# parameter specification
+parameter.list <- list(
+  # input.file = "M01_NM2_R1_test_300720.Rdata",
+  input.file = "R443_M02_NM2_p9_GBM_PR_integrated_SCTrerun_110521.Rdata",
+  # input.file = "R404_M02_NM2_celsius_renca_rpca_filtered_220321.Rdata",
+  # input.file = "R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
+   # input.file = "R71_M01_NM2_p10_CGR8_310820.Rdata",
+  # input.file = "branch_p12_meso_020521.rds",
+  # input.file = 	"R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
+  # input.file = "R416_M02_NM2_p12_meso_integrated_170421.Rdata",
+  cluster.resolution = 1,
+  subsample_factor = 1,
+  subset.data = NA,
+  pathway.db = "Bader", #Bader, GO
+  
+  
+  
+  # specify comparisons #########################################################
+  da.group.by = "bc", # required
+  
+  # one of following 2 arguments required. If none specified, all pairs are compared
+  da.which.pairs = list(P1 = c("01", "02"),
+                        P2 = c("03", "04"),
+                        P3 = c("05", "06")),
+  # da.which.pairs = list(P1 = c("WT.sc", "Tnfrsf1a.sc"), 
+  #                       P2 = c("WT.sc", "B2m_MHC1neg.sc"), 
+  #                       P3 = c("WT.sc", "B2m_MHC1pos.sc"), 
+  #                       P4 = c("WT.sc", "WT.ortho"), 
+  #                       P5 = c("WT.sc", "Jak1.sc"), 
+  #                       P6 = c("WT.sc", "Ifngr1.sc"), 
+  #                       P7 = c("WT.sc", "CD47.sc"),
+  #                       P8 = c("WT.sc", "Qpct.sc"),
+  #                        P9 = c("WT.ortho", "B2m_MHC1neg.ortho"),
+  #                        P10 = c("WT.ortho", "B2m_MHC1pos.ortho")),
+  # da.reference = "WT.sc", 
+  # da.which.pairs = list(P1 = c("C15", "C50"), P2 = c("WT", "C15"), P3 = c("C15", "C76"), P4 = c("C15", "C68"), P5 = c("C15", "C2")),   # specify specific pairs to compare; list (e.g., list(pair1 = c("wt", "c1"), pair2 = c("wt", "c2"))
+  # da.reference = NA       # specify control group to compare all others pairs to
+
+  table.output.n = 200 # output top N results in tables (per group)
+
+)
+
+
+barcode.list <-   list(
+    WT.sc = "01_|26_", 
+    WT.ref = "WT.ref",
+    Tnfrsf1a.sc = "02_|03_|04_",
+    B2m_MHC1neg.sc = "05_|06_|07_",
+    B2m_MHC1pos.sc = "08_|09_|10_",
+    WT.ortho = "11_|12_|13_",
+    B2m_MHC1neg.ortho = "14_|15_|16_",
+    B2m_MHC1pos.ortho = "17_|18_|19_",
+    Jak1.sc  = "20_|21_|22_",
+    Ifngr1.sc  = "23_|24_|25_",
+    CD47.sc = "27_|28_|29_", 
+    Qpct.sc = "30_|31_|32_"
+  )
+
+
+filter.parameters <- list(
+  include = NULL,
+  omit = NULL
+)
+
+
+# print inline
+print.inline <- FALSE # OPTIONAL; TRUE/FALSE
+
+# save PDF
+save.pdf <- update.log <- T
+
+
+```
+
+
+
+```{r load data, warning = FALSE}
+
+message("Importing data...")
+
+set.seed(1023)
+
+# Specify data directories
+dir.preprocessed <- "Preprocessed_Datasets/"
+
+if (!exists("data.path") & !exists("user")) {
+  stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+}
+
+# load query dataset
+input.file <- parameter.list$input.file
+if ((!grepl(".Rdata|.RData", input.file)) & !(grepl(".rds", input.file))) input.file <- paste0(input.file, ".Rdata")
+
+if (grepl(".Rdata|.RData", input.file)){
+  load(paste(data.path, dir.preprocessed, input.file, sep = ""));
+} else if (grepl(".rds", input.file)) {
+  so <- readRDS(paste(data.path, dir.preprocessed, input.file, sep = ""))
+}
+
+
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
+
+t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "integration.anchors")
+
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                         species =  parameter.list$species, resolution= parameter.list$cluster.resolution, 
+                         subset.data = parameter.list$subset.data, 
+                         subsample = parameter.list$subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
+                         terms2drop = t2d, rmv.pattern = "so", keep.default.assay.only = T)
+
+# unpack results
+if (exists("so")) try({rm(so)}, silent = T)
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+rm(prep.list);
+invisible({gc()})
+
+# determine species representation in seurat object
+parameter.list$species <- detectSpecies(so.query)
+
+```
+
+```{r filter clusters}
+
+if (exists("filter.parameters")){
+  so.query <- clusterFilter(so.query, include = filter.parameters$include, omit = filter.parameters$omit)
+  
+  # TODO ensure that refactorization does not renumber values
+  so.query@meta.data[["seurat_clusters"]] <- factor(as.character(so.query@meta.data[["seurat_clusters"]]))
+  Idents(object = so.query) <- 'seurat_clusters'
+}
+
+```
+
+```{r analysis log, include = FALSE, }
+
+message("Updating analysis log...")
+
+# Initiate and fill analysis Log
+df.log <- initiateLog("39, Differential Abundance")
+df.log <- addLogEntry("PDF saved", save.pdf, df.log, "save.pdf")
+df.log <- addLogEntry("Update Central Log", update.log, df.log, "update.log")
+df.log <- addLogEntry("Print Inline", print.inline, df.log, "print.inline")
+
+df.log <- addLogEntry("Input file", parameter.list$input.file, df.log, "input.file")
+df.log <- addLogEntry("Cluster resolution", parameter.list$cluster.resolution, df.log, "cluster.resolution")
+df.log <- addLogEntry("Subsample factor", parameter.list$subsample_factor, df.log, "subsample_factor")
+df.log <- addLogEntry("data subset", parameter.list$subset.data, df.log, "subset.data")
+df.log <- addLogEntry("species", parameter.list$species, df.log, "species")
+
+# df.log <- addLogEntry("Cumulative variance explained threshold", parameter.list$pca.cum.var.explained, df.log, "pca.cum.var.explained")
+# df.log <- addLogEntry("PCA reduction name", parameter.list$pca.reduction.name, df.log, "pca.reduction.name")
+# 
+# df.log <- addLogEntry("GSEA, n workers", parameter.list$gsea.n.workers, df.log, "gsea.n.workers")
+# df.log <- addLogEntry("GSEA, pathway database", parameter.list$pathway.db, df.log, "pathway.db")
+
+```
+
+
+```{r get past module logs, include = FALSE}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+```{r recode barcodes, warning = FALSE}
+
+
+if (exists("barcode.list") && (length(barcode.list) > 0)){
+
+df.meta <- so.query@meta.data
+
+# relabel barcodes
+bc.list <-barcode.list
+
+df.meta$bc <- NA
+for (i in 1:length(bc.list)){
+  
+  pattern <- bc.list[[i]]
+  pattern.replace <- names(bc.list)[i]
+  df.meta$bc[grepl(pattern, df.meta$Barcode)] <- pattern.replace
+}
+
+so.query@meta.data <- df.meta
+  
+} else {
+  
+  
+  u.bc <- unique(so.query@meta.data[["Barcode"]])
+  bc.list <- list()
+  for (i in 1:length(u.bc)){
+    bc.list[[i]] <- u.bc[i]
+  }
+  names(bc.list) <- u.bc
+so.query@meta.data[["bc"]] <- so.query@meta.data[["Barcode"]]
+}
+
+```
+
+
+
+
+```{r barcode statistics, fig.width=13, fig.height=6}
+
+message("Calculating relative and absolute abundances across conditions...")
+
+so.query@meta.data$bc.new <- so.query@meta.data$bc2 <-so.query@meta.data[ ,parameter.list$da.group.by]
+
+
+df.bc.tally <- data.frame(table(so.query@meta.data$bc2, so.query@meta.data$seurat_clusters))
+df.bc.tally <- df.bc.tally %>%
+  dplyr::group_by(Var1) %>%
+  dplyr::mutate(n.prop = Freq / sum(Freq))
+
+
+df.bc.tally$Var2 <-  orderedFactor(df.bc.tally$Var2)
+
+plt.abs.ab <- df.bc.tally %>%
+  ggplot(aes(x = Var1, y = Freq, fill = Var2)) + 
+  geom_bar(stat = "identity") + 
+  xlab("Groups") + ylab("N Cells") + 
+  labs(fill = "Cluster", title = "Absolute Abundance") + 
+  theme_miko(legend = T, x.axis.rotation = 45) + 
+  scale_fill_manual(values = categoricalColPal(n = length(unique(df.bc.tally$Var2)))) 
+
+
+plt.rel.ab <- df.bc.tally %>%
+  ggplot(aes(x = Var1, y = n.prop, fill = Var2)) + 
+  geom_bar(stat = "identity") + 
+  xlab("Groups") + ylab("Relative Abundance") + 
+  labs(fill = "Cluster", title = "Relative Abundance") + 
+  theme_miko(legend = T, x.axis.rotation = 45) + 
+  scale_fill_manual(values = categoricalColPal(n = length(unique(df.bc.tally$Var2))))
+
+```
+
+```{r Set up pairwise comparisons}
+
+# Identify all pairs for comparisons ################################################
+u.bc <- unique(so.query@meta.data$bc.new)
+
+da.res.list.sc <- list()
+da.comp.list <- list()
+da.par <- c("da.which.pairs", "da.reference")
+da.par.av <- da.par[da.par %in% names(parameter.list)]
+
+if (("da.reference" %in% da.par.av) && !is.na(parameter.list$da.reference)){
+  ref.group <- parameter.list$da.reference
+  for (i in 1:length(ref.group)){
+    cur.ref <- cur.comp <- c()
+    cur.ref <- u.bc[grepl(ref.group[i], u.bc)]
+    cur.comp <- u.bc[!grepl(ref.group[i], u.bc)]
+    
+    if ((length(cur.ref) == 0) |  (length(cur.comp) == 0)){
+      next
+    } else {
+      list.length <- length(da.comp.list)
+      da.comp.list[[paste0("P", list.length+1)]] <- list(
+        reference = cur.ref,
+        comparison = cur.comp
+      )
+    }
+  }
+}
+
+
+if (("da.which.pairs" %in% da.par.av) && !is.na(parameter.list$da.which.pairs)){
+  
+  pair.list <- parameter.list$da.which.pairs
+  for (i in 1:length(pair.list)){
+    
+    
+    n.pair <- length(pair.list[[i]])
+    if (n.pair > 2) message(names(pair.list)[i], " specifies more than 2 groups for comparison. Only first 2 groups used.")
+    
+    cur.ref <- cur.comp <- c()
+    cur.ref <- u.bc[grepl(pair.list[[i]][1], u.bc)]
+    cur.comp <- u.bc[grepl(pair.list[[i]][2], u.bc)]
+    
+    if ((length(cur.ref) == 0) |  (length(cur.comp) == 0)){
+      next
+    } else {
+      
+      if (!(names(pair.list)[i] %in% names(da.comp.list))){
+        pair.name <- names(pair.list)[i]
+      } else {
+        list.length <- length(da.comp.list)
+        pair.name <- paste0("P", list.length+1)
+      }
+      da.comp.list[[pair.name]] <- list(
+        reference = cur.ref,
+        comparison = cur.comp
+      )
+    }
+    
+  }
+  
+}
+
+if ((length(da.par.av) == 0) | length(da.comp.list) == 0){
+  # all pairs
+  for (i in 1:length(u.bc)){
+    cur.ref <- cur.comp <- c()
+    cur.ref <- u.bc[i]
+    cur.comp <- u.bc[!(u.bc %in% u.bc[i])]  
+    
+        if ((length(cur.ref) == 0) |  (length(cur.comp) == 0)){
+      next
+    } else {
+      list.length <- length(da.comp.list)
+      da.comp.list[[paste0("P", list.length+1)]] <- list(
+        reference = cur.ref,
+        comparison = cur.comp
+      )
+    }
+    
+  }
+}
+  
+```
+
+
+
+
+
+```{r DA analysis - MILO}
+
+
+da.res.list <- list()
+for (i in 1:length(da.comp.list)){
+
+  
+  so.query@meta.data$da.group <- NA
+  so.query@meta.data$da.group[so.query@meta.data$bc2 %in% da.comp.list[[i]][["reference"]]] <- "reference"
+  so.query@meta.data$da.group[so.query@meta.data$bc2 %in% da.comp.list[[i]][["comparison"]]] <- "comparison"
+  
+  
+  df.group.tally <- data.frame(table(so.query@meta.data$da.group))
+  min.size <- min(df.group.tally$Freq)
+  
+
+    res.current <- da_Run(object = so.query[ , !is.na(so.query@meta.data$da.group)], 
+                          condition.group = "da.group", sample.group = NA, balance.samples = T, 
+                          balance.size = min.size, reference.group = "reference")
+    
+    invisible({gc()})
+    
+    # add pseudoreplicate annotations
+    res.current$results <- annotateNhoods(res.current$milo.object, res.current$results, coldata_col = "pseudo_replicates")
+    
+    da.res.list[[names(da.comp.list)[i]]] <- res.current
+
+}
+rm(res.current); invisible({gc()})
+
+
+
+
+
+plt.da.list <- list()
+for (i in 1:length(da.res.list)){
+  plt.da.list[[names(da.res.list)[i]]] <- da.res.list[[i]]$da.umap +
+    labs(title = names(da.res.list)[i],
+         caption = paste0("Reference: " , paste(da.comp.list[[i]][["reference"]], collapse = ", "), 
+                           "\nComparison: " , paste(da.comp.list[[i]][["comparison"]], collapse = ", ")))
+}
+
+# plt.da.list
+
+```
+
+
+
+
+```{r DA umaps}
+
+da_UMAP <- function(da.res.list, color.by = "logFC", sig.only = F, 
+                    sig.threshold = 0.1, scale.lim = 5, size.range = c(0.3, 4), xlim.cart = NA, ylim.cart = NA){
+  
+  milo.object <- da.res.list$milo.object
+  signif_res <- da.res.list$results
+  
+  if (sig.only){
+    signif_res[signif_res$SpatialFDR > sig.threshold, "logFC"] <- 0
+    signif_res[signif_res$SpatialFDR > sig.threshold, "sP"] <- 0
+  }
+  
+  if (!is.na(scale.lim)){
+    signif_res[abs(signif_res[ ,color.by]) > scale.lim ,color.by] <- sign(signif_res[abs(signif_res[ ,color.by]) > scale.lim ,color.by]) * scale.lim
+  }
+  
+  colData(milo.object)["logFC"] <- NA
+  
+  suppressMessages({suppressWarnings({
+    colData(milo.object)[unlist(nhoodIndex(milo.object)[signif_res$Nhood]), ] <- signif_res[ ,color.by]
+    # colData(milo.object)[unlist(nhoodIndex(milo.object)[signif_res$Nhood]), ] <- signif_res$sP
+  })})
+  
+  nh_graph <- nhoodGraph(milo.object)
+  umap.layout <- reducedDim(milo.object, "UMAP")[as.numeric(vertex_attr(nh_graph)$name), ]
+  umap.layout <- as(umap.layout, "matrix")
+  
+  col_vals <- colData(milo.object)[as.numeric(vertex_attr(nh_graph)$name),  "logFC"]
+  
+  V(nh_graph)$colour_by <- col_vals
+  
+  
+  if (color.by == "logFC"){
+    label.name <- "logFC"
+  } else if (color.by == "sP"){
+    label.name <- "signed(logP)"
+  } else {
+    label.name <- "DA"
+  }
+  
+  
+  # , limits = c(-3,3)
+  plot.g <- simplify(nh_graph)
+  pl <- ggraph::ggraph(simplify(nh_graph), layout = umap.layout) +
+    ggraph::geom_node_point(aes(fill = colour_by, size = size), shape = 21, color = "grey66") +
+    scale_size(range = size.range, name = "H size") +
+    ggraph::scale_edge_width(range = c(0.2, 3), name = "overlap size") +
+    theme_classic(base_size = 14) +
+    theme(axis.line = element_blank(), axis.text = element_blank(),
+          axis.ticks = element_blank(), axis.title = element_blank()) 
+  
+  df.da.data <- pl[["data"]]
+  
+  pl2 <- df.da.data %>%
+    dplyr::arrange(abs(colour_by)) %>%
+    ggplot(aes(x = x, y = y, fill = colour_by, size = size))+ 
+    geom_point(color = "grey66", shape = 21) + 
+    # scale_fill_gradient2(name = label.name,high = muted("red"),  mid = "white",  low = muted("blue")) +
+    # theme_classic(base_size = 14) +
+    theme_void() + 
+    labs(size = "H Size") + 
+    theme(axis.line = element_blank(), axis.text = element_blank(),
+          axis.ticks = element_blank(), axis.title = element_blank()) 
+  
+  
+  if (!is.na(xlim.cart)){
+    pl2 <- pl2 + coord_cartesian(xlim = xlim.cart)
+  }
+  
+  if (!is.na(ylim.cart)){
+    pl2 <- pl2 + coord_cartesian(ylim = ylim.cart)
+  }
+  
+  
+  
+  if (!is.na(scale.lim)){
+    pl2 <- pl2 + scale_fill_gradient2(name = label.name,high = muted("red"),  mid = "white",  low = muted("blue"), limits = c(-scale.lim, scale.lim))
+  } else {
+    pl2 <- pl2 + scale_fill_gradient2(name = label.name,high = muted("red"),  mid = "white",  low = muted("blue"))
+  }
+  
+  pl2 + 
+    guides(fill = guide_legend(override.aes = list(size = 3))) + 
+    theme(legend.title = element_text(size = 5), 
+          legend.text = element_text(size = 5))
+  
+}
+
+
+sig.da <- T
+message("Differentially-abundance UMAPs...")
+
+p13.xmin <- min(so.query@reductions[["umap"]]@cell.embeddings[ ,1]*1.1)
+p13.xmax <- max(so.query@reductions[["umap"]]@cell.embeddings[ ,1]*1.1)
+p13.ymin <- min(so.query@reductions[["umap"]]@cell.embeddings[ ,2]*1.1)
+p13.ymax <- max(so.query@reductions[["umap"]]@cell.embeddings[ ,2]*1.1)
+
+da.umap.list <- list()
+for (i in 1:length(da.res.list)){
+  
+da.umap.list[[names(da.res.list)[i]]] <- da_UMAP(da.res.list = da.res.list[[i]], color.by = "logFC", sig.only = sig.da, 
+                             xlim.cart= c(p13.xmin,p13.xmax), ylim.cart= c(p13.ymin,p13.ymax)) + 
+  labs(title =names(da.res.list)[i])
+  
+}
+
+
+# da.umap.list
+
+
+
+```
+
+
+
+```{r within-cluster DEG, fig.width=10 , fig.height=4}
+
+
+do.intra.clust <- F
+
+if (do.intra.clust){
+
+getIntraClusterDEG <- function(res.list.list){
+  tfdb <- geneSets[["AnimalTFDB"]]
+  deg.list <- list()
+  tally.list <- list()
+  for (i in 1:length(res.list.list)){
+  
+  current.geno <- names(res.list.list)[i]
+  da.res.list <- res.list.list[[i]]
+  seurat.object <- da.res.list$seurat.object
+  
+  u.clust <- as.numeric(unique(as.character(seurat.object$seurat_clusters)))
+  u.clust <- u.clust[order(u.clust)]
+  
+  deg.geno.up.all <- deg.geno.down.all <- NULL
+
+  for (k in 1:length(u.clust)){
+    try({
+
+    deg.geno <- presto::wilcoxauc(X = seurat.object[ ,seurat.object$seurat_clusters %in% u.clust[k]], group_by = "da.group", seurat_assay = DefaultAssay(seurat.object))
+    deg.geno.sig.up <- deg.geno %>% dplyr::filter(!grepl("reference", group), padj < 0.05, logFC > 0)
+     deg.geno.sig.down <- deg.geno %>% dplyr::filter(!grepl("reference", group), padj < 0.05, logFC < 0)
+    if (nrow(deg.geno.sig.up) != 0) {
+    deg.geno.sig.up$cluster <- u.clust[k]    
+    deg.geno.up.all <- bind_rows(deg.geno.up.all, deg.geno.sig.up)      
+    }
+    if (nrow(deg.geno.sig.down) != 0) {
+    deg.geno.sig.down$cluster <- u.clust[k]    
+    deg.geno.down.all <- bind_rows(deg.geno.down.all, deg.geno.sig.down)      
+    }
+           
+    }, silent = T)
+
+  }
+
+  deg.up.tally <- data.frame(table(deg.geno.up.all$feature))
+  deg.up.tally$is.tf <- deg.up.tally$Var1 %in% tfdb$Mm
+
+  deg.down.tally <- data.frame(table(deg.geno.down.all$feature))
+  deg.down.tally$is.tf <- deg.down.tally$Var1 %in% tfdb$Mm  
+  
+  
+  tally.list[[current.geno]] <- list(deg.up.tally = deg.up.tally, deg.down.tally = deg.down.tally)
+  deg.list[[current.geno]] <- list(deg.geno.up.all = deg.geno.up.all, deg.geno.down.all = deg.geno.down.all)
+  }
+  
+  return(list(
+    deg.list = deg.list,
+    tally.list = tally.list
+  ))
+}
+
+
+so.deg.ic <- getIntraClusterDEG(res.list.list = da.res.list)
+deg.ic <- so.deg.ic 
+deg.gene.list <- list()
+
+# df.deg.tally <- NULL
+for (i in 1:length(deg.ic$deg.list)){
+  cur.geno.name <- names(deg.ic$deg.list)[i]
+  df.deg.up.cur <- deg.ic$deg.list[[i]][["deg.geno.up.all"]]
+  df.deg.down.cur <- deg.ic$deg.list[[i]][["deg.geno.down.all"]]
+  deg.gene.list[[paste0(cur.geno.name, "_up")]] <- unique(as.character(df.deg.up.cur$feature))
+  deg.gene.list[[paste0(cur.geno.name, "_down")]] <- unique(as.character(df.deg.down.cur$feature))
+}
+
+deg.mod.res <- runHG(gene.list = deg.gene.list, gene.universe = unique(c(unlist(deg.gene.list), rownames(so.query))), 
+                     species = parameter.list$species,
+                     pathway.db = parameter.list$pathway.db)
+
+deg.mod.sum <- summarizeHG(deg.mod.res)
+
+df.deg.tally$direction <- factor(df.deg.tally$direction, levels = c("up","down"))
+plt.deg.tally <- df.deg.tally %>%
+  ggplot(aes(x = geno, y = n.deg, fill = direction)) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  scale_fill_manual(values = c("up" = scales::muted("red"), "down" = scales::muted("blue"))) + 
+  theme_miko(legend = T, x.axis.rotation = 45) + 
+  xlab("Genotype") + 
+  ylab("N Differentially Expressed Genes")
+
+plt.deg.tally
+  
+}
+
+```
+
+
+```{r hood marker helper}
+
+message("Setting up helper functions...")
+
+miko_findNhoodMarkers <- function (x, da.res, da.fdr = 0.1, assay = "logcounts", aggregate.samples = FALSE,
+                                   sample_col = NULL, overlap = 1, lfc.threshold = NULL, merge.discord = FALSE,
+                                   subset.row = NULL, gene.offset = TRUE, return.groups = FALSE,
+                                   subset.nhoods = NULL, na.function = "na.pass", compute.new = FALSE) {
+  if (!is(x, "Milo")) {
+    stop("Unrecognised input type - must be of class Milo")
+  }   else if (any(!assay %in% assayNames(x))) {
+    stop(paste0("Unrecognised assay slot: ", assay))
+  }
+
+
+  if (is.null(na.function)) {
+    warning("NULL passed to na.function, using na.pass")
+    na.func <- get("na.pass")
+  }   else {
+    tryCatch({
+      na.func <- get(na.function)
+    }, warning = function(warn) {
+      warning(warn)
+    }, error = function(err) {
+      stop(paste0("NA function ", na.function, " not recognised"))
+    }, finally = {
+    })
+  }
+
+  if (isTRUE(aggregate.samples) & is.null(sample_col)) {
+    stop("if aggregate.samples is TRUE, the column storing sample information must be specified by setting 'sample_col'")
+  }
+
+  n.da <- sum(na.func(da.res$SpatialFDR < da.fdr))
+
+
+  if (!is.na(n.da) & n.da == 0) {
+    stop("No DA neighbourhoods found")
+  }
+  if (any(is.na(da.res$SpatialFDR))) {
+    warning("NA values found in SpatialFDR vector")
+  }
+  message(paste0("Found ", n.da, " DA neighbourhoods at FDR ",
+                 da.fdr * 100, "%"))
+
+  if ((ncol(nhoodAdjacency(x)) == ncol(nhoods(x))) & isFALSE(compute.new)) {
+    message("nhoodAdjacency found - using for nhood grouping")
+    nhs.da.gr <- miko_graph_nhoods_from_adjacency(nhoods(x),
+                                                  nhood.adj = nhoodAdjacency(x), da.res = da.res,
+                                                  is.da = da.res$SpatialFDR < da.fdr, merge.discord = merge.discord,
+                                                  lfc.threshold = lfc.threshold, overlap = overlap,
+                                                  subset.nhoods = subset.nhoods)
+  } else {
+    message("Computing nhood adjacency")
+    nhs.da.gr <- miko_group_nhoods_by_overlap(nhoods(x), da.res = da.res,
+                                          is.da = da.res$SpatialFDR < da.fdr, merge.discord = merge.discord,
+                                          lfc.threshold = lfc.threshold, overlap = overlap,
+                                          cells = seq_len(ncol(x)), subset.nhoods = subset.nhoods)
+  }
+  nhood.gr <- unique(nhs.da.gr)
+  message(paste0("Nhoods aggregated into ", length(nhood.gr),
+                 " groups"))
+  fake.meta <- data.frame(CellID = colnames(x), Nhood.Group = rep(NA,
+                                                                  ncol(x)))
+  rownames(fake.meta) <- fake.meta$CellID
+  for (i in seq_along(nhood.gr)) {
+    nhood.x <- names(which(nhs.da.gr == nhood.gr[i]))
+    nhs <- nhoods(x)
+    if (!is.null(subset.nhoods)) {
+      nhs <- nhs[, subset.nhoods]
+    }
+    nhood.gr.cells <- rowSums(nhs[, nhood.x, drop = FALSE]) >
+      0
+    fake.meta[nhood.gr.cells, "Nhood.Group"] <- ifelse(is.na(fake.meta[nhood.gr.cells,
+                                                                       "Nhood.Group"]), nhood.gr[i], NA)
+  }
+  x <- x[, !is.na(fake.meta$Nhood.Group)]
+  fake.meta <- fake.meta[!is.na(fake.meta$Nhood.Group), ]
+  if (!is.null(subset.row)) {
+    x <- x[subset.row, , drop = FALSE]
+  }
+  exprs <- assay(x, assay)
+  marker.list <- list()
+  i.contrast <- c("TestTest - TestRef")
+  if (length(nhood.gr) == 1) {
+    if (sum(fake.meta$Nhood.Group == nhood.gr[1]) == nrow(fake.meta)) {
+      warning("All graph neighbourhoods are in the same group - cannot perform DGE testing. Returning NULL")
+      return(NULL)
+    }
+  }
+  if (isTRUE(return.groups)) {
+    group.meta <- fake.meta
+  }
+  if (isTRUE(aggregate.samples)) {
+    fake.meta[, "sample_id"] <- colData(x)[[sample_col]]
+    fake.meta[, "sample_group"] <- paste(fake.meta[, "sample_id"],
+                                         fake.meta[, "Nhood.Group"], sep = "_")
+    sample_gr_mat <- matrix(0, nrow = nrow(fake.meta), ncol = length(unique(fake.meta$sample_group)))
+    colnames(sample_gr_mat) <- unique(fake.meta$sample_group)
+    rownames(sample_gr_mat) <- rownames(fake.meta)
+    for (s in colnames(sample_gr_mat)) {
+      sample_gr_mat[which(fake.meta$sample_group == s),
+                    s] <- 1
+    }
+    exprs_smp <- matrix(0, nrow = nrow(exprs), ncol = ncol(sample_gr_mat))
+    if (assay == "counts") {
+      summFunc <- rowSums
+    }
+    else {
+      summFunc <- rowMeans
+    }
+    for (i in 1:ncol(sample_gr_mat)) {
+      if (sum(sample_gr_mat[, i]) > 1) {
+        exprs_smp[, i] <- summFunc(exprs[, which(sample_gr_mat[,
+                                                               i] > 0)])
+      }
+      else {
+        exprs_smp[, i] <- exprs[, which(sample_gr_mat[,
+                                                      i] > 0)]
+      }
+    }
+    rownames(exprs_smp) <- rownames(exprs)
+    colnames(exprs_smp) <- colnames(sample_gr_mat)
+    smp_meta <- unique(fake.meta[, c("sample_group", "Nhood.Group")])
+    rownames(smp_meta) <- smp_meta[, "sample_group"]
+    fake.meta <- smp_meta
+    exprs <- exprs_smp
+  }
+  for (i in seq_along(nhood.gr)) {
+    i.meta <- fake.meta
+    i.meta$Test <- "Ref"
+    i.meta$Test[fake.meta$Nhood.Group == nhood.gr[i]] <- "Test"
+    if (ncol(exprs) > 1 & nrow(i.meta) > 1) {
+      i.design <- as.formula(" ~ 0 + Test")
+      i.model <- model.matrix(i.design, data = i.meta)
+      rownames(i.model) <- rownames(i.meta)
+    }
+    # sink(file = "/dev/null")
+    # gc()
+    # sink(file = NULL)
+    if (assay == "logcounts") {
+      i.res <- miko_perform_lognormal_dge(exprs, i.model,
+                                          model.contrasts = i.contrast, gene.offset = gene.offset)
+    } else if (assay == "counts") {
+      i.res <- miko_perform_lognormal_dge(exprs, i.model, model.contrasts = i.contrast,
+                                          gene.offset = gene.offset)
+      colnames(i.res)[ncol(i.res)] <- "adj.P.Val"
+    } else {
+      warning("Assay type is not counts or logcounts - assuming (log)-normal distribution. Use these results at your peril")
+      i.res <- miko_perform_lognormal_dge(exprs, i.model,
+                                          model.contrasts = i.contrast, gene.offset = gene.offset)
+    }
+    i.res$adj.P.Val[is.na(i.res$adj.P.Val)] <- 1
+    i.res$logFC[is.infinite(i.res$logFC)] <- 0
+    i.res <- i.res[, c("logFC", "adj.P.Val")]
+    colnames(i.res) <- paste(colnames(i.res), nhood.gr[i],
+                             sep = "_")
+    marker.list[[paste0(nhood.gr[i])]] <- i.res
+    # sink(file = "/dev/null")
+    # gc()
+    # sink(file = NULL)
+  }
+  marker.df <- do.call(cbind.data.frame, marker.list)
+  colnames(marker.df) <- gsub(colnames(marker.df), pattern = "^[0-9]+\\.",
+                              replacement = "")
+  marker.df$GeneID <- rownames(i.res)
+  if (isTRUE(return.groups)) {
+    out.list <- list(groups = group.meta, dge = marker.df)
+    return(out.list)
+  }   else {
+    return(marker.df)
+  }
+}
+
+
+miko_graph_nhoods_from_adjacency <- function (nhs, nhood.adj, da.res, is.da, merge.discord = FALSE,
+                                              lfc.threshold = NULL, overlap = 1, subset.nhoods = NULL) {
+  if (is.null(colnames(nhs))) {
+    warning("No names attributed to nhoods. Converting indices to names")
+    colnames(nhs) <- as.character(c(1:ncol(nhs)))
+  }
+  if (!is.null(subset.nhoods)) {
+    if (mode(subset.nhoods) %in% c("character", "logical",
+                                   "numeric")) {
+      if (mode(subset.nhoods) %in% c("character", "numeric")) {
+        sub.log <- colnames(nhs) %in% subset.nhoods
+      }
+      else {
+        sub.log <- subset.nhoods
+      }
+      nhood.adj <- nhood.adj[sub.log, sub.log]
+      if (length(is.da) == ncol(nhs)) {
+        nhs <- nhs[sub.log]
+        is.da <- is.da[sub.log]
+        da.res <- da.res[sub.log, ]
+      }
+      else {
+        stop("Subsetting `is.da` vector length does not equal nhoods length")
+      }
+    }
+    else {
+      stop(paste0("Incorrect subsetting vector provided:",
+                  class(subset.nhoods)))
+    }
+  }
+  else {
+    if (length(is.da) != ncol(nhood.adj)) {
+      stop("Subsetting `is.da` vector length is not the same dimension as adjacency")
+    }
+  }
+  if (isFALSE(merge.discord)) {
+    discord.sign <- sign(da.res[, "logFC"] %*% t(da.res[,
+                                                        "logFC"])) < 0
+    nhood.adj[discord.sign] <- 0
+  }
+  if (overlap > 1) {
+    nhood.adj[nhood.adj < overlap] <- 0
+  }
+  if (!is.null(lfc.threshold)) {
+    nhood.adj[, which(da.res$logFC < lfc.threshold)] <- 0
+    nhood.adj[which(da.res$logFC < lfc.threshold), ] <- 0
+  }
+  nhood.adj <- as.matrix((nhood.adj > 0) + 0)
+  n.dim <- ncol(nhood.adj)
+  if (!isSymmetric(nhood.adj)) {
+    stop("Overlap matrix is not symmetric")
+  }
+  if (nrow(nhood.adj) != ncol(nhood.adj)) {
+    stop("Non-square distance matrix - check nhood subsetting")
+  }
+  g <- igraph::graph_from_adjacency_matrix(nhood.adj, mode = "undirected",
+                                           diag = FALSE)
+  groups <- igraph::cluster_louvain(g)$membership
+  names(groups) <- colnames(nhood.adj)
+  keep.groups <- intersect(unique(groups[is.da]), unique(groups))
+  return(groups[groups %in% keep.groups])
+}
+
+
+miko_perform_lognormal_dge <- function (exprs.data, test.model, gene.offset = gene.offset,
+                                        model.contrasts = NULL, n.coef = NULL) {
+  if (isTRUE(gene.offset)) {
+    n.gene <- apply(exprs.data, 2, function(X) sum(X > 0))
+    old.col <- colnames(test.model)
+    if (all(test.model[, 1] == 1)) {
+      test.model <- cbind(test.model[, 1], n.gene, test.model[,
+                                                              c(2:ncol(test.model))])
+      colnames(test.model) <- c(old.col[1], "NGenes",
+                                old.col[c(2:length(old.col))])
+    }
+    else {
+      test.model <- cbind(n.gene, test.model)
+      colnames(test.model) <- c("NGenes", old.col)
+    }
+  }
+  i.fit <- lmFit(exprs.data, test.model)
+  if (!is.null(model.contrasts)) {
+    mod.constrast <- makeContrasts(contrasts = model.contrasts,
+                                   levels = test.model)
+    i.fit <- contrasts.fit(i.fit, contrasts = mod.constrast)
+    i.fit <- eBayes(i.fit, trend = TRUE)
+    i.res <- as.data.frame(topTreat(i.fit, number = Inf,
+                                    sort.by = "p", p.value = 1))
+  }
+  else {
+    i.fit <- eBayes(i.fit, trend = TRUE)
+    if (is.null(n.coef)) {
+      n.coef <- ncol(test.model)
+    }
+    i.res <- as.data.frame(topTreat(i.fit, coef = ncol(test.model),
+                                    number = Inf, sort.by = "p", p.value = 1))
+  }
+  return(i.res)
+}
+
+
+miko_group_nhoods_by_overlap <- function (nhs, da.res, is.da, overlap = 1, lfc.threshold = NULL,
+  merge.discord = FALSE, subset.nhoods = NULL, cells = NULL)
+{
+  nhood.adj <- miko_build_nhood_adjacency(nhs)
+  groups <- miko_graph_nhoods_from_adjacency(nhs = nhs, nhood.adj = nhood.adj,
+    is.da = is.da, da.res = da.res, subset.nhoods = subset.nhoods,
+    overlap = overlap, lfc.threshold = lfc.threshold, merge.discord = merge.discord)
+  return(groups)
+}
+
+miko_build_nhood_adjacency <- function (nhoods, overlap = 1)
+{
+  nh_intersect_mat <- Matrix::crossprod(nhoods)
+  nh_intersect_mat[nh_intersect_mat < overlap] <- 0
+  rownames(nh_intersect_mat) <- colnames(nhoods)
+  colnames(nh_intersect_mat) <- colnames(nhoods)
+  return(nh_intersect_mat)
+}
+```
+
+
+```{r aggregate DA hoods}
+
+aggregateHoods <- function(milo.object, da.res, merge.discord = F, lfc.threshold = NULL, overlap = 1, sig.threshold = 0.1){
+
+  
+  nh.da <- nhoods(milo.object)
+nhood.adj <- nhoodAdjacency(milo.object)
+
+    if (isFALSE(merge.discord)) {
+      discord.sign <- sign(da.res[, "logFC"] %*% t(da.res[, "logFC"])) < 0
+      nhood.adj[discord.sign] <- 0
+    }
+    if (overlap < 1) {
+      nhood.adj[nhood.adj < overlap] <- 0
+    }
+    if (!is.null(lfc.threshold)) {
+      nhood.adj[, which(da.res$logFC < lfc.threshold)] <- 0
+      nhood.adj[which(da.res$logFC < lfc.threshold), ] <- 0
+    }
+    nhood.adj <- as.matrix((nhood.adj > 0) + 0)
+    n.dim <- ncol(nhood.adj)
+
+    g <- igraph::graph_from_adjacency_matrix(nhood.adj, mode = "undirected", diag = FALSE)
+    groups <- igraph::cluster_louvain(g)$membership
+    
+    names(groups) <- colnames(nhood.adj)
+
+      nh_graph <- nhoodGraph(milo.object)
+  umap.layout <- reducedDim(milo.object, "UMAP")[as.numeric(vertex_attr(nh_graph)$name), ]
+  umap.layout <- as(umap.layout, "matrix")
+  col_vals <- colData(milo.object)[as.numeric(vertex_attr(nh_graph)$name),  "logFC"]
+  
+  col_vals[col_vals > 5] <- 5
+  col_vals[col_vals < -5] <- -5
+  
+  nh_graph2 <- nh_graph
+  V(nh_graph2)$colour_by <- col_vals
+  V(nh_graph)$colour_by <- as.character(as.factor(groups))
+  
+  u.groups <- unique(groups)
+  u.groups <- u.groups[order(u.groups)]
+  
+  plt.da.fc.list <- list()
+  plt.da.group.list <- list()
+  da.df.list <- list()
+  for (i in 1:length(u.groups)){
+    
+    group.name <- paste0("G", u.groups[i])
+    
+    pl2 <- ggraph::ggraph(simplify(nh_graph2), layout = umap.layout) +
+      ggraph::geom_node_point(aes(fill = colour_by, size = size), shape = 21, color = "grey66") +
+      ggraph::scale_edge_width(range = c(0.2, 3), name = "overlap size") +
+      theme_classic(base_size = 14) +
+      scale_fill_gradient2(high = scales::muted("red"), low = scales::muted("blue")) + 
+      theme(axis.line = element_blank(), axis.text = element_blank(),
+            axis.ticks = element_blank(), axis.title = element_blank()) 
+    
+    
+    df.pl2 <- pl2[["data"]]
+    
+    df.pl2$group <- groups
+    
+    df.pl2$is.group <- df.pl2$group %in% u.groups[i]
+    
+    mean.x <- mean(df.pl2$colour_by[df.pl2$is.group], na.rm = T)
+    
+    if (mean.x < 0){
+      df.pl2$is.group[(df.pl2$colour_by >= 0) | da.res$PValue > sig.threshold ] <- F
+    } else if (mean.x > 0){
+      df.pl2$is.group[(df.pl2$colour_by <= 0) | da.res$PValue > sig.threshold] <- F
+    }
+    
+    if (sum(df.pl2$is.group) < 5) next
+    
+    df.pl2$group.alpha = 0.1
+    df.pl2$group.alpha[df.pl2$is.group] <- 1
+    
+    plt.da.fc <- df.pl2 %>%
+      ggplot(aes(x=x , y = y, size = size, fill = colour_by, alpha = group.alpha, color = is.group)) + 
+      scale_fill_gradient2(high = scales::muted("red"), low = scales::muted("blue")) + 
+      scale_color_manual(values = c("TRUE" = "black", "FALSE" = "grey"), guide = F)+
+            scale_alpha_continuous(guide = FALSE) +
+      geom_point(shape = 21) +  #, color = "grey90"
+      labs(fill = "logFC", size = "H Size") + 
+      theme_void()
+    
+    # plt.da.group <- df.pl2 %>%
+    #   dplyr::arrange(is.group) %>%
+    #   ggplot(aes(x=x , y = y, size = size, fill = is.group, color = is.group)) + 
+    #   scale_color_manual(values = c("TRUE" = "tomato", "FALSE" = "grey"))+
+    #   scale_fill_manual(values = c("TRUE" = "tomato", "FALSE" = "grey"))+
+    #   geom_point(shape = 21) +  #, color = "grey90"
+    #   labs(color = "logFC", size = "Hood Size") + 
+    #   theme_void()
+
+      plt.da.fc.list[[group.name]] <-plt.da.fc
+  # plt.da.group.list[[group.name]] <- plt.da.group
+  da.df.list[[group.name]] <- df.pl2
+  }
+  
+  
+  return(list(
+   plots =  plt.da.fc.list,
+   groups = groups,
+   results =  da.df.list
+  ))
+  
+    
+}
+  
+    
+```
+
+
+
+```{r da DEG analysis, fig.width=16, fig.height=9}
+
+da_DEG2 <- function(da.results, pair.name){
+
+
+da.milo <- da.results$milo.object
+da.res <- da.results[["results"]]
+da.res$FDR <- da.res$PValue
+da.so <- da.results$seurat.object
+
+dge_smp <- aggregateHoods(milo.object = da.results$milo.object, da.res =  da.results[["results"]], sig.threshold = 0.2)
+
+    nhood.gr <- unique(dge_smp$groups)
+    fake.meta <- data.frame(CellID = colnames(da.milo), Nhood.Group = rep(NA, ncol(da.milo)))
+    rownames(fake.meta) <- fake.meta$CellID
+    group.fc.list <- list()
+    for (i in seq_along(nhood.gr)) {
+      nhood.x <- names(which(dge_smp$groups == nhood.gr[i]))
+      # nhood.x <- (which(dge_smp$groups == nhood.gr[i]))
+      nhs <- nhoods(da.milo)
+      nhood.gr.cells <- rowSums(nhs[, nhood.x, drop = FALSE]) > 0
+      fake.meta[nhood.gr.cells, "Nhood.Group"] <- ifelse(is.na(fake.meta[nhood.gr.cells, "Nhood.Group"]), nhood.gr[i], NA)
+    }
+fake.meta2 <- fake.meta
+
+my.symbol <- rownames(da.so)
+my.entrez <- sym2entrez(my.symbol, my.species = parameter.list$species)
+my.entrez <- my.entrez[complete.cases(my.entrez), ]
+suppressMessages({suppressWarnings({
+nm.pathways <- getAnnotationPathways(query.genes = my.entrez$ENTREZID, db = parameter.list$pathway.db, species =  parameter.list$species)
+})})
+
+df.meta <- da.so@meta.data
+df.meta$hood.membership <- "out"
+u.groups <- names(dge_smp$results)
+plt.da.deg.list <- list()
+ deg.all <- NULL
+ df.meta.group <- list()
+for (i in 1: length(u.groups)){
+
+  hood.name <- u.groups[i]
+  group.num <- as.numeric(gsub("G", "", hood.name))
+  
+  
+ grp.res <-  dge_smp$results[[hood.name]]
+ 
+  nhood.x <- which(grp.res$is.group)
+        # nhood.x <- names(which(dge_smp$groups == group.num))
+      nhs <- nhoods(da.milo)
+      nhood.gr.cells <- rowSums(nhs[, nhood.x, drop = FALSE]) > 0
+       fake.meta2$Nhood.Group <- NA
+      fake.meta2[nhood.gr.cells, "Nhood.Group"] <- group.num
+     
+
+  df.meta$hood.membership <- "out"
+  which.cells <- fake.meta2$CellID[fake.meta2$Nhood.Group %in% group.num]
+  df.meta$hood.membership[rownames(df.meta) %in% which.cells] <- "in"
+  da.so@meta.data <- df.meta
+  df.meta.group[[hood.name]] <- df.meta
+  
+  current.deg  <- presto::wilcoxauc(X = da.so, group_by = "hood.membership", seurat_assay = DefaultAssay(da.so))
+  current.deg$auc.mag <- abs(current.deg$auc - 0.5)
+  
+  current.deg <- current.deg %>% dplyr::filter(group == "in")
+  
+  current.deg$logp <- -log10(current.deg$padj)
+  current.deg.top <- current.deg %>% dplyr::top_n(20, logp) %>% dplyr::arrange(-logp)
+  current.deg.top <- current.deg.top[1:20, ]
+  
+  # get significant deg
+  deg.up <- (current.deg %>% dplyr::filter(padj < 0.05, logFC > 0, auc > 0.51))
+  deg.down <- (current.deg %>% dplyr::filter(padj < 0.05, logFC < 0, auc < 0.49))
+  
+  # enrich deg
+  suppressMessages({suppressWarnings({
+    da.hg.res <- runHG(gene.list = list(OverExpressed = deg.up$feature, UnderExpressed = deg.down$feature ), 
+                       gene.universe = rownames(da.so), species = parameter.list$species, my.pathway = nm.pathways, n.workers = 2)
+    da.hg.sum <- summarizeHG(da.hg.res, show.n = 10)    
+  })})
+  
+  
+ # store deg results
+  if (nrow(deg.up > 0) & nrow(deg.down > 0)){
+    deg.up$pair <- deg.down$pair <- pair.name
+    deg.up$hood <- deg.down$hood <- hood.name
+    deg.all <- bind_rows(deg.all, deg.up)
+    deg.all <- bind_rows(deg.all, deg.down)
+  } else if (nrow(deg.up > 0) & nrow(deg.down == 0)){
+    deg.up$pair <- pair.name
+    deg.up$hood <- hood.name
+    deg.all <- bind_rows(deg.all, deg.up)
+  } else if (nrow(deg.up == 0) & nrow(deg.down > 0)){
+    deg.down$pair <- pair.name
+    deg.down$hood <- hood.name
+    deg.all <- bind_rows(deg.all, deg.down)
+  }
+  
+  plt.volc <- current.deg %>%
+    dplyr::filter(padj < 0.1)  %>%
+    ggplot(aes(x = logFC, y = logp)) +
+    geom_point() + 
+    theme_miko(center.title = T) + 
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed") + 
+    geom_vline(xintercept = 0, linetype = "dashed") + 
+    labs(x = "logFC\n(Group of interest - rest)",y = "-log10(FDR)", title = "Volcano Plot", subtitle = "Differential Expression", caption = "horizontal dashed line = 5% FDR")  + 
+    ggrepel::geom_text_repel(data = current.deg.top, aes(x = logFC, y = logp, label = feature))
+  # plt.da.umap <- da.res.list[[pair.name]][["da.umap"]]
+  plt.da.umap <- dge_smp$plots[[hood.name]]
+  # plt.membership <- cluster.UMAP(da.so, group.by = "hood.membership", include.labels = F) + 
+  #   scale_color_manual(values = c("in" = "tomato", "out" = "grey")) + 
+  #   theme_miko(legend = T) + 
+  #   labs(title = hood.name)
+  
+  plt.enrich.up <- da.hg.sum$plots$OverExpressed
+  plt.enrich.down <- da.hg.sum$plots$UnderExpressed
+  
+  # plt.da.deg.list[[hood.name]] <- cowplot::plot_grid(cowplot::plot_grid(plt.da.umap, plt.membership, plt.volc, nrow = 1),
+  #                               cowplot::plot_grid(plt.enrich.up, plt.enrich.down,  nrow = 1), nrow = 2, rel_heights = c(1,1))
+  # plt.membership
+    plt.da.deg.list[[hood.name]] <- cowplot::plot_grid(plt.da.umap, plt.volc, plt.enrich.up, plt.enrich.down, nrow = 1, labels = c("E", "F", "G", "H"))
+  
+}
+
+
+  return(list(
+   plt.deg.list = plt.da.deg.list,
+   # meta.group = df.meta.group,
+   dge_smp = dge_smp,
+   deg.results = deg.all
+   
+  ))
+}
+
+
+message("Computing differential expression across differentially-abundant neighborhoods")
+
+da.deg.res <- pbapply::pblapply(seq_along(da.res.list), function(da.res.all, n, i){
+  da_DEG2(da.res.all[[n[i]]], n[i])
+}, da.res.all=da.res.list,  n=names(da.res.list))
+
+names(da.deg.res) <- names(da.res.list)
+
+# consolidate all results
+da.deg.final <- list()
+for (i in 1:length(da.deg.res)){
+  pair.name <- names(da.deg.res)[i]
+  for (j in 1:length(da.deg.res[[pair.name]][["plt.deg.list"]])){
+    hood.name <- names(da.deg.res[[pair.name]][["plt.deg.list"]])[j]
+    da.deg.final[[paste0(pair.name, "-", hood.name)]] <- da.deg.res[[pair.name]][["plt.deg.list"]][[hood.name]]
+  }
+}
+
+
+deg.all.out <- NULL
+for (i in 1:length(da.deg.res)){
+  
+  da.deg.cur <- da.deg.res[[i]][["deg.results"]] %>% dplyr::filter(padj < 0.05)
+  deg.all.out <- bind_rows(deg.all.out, da.deg.cur)
+}
+
+```
+
+
+
+```{r pair and group labels}
+
+
+df.ann.list <- list()
+df.ann.list2 <- list()
+df.ann.size <- list()
+for (i in 1:length(da.comp.list)){
+  
+  pair.name <- names(da.comp.list)[i]
+  
+  group.n <- length(da.comp.list[[i]][["reference"]]) + length(da.comp.list[[i]][["comparison"]])
+  
+  ref <- stringr::str_wrap(paste(da.comp.list[[i]][["reference"]], collapse = ", "), 20)
+  comp <- stringr::str_wrap(paste(da.comp.list[[i]][["comparison"]], collapse = ", "), 20)
+  df.ref.comp <- data.frame(Group = c("Reference", "Comparison"), x = c(ref, comp))
+  colnames(df.ref.comp) <- c("Pair", parameter.list$da.group.by)
+  
+  df.ann.list[[pair.name]] <- df.ref.comp
+  
+  ref <- paste(da.comp.list[[i]][["reference"]], collapse = ", ")
+  comp <- paste(da.comp.list[[i]][["comparison"]], collapse = ", ")
+  df.ref.comp <- data.frame(Group = c("Reference", "Comparison"), x = c(ref, comp))
+  colnames(df.ref.comp) <- c("Pair", parameter.list$da.group.by)
+  
+  df.ann.list2[[pair.name]] <- df.ref.comp
+  
+  if (group.n > 30){
+    df.ann.size[[pair.name]] <- 5
+  } else if (group.n <= 30 & group.n > 20){
+     df.ann.size[[pair.name]] <- 7
+  } else if (group.n <= 20 & group.n > 10){
+     df.ann.size[[pair.name]] <- 9
+  } else if (group.n <= 10){
+     df.ann.size[[pair.name]] <- 12
+  }
+}
+
+
+
+```
+
+```{r get pair-wide summary statistics, fig.width=15, fig.height=5}
+
+# da.deg.res
+
+# plt.umap <- cluster.UMAP(so.query) + theme_void() + theme(legend.position = "none") +  labs(title = "UMAP", subtitle = paste0(ncol(so.query), " cells | ", ulength(so.query$seurat_clusters), " clusters"))
+
+plt.summary.list <- list()
+
+for (i in 1:length(da.res.list)){
+  pair.name <- names(da.res.list)[i]
+  df.res <- da.res.list[[pair.name]][["results"]]
+  df.res$seurat_clusters <- orderedFactor(df.res$seurat_clusters)
+  df.res.sum <- df.res %>%
+    dplyr::group_by(seurat_clusters) %>%
+    dplyr::summarize(x.mean = mean(logFC, na.rm = T),
+                     x.sd = sd(logFC, na.rm = T))
+  
+  df.res.sum$z <- df.res.sum$x.mean / sd(df.res$logFC, na.rm = T)
+  df.res.sum$is.sig <- abs(df.res.sum$z) > 1.96
+  
+  df.res.sum2 <- df.res.sum %>% dplyr::filter(abs(z)> 1.96)
+  if (nrow(df.res.sum2) >0){
+    df.res.sum.pos <- df.res.sum2 %>% dplyr::filter(z > 0)
+    df.res.sum.neg <- df.res.sum2 %>% dplyr::filter(z < 0)
+  }
+  
+  df.res$z <- df.res$logFC /   sd(df.res$logFC, na.rm = T)
+  plt.da.stat <- df.res %>%
+    ggplot(aes(x = reorder(seurat_clusters, z), y = z, fill = (seurat_clusters))) + 
+    geom_violin() + 
+    geom_point(data = df.res.sum, aes(x = seurat_clusters, y = z)) + 
+    geom_hline(yintercept = c(-1.96, 0, 1.96), linetype = "dashed") + 
+    theme_miko(center.title = T) + 
+    labs(x = "Cluster",  y = "Differential Abundance (Z score)\nComparison - Reference", title = paste0(pair.name, " Differential Abundance"), subtitle = "Stratified by cluster", caption = "dashed lines = [-1.96, 0, 1.96]") + 
+    coord_flip()
+  
+  
+  
+  
+  plt.umap <- cluster.UMAP(da.res.list[[pair.name]][["seurat.object"]]) + theme_void() + theme(legend.position = "none") +  labs(title = "UMAP", subtitle = paste0(ncol(da.res.list[[pair.name]][["seurat.object"]]), " cells | ", ulength(da.res.list[[pair.name]][["seurat.object"]]$seurat_clusters), " clusters")) +
+      theme(plot.title = element_text(hjust = 0.5)) +
+      theme(plot.subtitle = element_text(hjust = 0.5)) + 
+    labs(title = "Cluster UMAP")
+   
+  
+  plt.da.umap <- da.umap.list[[pair.name]] +
+      theme(plot.title = element_text(hjust = 0.7)) +
+      theme(plot.subtitle = element_text(hjust = 0.7)) + 
+    labs(title = "Differential Abundance UMAP", subtitle = "Comparison - Reference") 
+  # theme(text=element_text(size=11,  family="sans"))
+  
+
+  
+      tt3 <- gridExtra::ttheme_default(
+      base_size = df.ann.size[[pair.name]] ,
+  core=list(bg_params = list(fill ="white", col="black"),
+            fg_params=list(fontface=3)),
+  colhead=list(fg_params=list(col="black", fontface=2L), bg_params = list(fill ="grey", col = "black")),
+  rowhead=list(fg_params=list(col="black", fontface=2L)))
+    
+    p2 <- cowplot::plot_grid(gridExtra::tableGrob(df.ann.list[[pair.name]], rows= NULL, 
+                                                  theme = tt3))
+   
+  plt.summary.list[[pair.name]] <- cowplot::plot_grid( p2, plt.umap, plt.da.umap, plt.da.stat, nrow = 1, labels = "AUTO")
+    
+# plt.summary.list[[pair.name]]
+}
+
+# plt.summary.list[[pair.name]]
+
+```
+
+
+
+
+```{r under and overrepresented population gene assocaitons, fig.width=18, fig.height=10}
+
+
+# generate annotation tables
+plt.common.deg.all <- list()
+gsea.list.all <- NULL
+deg.list.all <- NULL
+for (i in 1:length(da.deg.res)){
+  pair.name <- names(da.deg.res)[i]
+  dge <- da.deg.res[[pair.name]][["dge_smp"]][["results"]]
+  
+  df.dge.sum <- NULL
+  for (j in 1:length(dge)){
+    dge.cur <- dge[[j]]
+    dge.cur.sum <- dge.cur %>% dplyr::filter(is.group) %>% dplyr::summarize(mean(colour_by)/ sd(colour_by))
+    df.dge.sum <- bind_rows(df.dge.sum, data.frame(group = names(dge)[j], z = dge.cur.sum$`mean(colour_by)/sd(colour_by)`))
+  }
+  
+  df.dge.deg <- da.deg.res[[pair.name]][["deg.results"]]
+  
+  # identify significant over and under abundant plots
+  pos.group <- df.dge.sum$group[df.dge.sum$z > 1]
+  neg.group <- df.dge.sum$group[df.dge.sum$z < -1]
+  
+  # get all neg and positive fc umaps
+  dge.neg.cur2 <- NULL
+  if (length(neg.group) > 0){
+    dge.neg.cur2 <- dge.cur
+    dge.neg.cur2$is.group <- F
+    for (j in 1:length(neg.group)){
+      dge.neg.cur2$is.group <- dge.neg.cur2$is.group | dge[[neg.group[j]]]$is.group
+    }
+    dge.neg.cur2$group.alpha <- 0.1
+    dge.neg.cur2$group.alpha[dge.neg.cur2$is.group] <- 1
+    
+    plt.da.neg.all <- dge.neg.cur2 %>%
+      ggplot(aes(x = x, y = y, fill = colour_by, alpha = group.alpha, size = size)) + 
+      scale_fill_gradient2(high = scales::muted("red"), low = scales::muted("blue")) + 
+      scale_color_manual(values = c("TRUE" = "black", "FALSE" = "grey"), guide = F)+
+            theme_void() + 
+      labs(title = "Underrepresented populations", size = "H Size", fill = "Differential\nAbundance\n(logFC)",
+           caption = "logFC = comparison - reference") +
+      theme(plot.title = element_text(hjust = 0.5)) +
+      theme(plot.subtitle = element_text(hjust = 0.5)) + 
+       scale_alpha_continuous(guide = FALSE) +
+      geom_point(shape = 21) 
+  }
+  
+  dge.pos.cur2 <- NULL
+  if (length(pos.group) > 0){
+    dge.pos.cur2 <- dge.cur
+    dge.pos.cur2$is.group <- F
+    for (j in 1:length(pos.group)){
+      dge.pos.cur2$is.group <- dge.pos.cur2$is.group | dge[[pos.group[j]]]$is.group
+    }
+    dge.pos.cur2$group.alpha <- 0.1
+    dge.pos.cur2$group.alpha[dge.pos.cur2$is.group] <- 1  
+    
+    plt.da.pos.all <- dge.pos.cur2 %>%
+      ggplot(aes(x = x, y = y, fill = colour_by, alpha = group.alpha, size = size)) + 
+      scale_fill_gradient2(high = scales::muted("red"), low = scales::muted("blue")) + 
+      scale_color_manual(values = c("TRUE" = "black", "FALSE" = "grey"), guide = F)+
+            theme_void() + 
+            labs(title = "Overrepresented populations", size = "H Size", fill = "Differential\nAbundance\n(logFC)",
+           caption = "logFC = comparison - reference") +
+      theme(plot.title = element_text(hjust = 0.5)) +
+      theme(plot.subtitle = element_text(hjust = 0.5)) + 
+             scale_alpha_continuous(guide = FALSE) +
+      geom_point(shape = 21)
+  }
+
+  # DEG between up and down #######################
+  pos.cell <- c()
+  for (j in 1:length(pos.group)){
+    grp.res <-  dge[[pos.group[j]]]
+    nhood.x <- which(grp.res$is.group)
+    nhs <- nhoods( da.res.list[[pair.name]][["milo.object"]])
+    nhood.gr.cells <- rowSums(nhs[, nhood.x, drop = FALSE]) > 0
+    pos.cell <- c(pos.cell, which(nhood.gr.cells))
+  }
+  # dge$
+    neg.cell <- c()
+  for (j in 1:length(neg.group)){
+    grp.res <-  dge[[neg.group[j]]]
+    nhood.x <- which(grp.res$is.group)
+    nhs <- nhoods( da.res.list[[pair.name]][["milo.object"]])
+    nhood.gr.cells <- rowSums(nhs[, nhood.x, drop = FALSE]) > 0
+    neg.cell <- c(neg.cell, which(nhood.gr.cells))
+  }
+  
+    pos.cell2 <- colnames(da.res.list[[pair.name]][["seurat.object"]])[unique(pos.cell)]
+    neg.cell2 <- colnames(da.res.list[[pair.name]][["seurat.object"]])[unique(neg.cell)]
+    
+    da.res.list[[pair.name]][["seurat.object"]]$up.ab <- colnames(da.res.list[[pair.name]][["seurat.object"]]) %in% pos.cell2
+    da.res.list[[pair.name]][["seurat.object"]]$down.ab <- colnames(da.res.list[[pair.name]][["seurat.object"]]) %in% neg.cell2
+    
+    common.up.deg  <- presto::wilcoxauc(X = da.res.list[[pair.name]][["seurat.object"]], group_by = "up.ab", 
+                                        seurat_assay = DefaultAssay(da.res.list[[pair.name]][["seurat.object"]])) %>% 
+      dplyr::filter(group == "TRUE", padj < 0.05)
+    common.down.deg  <- presto::wilcoxauc(X = da.res.list[[pair.name]][["seurat.object"]], group_by = "down.ab", 
+                                        seurat_assay = DefaultAssay(da.res.list[[pair.name]][["seurat.object"]])) %>% 
+      dplyr::filter(group == "TRUE", padj < 0.05)
+    
+   common.up.gsea <- runGSEA(gene = common.up.deg$feature, value = common.up.deg$logFC, 
+                             species = parameter.list$species, db = parameter.list$pathway.db, plot.top.n = 7)
+   common.down.gsea <- runGSEA(gene = common.down.deg$feature, value = common.down.deg$logFC, 
+                               species = parameter.list$species, db = parameter.list$pathway.db, plot.top.n = 7)
+   
+   # tables to output #########
+   df.gsea.up <- (common.up.gsea$gse.pathway %>% dplyr::arrange(log10(pval)))[1:parameter.list$table.output.n, ]
+   df.gsea.down <- (common.down.gsea$gse.pathway %>% dplyr::arrange(log10(pval)))[1:parameter.list$table.output.n, ]
+   df.deg.up <- (common.up.deg %>% dplyr::arrange(-abs(auc-0.5)))[1:round((parameter.list$table.output.n*2.5)), ]
+   df.deg.down <- (common.down.deg %>% dplyr::arrange(-abs(auc-0.5)))[1:round((parameter.list$table.output.n*2.5)), ]
+   df.gsea.up$pair <- df.gsea.down$pair <- df.deg.up$pair <- df.deg.down$pair <- pair.name
+   df.gsea.up$group <- df.deg.up$group <- "overrepresented"
+   df.gsea.down$group <- df.deg.down$group <- "underrepresented"
+   gsea.list.all <- bind_rows(gsea.list.all, bind_rows(df.gsea.up, df.gsea.down))
+   deg.list.all <- bind_rows(deg.list.all, bind_rows(df.deg.up, df.deg.down))
+
+   # generate volcano plots
+   common.up.deg.top <- (common.up.deg %>% dplyr::top_n(15, logFC) %>% dplyr::arrange(-logFC))[1:15, ]
+   common.up.deg.bottom <- (common.up.deg %>% dplyr::top_n(15, -logFC)%>% dplyr::arrange(logFC))[1:15, ]
+   common.up.deg.show <- bind_rows(common.up.deg.top, common.up.deg.bottom)
+   plt.volc.common.up <- common.up.deg %>%
+     ggplot(aes(x = logFC, y = -log10(padj))) + 
+     geom_point() +
+     ggrepel::geom_text_repel(data = common.up.deg.show, aes(x = logFC, y = -log10(padj), label = feature)) + 
+     theme_miko(center.title = T) + geom_vline(xintercept = 0, linetype = "dashed") + geom_hline(yintercept = -log10(0.05), linetype = "dashed") + 
+     labs(x = "Expression logFC\n(overrepresented neighborhoods - rest)", y = "-log10(FDR)", title = "Volcano plot", "Differential Expression", caption = "horizontal dashed line = 5% FDR", subtitle = "Genes associated with overrepresented populations")
+   
+   common.down.deg.top <- (common.down.deg %>% dplyr::top_n(15, logFC) %>% dplyr::arrange(-logFC))[1:15, ]
+   common.down.deg.bottom <- (common.down.deg %>% dplyr::top_n(15, -logFC)%>% dplyr::arrange(logFC))[1:15, ]
+   common.down.deg.show <- bind_rows(common.down.deg.top, common.down.deg.bottom)
+   plt.volc.common.down <- common.down.deg %>%
+     ggplot(aes(x = logFC, y = -log10(padj))) + 
+     geom_point() +
+     ggrepel::geom_text_repel(data = common.down.deg.show, aes(x = logFC, y = -log10(padj), label = feature)) + 
+     theme_miko(center.title = T) + geom_vline(xintercept = 0, linetype = "dashed") + geom_hline(yintercept = -log10(0.05), linetype = "dashed") + 
+     labs(x = "Expression logFC\n(underrepresented neighborhoods - rest)", y = "-log10(FDR)", title = "Volcano plot", "Differential Expression", caption = "horizontal dashed line = 5% FDR", subtitle = "Genes associated with underrepresented populations")
+   
+  # combine plots
+    p1 <- cowplot::plot_grid(
+     plt.da.pos.all, plt.volc.common.up, common.up.gsea$plt.gsea + 
+       labs(subtitle = "Pathways associated with overrepresented populations") + theme_miko(center.title = T, legend = T),
+      plt.da.neg.all, plt.volc.common.down, common.down.gsea$plt.gsea + 
+       labs(subtitle = "Pathways associated with underrepresented populations") + theme_miko(center.title = T, legend = T), 
+     nrow = 2, rel_widths = c(1,1,1.5), labels = "AUTO"
+   )
+    
+    
+    tt3 <- gridExtra::ttheme_default(
+      base_size = df.ann.size[[pair.name]] ,
+  core=list(bg_params = list(fill ="white", col="black"),
+            fg_params=list(fontface=3)),
+  colhead=list(fg_params=list(col="black", fontface=2L), bg_params = list(fill ="grey", col = "black")),
+  rowhead=list(fg_params=list(col="black", fontface=2L)))
+    
+    p2 <- cowplot::plot_grid(gridExtra::tableGrob(df.ann.list2[[pair.name]], rows= NULL, 
+                                                  theme = tt3))
+
+  plt.common.deg.all[[pair.name]] <- cowplot::plot_grid(p2, p1, rel_heights = c(1,10), ncol = 1)
+}
+
+# plt.common.deg.all[[pair.name]]
+# plt.common.deg.all
+
+```
+
+
+
+
+```{r central log}
+
+# update central log
+run.id <- NULL
+if (!exists("user")) user <- "guest"
+
+clog.update.success <- F
+try({
+  run.id <-  updateCentralLog(Module = "M39", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
+  clog.update.success <-  T
+}, silent = F)
+if (is.null(run.id))  {
+  warning("Central log update was unsuccessful :(\n")
+  run.id <- paste("M39_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+}
+
+```
+
+
+```{r setup output directories}
+
+# # output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+
+# create output directories
+dir.create(output.path)
+dir.create(paste0(output.path, "Tables/"))
+if (save.pdf) dir.create(paste0(output.path, "PDF/"))
+
+```
+
+
+
+
+
+Sample Overview
+=====================================
+
+
+
+Sidebar {.sidebar}
+-------------------------------------
+
+**Differential Abundance**
+
+**Description**: Analysis of differential abundance between conditions. 
+
+**Method**: TODO
+
+
+
+Row {data-height=400}
+-------------------------------------
+    
+### Sample Overview
+    
+```{r, fig.width=20, fig.height=7}
+
+plt.umap.final <- cluster.UMAP(so.query) + theme_miko(legend = F) + labs(title = "UMAP", subtitle = paste0(ncol(so.query), " cells | ", ulength(so.query$seurat_clusters), " clusters"))
+plt.overview <- cowplot::plot_grid(plt.umap.final, plt.abs.ab, plt.rel.ab, ncol = 3, align = "h", axis = "tb")
+print(plt.overview)
+
+```
+
+
+Regional Differential Abundance 
+===================================== 
+
+Sidebar {.sidebar}
+-------------------------------------
+
+**Differential Abundance**
+
+**Description**: Analysis of regional differential abundance between conditions. 
+
+**Method**: TODO
+
+**Definitions**:\
+**Pair (P)**: Two groups of samples representing different conditions. Groups are designated 'comparison' and 'reference' for analyses.\
+**Differential abundance cluster (G)**: Adjacent neighborhoods that have coherent differences in abundance.\
+**Cell cluster (C)**: Subpopulation of cells, determined by unsupervised louvain clustering.\
+**Neighborhood (H)**: Group of 10-50 similar cells identified on KNN graph.\
+*e.g., P1-G2 presents analyses for Pair 1 (P1), specifically focusing on neighborhood cluster 2 (G2) specific differences*
+
+**Figure Legends**:\
+**A| Pair specification.** Specification of samples belonging to 'reference' and 'comparison' groups.\
+**B| Cell cluster UMAP.** UMAP of samples belonging to 'reference' and 'comparison' groups. *Color*: louvain cluster membership.\
+**C| Differential abundance UMAP.** *Nodes*: neighborhoods, *colors*: logFC between comparison and reference group, *size*: number of cells within neighborhood.\
+**D| Differential abundance stratified by cluster.** Cell clusters correspond to those shown in *B*.\
+**E| Differential abundance UMAP**, highlighting specified differential abundance cluster.\
+**F| Volcano plot** of differentially expressed genes between differential abundance cluster G and remaining neighborhoods. LogFC > 0 and LogFC < 0 represent over- and under-expressed genes, respectively, in G relative to remaining neighborhoods.\
+**G| Pathway enrichment of over-expressed genes** in differential abundance cluster G.\
+**H| Pathway enrichment of under-expressed genes** in differential abundance cluster G.\
+
+**Citation**: Dann, E., Henderson, N. C., Teichmann, S. A., Morgan, M. D., & Marioni, J. C. (2020). Milo: differential abundance testing on single-cell data using k-NN graphs. bioRxiv.
+
+
+Row {.tabset data-height=450}
+-------------------------------------
+
+
+```{r regional abundance plots}
+
+out <- lapply(seq_along(plt.summary.list), function(i) {
+  
+  s1 <- names(plt.summary.list)[i]
+  s2 <- paste0("plt.summary.list[[", i, "]]")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE, fig.width = 20, fig.height=5}",  #fig.width = 8, fig.height=8, 
+                                          paste("da_umap_", i, sep = "")))
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+### DEG Table
+
+```{r save regional DEG table }
+
+deg.all.out[ ,c("avgExpr", "logFC", "statistic", "auc", "pval", "padj", "pct_in", "pct_out", "auc.mag", "logp")] <- signif(deg.all.out[ ,c("avgExpr", "logFC", "statistic", "auc", "pval", "padj", "pct_in", "pct_out", "auc.mag", "logp")], 3)
+
+deg.all.out <- deg.all.out %>% dplyr::group_by(pair, hood) %>% dplyr::top_n(parameter.list$table.output.n, abs(auc-0.5))
+deg.all.out$group <- deg.all.out$hood; deg.all.out <- deg.all.out %>% dplyr::select(-c("auc.mag", "logp", "hood"))
+deg.all.out <- deg.all.out[ ,c("pair", "group", "feature", "avgExpr", "logFC", "auc", "pval", "padj", "pct_in", "pct_out")]
+colnames(deg.all.out) <- c("pair", "diff_abundance_cluster", "feature", "avgExpr", "logFC", "auc", "pval", "padj", "pct_in", "pct_out")
+
+flex.asDT(deg.all.out)
+```
+
+Row {.tabset data-height=550}
+-------------------------------------
+
+```{r hood-specific abundance analyses}
+
+out <- lapply(seq_along(da.deg.final), function(i) {
+  
+  s1 <- names(da.deg.final)[i]
+  s2 <- paste0("da.deg.final[[", i, "]]")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE, fig.width = 20, fig.height=5}",  #fig.width = 8, fig.height=8, 
+                                          paste("da_deg_", i, sep = "")))
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+
+
+Population-Wide Differential Abundance 
+===================================== 
+
+Sidebar {.sidebar}
+-------------------------------------
+
+**Differential Abundance**
+
+**Description**: Analysis of population-wide differential abundance between conditions. 
+
+**Method**: TODO
+
+**Definitions**:\
+**Pair (P)**: Two groups of samples representing different conditions. Groups are designated 'comparison' and 'reference' for analyses.\
+**Neighborhood (H)**: Group of 10-50 similar cells identified on KNN graph.\
+**Overrepresented population**: Neighborhoods in which abundance in 'comparison' group is greater than in 'reference' group.\
+**Underrepresented population**: Neighborhoods in which abundance in 'comparison' group is less than in 'reference' group. 
+
+**Figure Legends**:\
+**A| UMAP of overrepresented populations**. Nodes: cell neighborhoods, color: Differential abundance logFC, size: number of cells in neighborhood.
+**B| Volcano plot** of differential expressed genes between overrepresented population and rest of cells. LogFC > 0 and LogFC < 0 represent over- and under-expressed genes, respectively, in overrepresented population (comparison > reference abundance)\
+**C| GSEA analysis of differential genes in overrepresented population**\
+**D| UMAP of underrepresented populations**. Nodes: cell neighborhoods, color: Differential abundance logFC, size: number of cells in neighborhood.
+**E| Volcano plot** of differential expressed genes between underrepresented population and rest of cells. LogFC > 0 and LogFC < 0 represent over- and under-expressed genes, respectively, in underrepresented population (comparison < reference abundance).\
+**F| GSEA analysis of differential genes in underrepresented population**\
+
+**Citation**: Dann, E., Henderson, N. C., Teichmann, S. A., Morgan, M. D., & Marioni, J. C. (2020). Milo: differential abundance testing on single-cell data using k-NN graphs. bioRxiv.
+
+
+Row {.tabset}
+-------------------------------------
+
+
+```{r population-wide abundance plots}
+
+out <- lapply(seq_along(plt.common.deg.all), function(i) {
+  
+  s1 <- names(plt.common.deg.all)[i]
+  s2 <- paste0("plt.common.deg.all[[", i, "]]")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE, fig.width = 18, fig.height=10}",  #fig.width = 8, fig.height=8, 
+                                          paste("pop_da_umap_", i, sep = "")))
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+### DEG Table
+
+```{r save pop DEG table }
+deg.list.all[ ,c("avgExpr", "logFC", "statistic", "auc", "pval", "padj", "pct_in", "pct_out")] <- signif(deg.list.all[ ,c("avgExpr", "logFC", "statistic", "auc", "pval", "padj", "pct_in", "pct_out")], 3)
+
+deg.list.all <- deg.list.all[ ,c("pair", "group", "feature", "avgExpr", "logFC", "auc", "pval", "padj", "pct_in", "pct_out")]
+deg.list.all$group[deg.list.all$group %in% "overrepresented"] <- "comparison group"
+deg.list.all$group[deg.list.all$group %in% "underrepresented"] <- "reference group"
+
+flex.asDT(deg.list.all)
+```
+
+### GSEA Table
+
+```{r save pop GSEA table }
+
+gsea.list.all[ ,c("pval", "padj", "ES", "NES")] <- signif(gsea.list.all[ ,c("pval", "padj", "ES", "NES")], 3)
+
+gsea.list.all <- gsea.list.all[ ,c("pair", "group", "pathway", "NES", "pval", "padj", "nMoreExtreme", "size", "set")]
+
+gsea.list.all$group[gsea.list.all$group %in% "overrepresented"] <- "comparison group"
+gsea.list.all$group[gsea.list.all$group %in% "underrepresented"] <- "reference group"
+
+flex.asDT(gsea.list.all)
+
+
+
+```
+
+ 
+```{r finalize log}
+
+# Update analysis log
+n.cells.analyzed <- ncol(so.query)
+df.log <- addLogEntry("Number of cells analyzed", n.cells.analyzed, df.log, "n.cells.analyzed")
+df.log <- addLogEntry("Seurat Assay", DefaultAssay(so.query), df.log, "DefaultAssay(so.query)")
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
+
+df.log_Module_39 <- df.log
+
+```
+
+
+
+```{r ph10,  echo = FALSE, eval = TRUE}
+
+out1 <- lapply(seq_along(module.logs), function(i) {
+  
+  module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
+  
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (Module %s)", paste(module.n)))
+  a2 <- knitr::knit_expand(text = "\n=====================================")
+  a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
+  a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
+  a5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+ 
+Log (Module 39)
+===================================== 
+
+```{r table.log_current}
+knitr::kable(df.log_Module_39)
+```
+
+```{r save analysis log as csv}
+
+try({
+  write.csv(df.log_Module_38, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+    row.names = F)  
+}, silent = T)
+
+```
+
+
+System Info
+=====================================
+
+```{r}
+
+pander::pander(sessionInfo())
+
+```
+

@@ -20,6 +20,7 @@ See  [scPipeline Wiki](https://github.com/NMikolajewicz/scPipeline/wiki) for ins
 | M27  | Decorate Seurat | Up | Preprocessed_Datasets | Preprocessed_Datasets | Yes | High |
 | M28  | GBM Analysis | Up | Preprocessed_Datasets | - | Yes | Moderate |
 | M29  | Pairwise Cluster Differentials | Up | Preprocessed_Datasets | - | Yes | Moderate |
+| M37  | Transcriptional Network Analysis | Up | Preprocessed_Datasets | - | Yes | High |
 
 
 ## Module Status (Offline/Retire/TODO)
