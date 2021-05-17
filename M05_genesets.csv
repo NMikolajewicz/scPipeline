@@ -25,3 +25,4 @@ invitro.GBM,Mm,VALID_invitro_GBM_CT2A_GL261_NM_271020.csv
 Zeisel2018_brainDev,Mm,VALID_Zeisel2018_brainDevelopment_061120.csv
 msigdb_Mm,Mm,VALID_msigdb_cell_types_mouse_240321.csv
 msigdb_Hs,Hs,VALID_msigdb_cell_types_human_240321.csv
+GBM.immune,,VALID_murine_GBM_immune_markers_Ochocka2021.csv
