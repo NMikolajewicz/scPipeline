@@ -12,8 +12,8 @@ CIT.Lung,Hs,5_EVLP_599_CIT_10x_filtered,,,Raw_Datasets/cell ranger/,2
 End.EVLP.Lung,Hs,6_EVLP_599_End_EVLP_10x_filtered,,,Raw_Datasets/cell ranger/,2
 Neftel.10x.GBM,Hs,GSM3828673_10X_GBM_IDHwt_processed_TPM.tsv,,,Raw_Datasets/Expression_matrix/Neftel_2019_GBM/,3
 Neftel.ss2.GBM,Hs,GSM3828672_Smartseq2_GBM_IDHwt_processed_TPM.tsv,,,Raw_Datasets/Expression_matrix/Neftel_2019_GBM/,3
-UHN.GBM.0231_ACCVR9ANXX.filtered.agg,Hs,7_UHN_GBM_0231_ACCVR9ANXX_10x_filtered_aggregate,,,Raw_Datasets/cell ranger/,2
-UHN.GBM.0238_ACD0E5ANXX.filtered.agg,Hs,8_UHN_GBM_0238_ACD0E5ANXX_10x_filtered_aggregate,,,Raw_Datasets/cell ranger/,2
+UHN.GBM.0231_ACCVR9ANXX.filtered.agg,Hs,07_UHN_GBM_0231_ACCVR9ANXX_10x_filtered_aggregate,,,Raw_Datasets/cell ranger/,2
+UHN.GBM.0238_ACD0E5ANXX.filtered.agg,Hs,08_UHN_GBM_0238_ACD0E5ANXX_10x_filtered_aggregate,,,Raw_Datasets/cell ranger/,2
 09-CID003556-filtered,Mm,09-CID003556-filtered,,,Raw_Datasets/cell ranger/,2
 10-CID003557-filtered,Mm,10-CID003557-filtered,,,Raw_Datasets/cell ranger/,2
 11-CID003558-filtered,Mm,11-CID003558-filtered,,,Raw_Datasets/cell ranger/,2
