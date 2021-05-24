@@ -8,18 +8,18 @@ pilot4_25pctDS,Mm,scRNAseq_pilot4_DS25pct.RData,pilot4_pcr_barcodes.txt,pilot4_r
 pilot4_50pctDS,Mm,scRNAseq_pilot4_DS50pct.RData,pilot4_pcr_barcodes.txt,pilot4_rt_barcodes.txt,Raw_Datasets/pilots/,1
 pilot4,Mm,scRNAseq_pilot4.RData,pilot4_pcr_barcodes.txt,pilot4_rt_barcodes.txt,Raw_Datasets/pilots/,1
 pilot5,Mm,scRNAseq_pilot5.RData,pilot5_pcr_barcodes.txt,pilot5_rt_barcodes.txt,Raw_Datasets/pilots/,1
-CIT.Lung,Hs,5_EVLP_599_CIT_10x_filtered,,,Raw_Datasets/cell ranger/,2
-End.EVLP.Lung,Hs,6_EVLP_599_End_EVLP_10x_filtered,,,Raw_Datasets/cell ranger/,2
+CIT.Lung,Hs,5_EVLP_599_CIT_10x_filtered,,,Raw_Datasets/cell_ranger/,2
+End.EVLP.Lung,Hs,6_EVLP_599_End_EVLP_10x_filtered,,,Raw_Datasets/cell_ranger/,2
 Neftel.10x.GBM,Hs,GSM3828673_10X_GBM_IDHwt_processed_TPM.tsv,,,Raw_Datasets/Expression_matrix/Neftel_2019_GBM/,3
 Neftel.ss2.GBM,Hs,GSM3828672_Smartseq2_GBM_IDHwt_processed_TPM.tsv,,,Raw_Datasets/Expression_matrix/Neftel_2019_GBM/,3
-UHN.GBM.0231_ACCVR9ANXX.filtered.agg,Hs,07_UHN_GBM_0231_ACCVR9ANXX_10x_filtered_aggregate,,,Raw_Datasets/cell ranger/,2
-UHN.GBM.0238_ACD0E5ANXX.filtered.agg,Hs,08_UHN_GBM_0238_ACD0E5ANXX_10x_filtered_aggregate,,,Raw_Datasets/cell ranger/,2
-09-CID003556-filtered,Mm,09-CID003556-filtered,,,Raw_Datasets/cell ranger/,2
-10-CID003557-filtered,Mm,10-CID003557-filtered,,,Raw_Datasets/cell ranger/,2
-11-CID003558-filtered,Mm,11-CID003558-filtered,,,Raw_Datasets/cell ranger/,2
-12-CID003559-filtered,Mm,12-CID003559-filtered,,,Raw_Datasets/cell ranger/,2
-13-CID003560-filtered,Mm,13-CID003560-filtered,,,Raw_Datasets/cell ranger/,2
-14-CID003561-raw,Mm,14-CID003561-raw,,,Raw_Datasets/cell ranger/,2
+UHN.GBM.0231_ACCVR9ANXX.filtered.agg,Hs,07_UHN_GBM_0231_ACCVR9ANXX_10x_filtered_aggregate,,,Raw_Datasets/cell_ranger/,2
+UHN.GBM.0238_ACD0E5ANXX.filtered.agg,Hs,08_UHN_GBM_0238_ACD0E5ANXX_10x_filtered_aggregate,,,Raw_Datasets/cell_ranger/,2
+09-CID003556-filtered,Mm,09-CID003556-filtered,,,Raw_Datasets/cell_ranger/,2
+10-CID003557-filtered,Mm,10-CID003557-filtered,,,Raw_Datasets/cell_ranger/,2
+11-CID003558-filtered,Mm,11-CID003558-filtered,,,Raw_Datasets/cell_ranger/,2
+12-CID003559-filtered,Mm,12-CID003559-filtered,,,Raw_Datasets/cell_ranger/,2
+13-CID003560-filtered,Mm,13-CID003560-filtered,,,Raw_Datasets/cell_ranger/,2
+14-CID003561-raw,Mm,14-CID003561-raw,,,Raw_Datasets/cell_ranger/,2
 Celsuis_sci_Renca,"Mm, Hs",sci_summary_Celsius.RData,,RencaTumor_rt_barcodes.txt,Raw_Datasets/pilots/,1
 pilot6,"Mm, Hs",sci_summary_Pilot6.RData,,Pilot6_rt_barcodes.txt,Raw_Datasets/pilots/,1
 hu.p6.s1,Mm,GSM3332251_Ctrl-P6-1_gene_exonic.intronic_tagged.dge.txt,,,Raw_Datasets/Expression_matrix/Hu_2018_mammalian_heart/,3
