@@ -5,14 +5,21 @@ output:
   flexdashboard::flex_dashboard:
     orientation: rows
     vertical_layout: fill
+    source_code: embed
+    theme: flatly
+    navbar:
+      - { title: "scPipeline", href: "https://github.com/NMikolajewicz/scPipeline" }
+      - { title: "scMiko", href: "https://github.com/NMikolajewicz/scMiko" }  
 editor_options: 
   chunk_output_type: inline
 knit: (function(inputFile, encoding) {
     rmarkdown::render(input = inputFile,
       encoding = encoding,
       output_file = if (exists("user")){paste0(
-        xfun::sans_ext(inputFile), '_',user, "_", format(Sys.Date(), "%d%m%y"), '.html'
-      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", format(Sys.Date(), "%d%m%y"), '.html')},
+        xfun::sans_ext(inputFile), '_',user, "_", 
+        paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", 
+      paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html')},
       output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
     )
   })
@@ -30,67 +37,101 @@ start.time <- proc.time()
 # List of packages to load
 packages2load <- c("Seurat", "scMiko", 
                    "plyr", "dplyr", "tidyr", "reshape2", "arrangements", "RColorBrewer", "ggplot2", "gridExtra", 
-                   "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", "cowplot", "iTALK")
+                   "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", "cowplot", "iTALK", "grobblR", "ggplotify", "gridGraphics", "MASS", "drc", "parallel", "foreach", "stringr")
 
 # load packages
 lapply(packages2load, library, character.only = TRUE)
+
+# Suppress summarise info
+options(dplyr.summarise.inform = FALSE)
 ```
 
 
 ```{r specify parameters}
 
-# query input
-# input.file <- "R117_M27_NM2_M02_p467891011_Immune_tier2_160920.Rdata"
-# input.file <- "M01_NM2_R1_test_300720.Rdata"
-# input.file <- "Module2_integrated_p4789_allGBM_210720.Rdata"
-# input.file <- "Module1_Suva2019.Rdata"
- input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
+# TODO
+# minimum interaction score to qualify for network
+# provide descriptions 
 
-which.species <- "Mm"
-cluster.resolution = 1
+parameter.list <- list(
+  # input.file = "so_immune_GL261_invivo_integrated_210421.rds", #1.8
+  # input.file = "so_immune_CT2A_invivo_integrated_210421.rds", # 1.2
+  input.file = "p13_renca_clean_300521.rds",
+  # input.file = "so_immune_GBM_invivo_integrated_180421.rds", 0.9
+  # which.species = "Mm",
+  cluster.resolution = 0.4,
+  print.inline = F,
+  top.n.dash = 100,
+  pathway.db = "GO",
+  which.data = "data", # options: data, scale
+  data.type  = "mean count", # options: mean count, DEG
+  query.genes = NULL, # query.genes <- c("NCSTN", "TNFRSF1A", "TNFRSF1B", "B2M", "CALR", "TFRC", "TGFBR2")
+  subsample_factor = 1, # downsampling
+  which.subset = NULL, # subset
+  pct.min = 0,
+  # threshold.pct = 0.99,  # top nth percentile interactions; recommended 0.990-0.99999
+  # threshold.n = 20, # top n interactions per cluster
+  # top.n.genes = 500, # top n genes for LR network
+  communication.type = c('checkpoint', "cytokine"), # communication type
+  aggregation.method = "mean", # options: mean, median
+  # n.LRpairs = 20,
+  save.pdf = F,
+  update.log = T
+)
 
-print.inline <- F
+ # c('checkpoint', "cytokine")
+# "growth factor"
+# c('checkpoint', "cytokine")
+# , "growth factor", "other", 'cytokine'
 
-which.data <- "data" # options: data, scale
+# "growth factor", "other", 'cytokine',
 
-data.type  <- "mean count" # options: mean count, DEG
+# paramater.list$pathway.db <- "Bader"
 
-# downsampling
-subsample_factor <- 1
+# which.subset <-data.frame(field = "seurat_clusters", subgroups = c(0:7, 9:20))
+# which.subset <-data.frame(field = "Barcode", subgroups = "GL261")
+# which.subset <-data.frame(field = "Barcode", subgroups = c("01_GBM"))
 
-# subset
-which.subset <- "no.subset"
-
-# top n genes for LR network
- top.N.genes <- 500
-
-
-# communication type
-communication.type <- c("growth factor", "other", 'cytokine','checkpoint')
-# communication.type <-  "checkpoint" # options: cytokine, checkpoint, growth factor, other
-
-aggregation.method <- "mean" # options: mean, median
-n.LRpairs <- 20
-
-save.pdf <- T
 ```
+
 
 
 
 ```{r analysis log}
 
-# Module
+message("Updating analysis log...")
+
+
+if (!("communication.type" %in% names(parameter.list))) {
+  parameter.list$communication.type <- c('checkpoint', "cytokine", "growth factor", "other", 'cytokine')
+}
+
+if (sum(parameter.list$communication.type %in% c('checkpoint', "cytokine", "growth factor", "other", 'cytokine')) == 0) {
+  parameter.list$communication.type <- c('checkpoint', "cytokine", "growth factor", "other", 'cytokine')
+}
+
+
+# , "growth factor", "other", 'cytokine'
+
 df.log <- initiateLog("12, Ligand-Receptor Interactions")
-df.log <- addLogEntry("Input File (.Rdata)", input.file, df.log, "input.file")
-df.log <- addLogEntry("Cluster Resolution", cluster.resolution, df.log, "cluster.resolution")
-df.log <- addLogEntry("Species", which.species, df.log, "which.species")
-df.log <- addLogEntry("Data Type", data.type, df.log, "data.type")
-df.log <- addLogEntry("Data Slot", which.data, df.log, "which.data")
-df.log <- addLogEntry("Communication Type", communication.type, df.log, "communication.type")
-df.log <- addLogEntry("Top N pairs shown", n.LRpairs, df.log, "n.LRpairs")
-if (is.character(which.subset))  df.log <- addLogEntry("Subset", which.subset, df.log, "which.subset")
-df.log <- addLogEntry("Downsample Factor", subsample_factor, df.log, "subsample_factor")
-df.log <- addLogEntry("Aggregation Method", aggregation.method, df.log, "aggregation.method")
+df.log <- addLogEntry("Input File (.Rdata)", parameter.list$input.file, df.log, "input.file")
+df.log <- addLogEntry("Cluster Resolution", parameter.list$cluster.resolution, df.log, "cluster.resolution")
+df.log <- addLogEntry("Data Type", parameter.list$data.type, df.log, "data.type")
+df.log <- addLogEntry("Data Slot", parameter.list$which.data, df.log, "which.data")
+df.log <- addLogEntry("Communication Type", parameter.list$communication.type, df.log, "communication.type")
+# df.log <- addLogEntry("Top N pairs shown", parameter.list$n.LRpairs, df.log, "n.LRpairs")
+if (is.character(parameter.list$which.subset))  df.log <- addLogEntry("Subset", parameter.list$which.subset, df.log, "which.subset")
+df.log <- addLogEntry("Downsample Factor", parameter.list$subsample_factor, df.log, "subsample_factor")
+df.log <- addLogEntry("Aggregation Method", parameter.list$aggregation.method, df.log, "aggregation.method")
+df.log <- addLogEntry("Update log", parameter.list$update.log, df.log, "update.log")
+
+
+
+try({
+  
+  df.log <- addLogEntry("Query Genes", parameter.list$query.genes, df.log, "query.genes")
+  
+}, silent = T)
 
 
 ```
@@ -106,24 +147,37 @@ dir.preprocessed <- "Preprocessed_Datasets/"
 if (!exists("data.path") & !exists("user")) {
   stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
 }
-if (!exists("input.file")) stop("input.file is not specified")
+# if (!exists("input.file")) stop("input.file is not specified")
+if (!("input.file" %in% names(parameter.list)))  stop("input.file is not specified")
 
 # load query dataset
-warning("Importing data...")
-if (!grepl(".Rdata|.RData", input.file)) input.file <- paste0(input.file, ".Rdata")
-load(paste(data.path, dir.preprocessed, input.file, sep = ""));
+message("Importing data...")
+if ((!grepl(".Rdata|.RData", parameter.list$input.file)) & !(grepl(".rds", parameter.list$input.file))){
+  parameter.list$input.file <- paste0(parameter.list$input.file, ".Rdata")
+} 
+if (grepl(".Rdata|.RData", parameter.list$input.file)){
+  load(paste(data.path, dir.preprocessed,parameter.list$input.file, sep = ""));
+} else if (grepl(".rds", parameter.list$input.file)) {
+  so <- readRDS(paste(data.path, dir.preprocessed,parameter.list$input.file, sep = ""))
+}
+
 
 if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
-if (!(exists("which.subset"))) which.subset <- "no.subset"
+# if (!(exists("which.subset"))) which.subset <- "no.subset"
+if (!("which.subset" %in% names(parameter.list))){
+  which.subset <- parameter.list$which.subset
+} else {
+  which.subset <- NULL
+}
 
 # which terms2drop
 t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "scale")
 
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
-                             species = which.species, resolution= cluster.resolution, subset.data = which.subset, 
-                             subsample = subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
-                             terms2drop = t2d, rmv.pattern = "so", keep.default.assay.only = T)
+                         species = NULL, resolution= parameter.list$cluster.resolution, subset.data = which.subset, 
+                         subsample = parameter.list$subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
+                         terms2drop = t2d, rmv.pattern = "so", keep.default.assay.only = T)
 
 
 # unpack results
@@ -133,6 +187,8 @@ current.assay <- prep.list$assay
 n.cells <- prep.list$n.cell
 rm(prep.list);
 invisible({gc()})
+
+parameter.list$species <- detectSpecies(so.query)
 
 ```
 
@@ -144,7 +200,7 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 
 ```
 
-```{r  function to specify signature gene sets}
+```{r  function to specify signature gene sets, include = FALSE}
 
 # helper function to convert human symbols to mouse symbols
 gene2species <- function(x, expected_species){
@@ -153,21 +209,321 @@ gene2species <- function(x, expected_species){
   } else if (expected_species == "Mm"){
     x <- tolower(x)
     substr(x, 1, 1) <- toupper(substr(x, 1, 1))
-
+    
   }
   return(x)
 }
+
+# check query genes
+do.query <- F
+try({
+  if ((length(parameter.list$query.genes) > 0) & (!is.na(parameter.list$query.genes)) & (!is.null(parameter.list$query.genes))){
+    parameter.list$query.genes <- gene2species(parameter.list$query.genes, parameter.list$species)
+    do.query <- T
+  }
+}, silent = T)
+
+# query.genes
 ```
 
 
-```{r define prep data function}
+```{r MAGALI ligand-receptor database stats, warning=FALSE}
 
-# helper function to prep data
-prep.data <- function(so, cluster.field, gNames.list, data.slot){
+message("Retrieving LR database...")
+# load in LR database
+data("LR.db")
+plt.upset <- LR.db[["LR.upset.plot"]]
+if (parameter.list$print.inline) print(plt.upset)
+
+# filter out autopairs
+LR.df.ref <-  LR.db[["LR.df"]]
+LR.df.ref <- LR.df.ref[LR.df.ref$Ligand != LR.df.ref$Receptor, ]
+
+# species wrangler
+if (parameter.list$species == "Mm"){
+  h2m.lig <- homologene::human2mouse(genes = LR.df.ref$Ligand, db = homologene::homologeneData2)[ ,1:2]
+  colnames(h2m.lig) <- c("Ligand", "L.Mm")
+  LR.df.ref <- merge(LR.df.ref, h2m.lig, by = "Ligand")
+  h2m.rec <- homologene::human2mouse(genes = LR.df.ref$Receptor, db = homologene::homologeneData2)[ ,1:2]
+  colnames(h2m.rec) <- c("Receptor", "R.Mm")
+  LR.df.ref <- merge(LR.df.ref, h2m.rec, by = "Receptor")
+  LR.df.ref$Ligand <- LR.df.ref$L.Mm
+  LR.df.ref$Receptor <- LR.df.ref$R.Mm
+  LR.df.ref <- LR.df.ref %>% dplyr::select(-c("L.Mm", "R.Mm"))
+  LR.df.ref$Pair <- paste0(LR.df.ref$Ligand, "_", LR.df.ref$Receptor)
+}
+
+LR.df <- LR.df.ref
+
+```
+
+
+```{r cluster expression, warning = FALSE, message = FALSE, include = FALSE}
+
+message("Calculating average cluster expression...")
+
+# get expression  matrix
+
+av.mat <- Seurat::AverageExpression(
+  object = so.query,
+  assays = DefaultAssay(so.query),
+  features = NULL,
+  return.seurat = FALSE,
+  group.by = "seurat_clusters",
+  add.ident = NULL,
+  slot = parameter.list$which.data,
+  verbose = TRUE
+)[[DefaultAssay(so.query)]]
+colnames(av.mat) <- paste0("c", colnames(av.mat))
+
+ef.mat <- (so.query@assays[[DefaultAssay(so.query)]]@data)
+sc.meta <- so.query@meta.data[["seurat_clusters"]]
+u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
+
+f.mat <- av.mat
+rm(f1); invisible({gc()})
+
+# cast to data.frame
+df.f.wide <- data.frame(gene = rownames(f.mat), as.data.frame(f.mat)); colnames(df.f.wide) <- c("gene", u.clust)
+
+# wide to long
+df.f.long <- pivot_longer(df.f.wide, colnames(df.f.wide)[2:ncol(df.f.wide)])
+
+# assign col names to long dataframe
+colnames(df.f.long) <- c("gene", "cluster", "value")
+
+# ensure clusters are ordered factors
+df.f.long$cluster <- factor(df.f.long$cluster, levels = u.clust)
+
+# clear baggage
+rm(ef.mat); invisible({gc()})
+
+# store original object for later
+so.all <- so.query
+
+```
+
+```{r remove lowly expressed genes}
+
+
+
+if (do.query){
+  message("Filtering query genes...")
+  query.genes2 <-  unique(c(LR.df$Ligand[(LR.df$Ligand %in% parameter.list$query.genes) | (LR.df$Receptor %in% parameter.list$query.genes)], 
+                            LR.df$Receptor[(LR.df$Ligand %in% parameter.list$query.genes) | (LR.df$Receptor %in% parameter.list$query.genes)]))
+  
+  which.available <- query.genes2[query.genes2 %in% rownames(so.query)]
+  so.query <- subset(so.query, feature = which.available)
+  # parameter.list$pct.min <- 0
+} 
+
+
+
+if ((!all(c('checkpoint', "cytokine", "growth factor", "other", 'cytokine') %in% parameter.list$communication.type ))){
+  message("Filtering genes by communication type...")
+  LR.df.sub <- LR.df %>% dplyr::filter(Type %in% parameter.list$communication.type)
+  qg1 <- LR.df.sub$Ligand[LR.df.sub$Ligand %in% rownames(so.query)]
+  qg2 <- LR.df.sub$Receptor[LR.df.sub$Receptor %in% rownames(so.query)]
+} else {
+  qg1 <- LR.df$Ligand[LR.df$Ligand %in% rownames(so.query)]
+  qg2 <- LR.df$Receptor[LR.df$Receptor %in% rownames(so.query)]
+}
+so.query <- subset(so.query, feature = unique(c(qg1, qg2)))
+
+# expr.genes2 <- getExpressedGenes(object = so.query, min.pct = parameter.list$pct.min, group = "seurat_clusters", group.boolean = "OR")
+if (parameter.list$pct.min > 0){
+  message("Filtering low-expressed genes...")
+  expr.genes <- getExpressedGenes(object = so.query, min.pct = parameter.list$pct.min, group = "seurat_clusters", group.boolean = "OR")
+  so.query <- subset(so.query, feature = expr.genes)
+}
+
+
+invisible({gc()})
+
+# how many retained
+if (do.query){
+  n.lig.av <- sum((unique(LR.df.ref$Ligand) %in%  rownames(so.query)))
+  n.rec.av <- sum(unique(LR.df.ref$Receptor) %in%  rownames(so.query))
+  inclusion.crit <- "Selection criteria: User-specified query genes"
+} else {
+  n.lig.av <- sum(unique((LR.df.ref %>% dplyr::filter(Type %in% parameter.list$communication.type))$Ligand) %in%  rownames(so.query))
+  n.rec.av <- sum(unique((LR.df.ref %>% dplyr::filter(Type %in% parameter.list$communication.type))$Receptor) %in%  rownames(so.query)) 
+  inclusion.crit <- paste0("Selection criteria: \ni) Expressed in more than ", 100*parameter.list$pct.min, "% cells in >=1 cluster\nii) Interaction type: ", paste(parameter.list$communication.type, collapse = ", "))
+}
+
+df.db.stat <- data.frame(
+  type = c("Ligand", "Receptor", "Ligand", "Receptor"),
+  n.type = c("Excluded", "Excluded", "Included", "Included"),
+  n = c(ulength(LR.df.ref$Ligand) - n.lig.av, ulength(LR.df.ref$Receptor) - n.rec.av, n.lig.av, n.rec.av)
+)
+
+plt.inclusion <- df.db.stat%>%
+  ggplot(aes(x = type, fill = n.type, y = n)) + 
+  geom_bar(stat= "identity") + 
+  scale_fill_manual(values = c("Excluded" = "grey", "Included" = "tomato")) + 
+  theme_miko(legend = T) + 
+  labs(x = "Gene Type", y = "Count", title = "LR gene selection", fill = NULL, 
+       
+       subtitle = paste0(n.lig.av, "/", ulength(LR.df.ref$Ligand), " Ligands, ", n.rec.av, "/", ulength(LR.df.ref$Receptor), " Receptors"),
+       caption = inclusion.crit) + 
+  theme(plot.caption = element_text(hjust = 0))
+
+# df.db.stat
+
+
+```
+
+
+```{r analysis helper functions, include = FALSE}
+
+message("Preparing helper functions...")
+
+# Cluster means for iTALK #####################################################
+rawParse2 <- function (data, stats = "mean"){
+  # top_genes = top.N.genes, 
+  res = NULL
+  cell_group <- unique(data$cell_type)
+  pb <- progress::progress_bar$new(total = length(cell_group))
+  pb$tick(0)
+  for (i in cell_group) {
+    sub_data <- data[data$cell_type == i, ]
+    
+    if (nrow(sub_data) == 1){
+      sub_data <- bind_rows(sub_data, sub_data)
+    }
+    
+    counts <- t(subset(sub_data, select = -cell_type))
+    counts <- apply(counts, 1, function(x) {
+      storage.mode(x) <- "numeric"
+      x
+    })
+    
+    # calculate mean
+    if (stats == "mean") {
+      temp <- data.frame(apply(counts, 2, function(x) {
+        log(mean(expm1(x), na.rm = T) + 1)}), i, stringsAsFactors = FALSE)
+    }
+    
+    # calculate median
+    else if (stats == "median") {
+      temp <- data.frame(apply(counts, 1, FUN = median),
+                         i, stringsAsFactors = FALSE)
+    }
+    else {
+      print("error stats option")
+    }
+    
+    temp <- temp[order(temp[, 1], decreasing = TRUE), ]
+    # temp <- temp[1:ceiling(nrow(temp) * top_genes/100),
+    # ]
+    temp <- temp %>% tibble::rownames_to_column()
+    res <- bind_rows(res, temp)
+    pb$tick()
+  }
+  colnames(res) <- c("gene", "exprs", "cell_type")
+  return(res)
+}
+
+
+# helper functions for analyzing LR pairs, adapted from iTALK ##################
+FindLR2 <- function (data_1, data_2 = NULL, datatype, comm_type, database = NULL){
+  
+  # get LR databse
+  data("LR.db")
+  database <- LR.db$LR.df
+  database <- database[database$Ligand != database$Receptor, ]
+  
+  database$Ligand <- gene2species(database$Ligand, parameter.list$species)
+  database$Receptor <- gene2species(database$Receptor, parameter.list$species)
+  database$type <- database$Type
+  database$ligand <- database$Ligand
+  database$receptor <- database$Receptor
+  
+  database <- database[database$type == comm_type,  ]
+  
+  if (datatype == "mean count") {
+    gene_list_1 <- data_1
+    if (is.null(data_2)) {
+      gene_list_2 <- gene_list_1
+    } else {
+      gene_list_2 <- data_2
+    }
+    ligand_ind <- which(database$ligand %in% gene_list_1$gene)
+    receptor_ind <- which(database$receptor %in% gene_list_2$gene)
+    ind <- intersect(ligand_ind, receptor_ind)
+    FilterTable_1 <- database[ind, c("ligand", "receptor")] %>% 
+      left_join(gene_list_1[, c("gene", "exprs", "cell_type")], by = c(ligand = "gene")) %>% 
+      dplyr::rename(cell_from_mean_exprs = exprs, cell_from = cell_type) %>% 
+      left_join(gene_list_2[, c("gene", "exprs", "cell_type")], by = c(receptor = "gene")) %>% 
+      dplyr::rename(cell_to_mean_exprs = exprs, cell_to = cell_type)
+    
+    ligand_ind <- which(database$ligand %in% gene_list_2$gene)
+    receptor_ind <- which(database$receptor %in% gene_list_1$gene)
+    ind <- intersect(ligand_ind, receptor_ind)
+    FilterTable_2 <- database[ind, c("ligand", "receptor")] %>% 
+      left_join(gene_list_2[, c("gene", "exprs", "cell_type")], by = c(ligand = "gene")) %>% 
+      dplyr::rename(cell_from_mean_exprs = exprs, cell_from = cell_type) %>% 
+      left_join(gene_list_1[, c("gene", "exprs", "cell_type")], 
+                by = c(receptor = "gene")) %>% 
+      dplyr::rename(cell_to_mean_exprs = exprs, cell_to = cell_type)
+    
+    FilterTable <- rbind(FilterTable_1, FilterTable_2)
+  } else if (datatype == "DEG") {
+    gene_list_1 <- data_1
+    
+    if (is.null(data_2)) {
+      gene_list_2 <- gene_list_1
+    } else {
+      gene_list_2 <- data_2
+    }
+    
+    ligand_ind <- which(database$ligand %in% gene_list_1$gene)
+    receptor_ind <- which(database$receptor %in%  gene_list_2$gene)
+    ind <- intersect(ligand_ind, receptor_ind)
+    FilterTable_1 <- database[ind, c("ligand", "receptor")] %>% 
+      left_join(gene_list_1[, c("gene", "logFC", "q.value", "cell_type")], by = c(ligand = "gene")) %>% 
+      dplyr::rename(cell_from_logFC = logFC, cell_from_q.value = q.value, cell_from = cell_type) %>% 
+      left_join(gene_list_2[, c("gene", "logFC", "q.value", "cell_type")], by = c(receptor = "gene")) %>% 
+      dplyr::rename(cell_to_logFC = logFC, cell_to_q.value = q.value, cell_to = cell_type)
+    
+    ligand_ind <- which(database$ligand %in% gene_list_2$gene)
+    receptor_ind <- which(database$receptor %in% gene_list_1$gene)
+    ind <- intersect(ligand_ind, receptor_ind)
+    FilterTable_2 <- database[ind, c("ligand", "receptor")] %>% 
+      left_join(gene_list_2[, c("gene", "logFC", "q.value", "cell_type")], by = c(ligand = "gene")) %>% 
+      dplyr::rename(cell_from_logFC = logFC, cell_from_q.value = q.value, cell_from = cell_type) %>% 
+      left_join(gene_list_1[, c("gene", "logFC", "q.value", "cell_type")], by = c(receptor = "gene")) %>% 
+      dplyr::rename(cell_to_logFC = logFC, cell_to_q.value = q.value, cell_to = cell_type)
+    FilterTable <- rbind(FilterTable_1, FilterTable_2)
+  } else {
+    stop("Error: invalid data type")
+  }
+  
+  FilterTable <- FilterTable[!duplicated(FilterTable), ]
+  res <- as.data.frame(FilterTable)
+  
+  if (datatype == "DEG") {
+    res <- res[!(res$cell_from_logFC == 1e-04 & res$cell_to_logFC == 1e-04), ]
+  }
+  
+  if (nrow(res) == 0){
+    return(NULL)
+  } else {
+    res <- res %>% mutate(comm_type = comm_type)
+    return(res)
+  }
+  
+  
+  
+}
+
+
+# Prep data helper #############################################################
+prep.data <- function(so, cluster.field, data.slot){
   
   # get current assay
   current.assay <- DefaultAssay(so)
-
+  
   # get unique clusters
   u.clusters <- as.numeric(as.character(unique(so@meta.data[[cluster.field]])))
   u.clusters <- u.clusters[order(u.clusters)]
@@ -176,7 +532,7 @@ prep.data <- function(so, cluster.field, gNames.list, data.slot){
   if (data.slot == "data"){
     exp.mat <- (so@assays[[current.assay]]@data)
   } else if (data.slot == "scale"){
-    exp.mat <- so@assays[[current.assay]]@scale.data 
+    exp.mat <- so@assays[[current.assay]]@scale.data
   }
   
   # cast matrix to data.frame
@@ -187,337 +543,836 @@ prep.data <- function(so, cluster.field, gNames.list, data.slot){
   
   # prepare data
   cur.genes <- colnames(exp.df_t)
-  colnames(exp.df_t) <- gene2species(cur.genes, expected_species = "Hs")
+  colnames(exp.df_t) <- gene2species(cur.genes, parameter.list$species)
   exp.df_t$cell_type <- paste("c", as.vector(so@meta.data[[cluster.field]]), sep = "")
-
+  
   # return output
   output <- list(u.clusters, NULL, exp.df_t)
   return(output)
   
 }
 
+# iTALK Analysis ###############################################################
+# analyze_LG.pairs <- function(u.clusters, exp.df_t, communication.type, high.exp_genes = NULL, 
+#                              aggregation.method = "mean",  n.LRpairs = 20){
+#   # top.N.genes = 50,
+#   # get top nth percentile 
+#   # if (is.null(high.exp_genes)){
+#   #   high.exp_genes <-rawParse2(exp.df_t,top_genes=parameter.list$top.n.genes,stats=aggregation.method)
+#   # }
+#   
+#   res_cat<-FindLR2(high.exp_genes, datatype= parameter.list$data.type, comm_type=communication.type)
+#   
+#   # sort by product of ligand*receptor expression
+#   res_cat<-res_cat[order(res_cat$cell_from_mean_exprs*res_cat$cell_to_mean_exprs,decreasing=T),]
+#   
+#   return(res_cat)
+# }
+
+# SCSR Analysis ################################################################
+normScore = function(object, genes, cluster, database = NULL, int.type=c("paracrine","autocrine"), c.names=NULL, 
+                     s.score=0, species=c("Hs","Mm"), tol=1, verbose=TRUE){
+  
+  u.clust.current <- unique(cluster)
+  u.clust.current <- u.clust.current[order(u.clust.current)]
+  if (is.null(c.names)) c.names = paste("cluster",unique(u.clust.current) )
+  cluster = cluster + 1 - min(cluster) 
+  
+  if (sum(duplicated(c.names))>0 | grepl("/",paste(c.names,collapse =""))){
+    cat("The length of c.names must be equal to the number of clusters and must contain no duplicates. The cluster names must not include special characters")
+    return()
+  }
+  int.type = match.arg(int.type)
+  species = match.arg(species)
+  
+  if (is.null(database)){
+    data("LR.db")
+    database <- LR.db
+    LR <- database$LR.df
+  } else {
+    LR <- database$LR.df
+  }
+  LR <- LR[LR$Ligand != LR$Receptor, ]
+  
+  LR$ligand <- LR$Ligand
+  LR$receptor <- LR$Receptor
+  LR <- LR[,c("ligand", "receptor")]
+  
+  LR$ligand <- gene2species(LR$ligand, species)
+  LR$receptor <- gene2species(LR$receptor, species)
+  LR$pair <- paste0(LR$ligand, "-", LR$receptor)
+  
+  rownames(object) = genes
+  z = unique(cluster)
+  z <- z[order(z)]
+  lig = unique(LR$ligand)
+  rec = unique(LR$receptor)
+  object = data.frame(object)
+  object = object[rowSums(object)>0,]
+  med = sum(object)/(nrow(object)*ncol(object))
+  
+  
+  
+  ## Paracrine -------------------
+  if (int.type=="paracrine"){
+    # gene.list = vector("list",length(unique(cluster)))
+    
+    gene.list <- list()
+    for (i in 1:length(z)){
+      gene.list[[as.character(z[i])]] <- genes
+    }
+    
+    para = list()
+    k=0
+    int=NULL
+    n.int=NULL
+    
+    for (i in 1:length(z)){
+      if (sum(cluster==z[i])>1){
+        tmp = object[,cluster==z[i]]
+        # tmp = tmp[rowSums(tmp)>0,] # FLAG
+        if (sum(is.element(lig, rownames(tmp)))>0){
+          lig.tmp = rownames(tmp)[(rownames(tmp) %in% lig)]
+        } else {
+          lig.tmp=NULL
+        }
+        
+        # get ligand-receptor pairs for current cluster
+        final.tmp = LR[(LR$ligand %in% lig.tmp),c("ligand", "receptor")]
+        final.tmp[ ,"interaction type"] <- "paracrine"
+        m.lig = apply(tmp[unique(final.tmp[,1]),], 1, function(x) {
+          log(mean(expm1(x), na.rm = T) + 1)
+        })
+        
+        # AverageExpression() 
+        
+        names(m.lig) = unique(final.tmp[,1])
+        
+        for (j in 1:length(z)){
+          # if (i == j) next
+          if (sum(cluster==z[j])>1){
+            temp = object[,cluster==z[j]]
+            if (sum(is.element(rec, rownames(temp)))>0){
+              rec.temp = rownames(temp)[is.element(rownames(temp),rec)]
+            } else {
+              rec.temp=NULL
+            }
+            m.rec = apply(data.frame(temp[rec.temp,]), 1, function(x) {
+              log(mean(expm1(x), na.rm = T) + 1)
+            })
+            names(m.rec) = rec.temp
+            
+            final = final.tmp[is.element(final.tmp$receptor,rec.temp),]
+            final = cbind(final,LRscore2(m.lig[final$ligand],m.rec[final$receptor],med))
+            
+            colnames(final) = c(c.names[i],c.names[j],"interaction type","LRscore")
+            final = final[final[,4]>=s.score,]
+            final = final[order(final[,4],decreasing = TRUE),]
+            
+            if (nrow(final)>0){
+              k=k+1
+              para[[k]] = final
+              if (verbose==TRUE){
+                message("Calculating interactions from cluster ",z[i]-1," to cluster ", z[j] - 1)
+                # message(paste0(nrow(final)," interactions from cluster ",z[i]-1," to cluster ", z[j] - 1))
+              }
+              int = c(int,paste(z[i],"-",z[j],sep=""))
+              n.int = c(n.int,paste(c.names[i],"-",c.names[j],sep=""))
+              gr = igraph::graph_from_data_frame(final,directed=FALSE)
+            } 
+          }
+        }
+      } 
+    }
+    if (k!=0){
+      names(para) = n.int
+    }
+  }
+  
+  
+  ## Returns ---------------------
+  if (int.type=="autocrine"){
+    return(auto)
+  }
+  if (int.type=="paracrine"){
+    return(para)
+  }
+}
+
+# Normalized LR score ###########################################################
+LRscore2 = function(l,r,s){
+  L = l
+  R = r
+  S=s
+  sc=sqrt(L*R)/(S+sqrt(L*R))
+  return(sc)
+}
+
+
+
+```
+
+
+
+```{r LR circular plots, include = FALSE}
+
+# Prep Data ####################################################################
+
 # specify where cluster ids are stored
 cluster.field <- "seurat_clusters"
 
 # prep data
-prep.output <- prep.data(so.query, cluster.field, gNames.list, which.data)
+prep.output <- prep.data(so.query, cluster.field,  parameter.list$which.data)
 
-```
-
-
-```{r analysis function}
-
-# helper function for analyzing LR pairs
-analyze_LG.pairs <- function(u.clusters, exp.df_t, communication.type, high.exp_genes = NULL, aggregation.method = "mean", top.N.genes = 50, n.LRpairs = 20){
-  
-  # get top nth percentile 
-  if (is.null(high.exp_genes)){
-    high.exp_genes <-rawParse(exp.df_t,top_genes=top.N.genes,stats=aggregation.method)
-  }
-  
-  res_cat<-FindLR(high.exp_genes, datatype='mean count', comm_type=communication.type)
-  
-  # sort by product of ligand*receptor expression
-  res_cat<-res_cat[order(res_cat$cell_from_mean_exprs*res_cat$cell_to_mean_exprs,decreasing=T),]
-  
-  return(res_cat)
-}
-
-```
-
-
-
-```{r ligand-receptor pairs from highly expressed genes, fig.height= 10, fig.width= 10}
-
-# Identify LR pairs ############################################################
+# Cluster Averages #############################################################
 
 # initiate lists
-res.LR.list <- list()
-res.LR.list2 <- list()
+res.comm.list <- list()
+# res.comm.list2 <- list()
 
-  # initiate lists
-  res.comm.list <- list()
-  res.comm.list2 <- list()
+# get data
+exp.df_t <-  prep.output[[3]]
+u.clusters <- prep.output[[1]]
+rm(prep.output)
+invisible({gc()})
+
+# top.genes.n <- parameter.list$top.n.genes
+
+# if (do.query){
+#   top.genes.n <- 100
+# }
+# get highly expressed genes
+
+
+# clust.name <- colnames(av.mat)
+# av.mat2 <- as.data.frame(av.mat[rownames(av.mat) %in% rownames(so.query), ])
+# av.mat2$gene <- rownames(av.mat2)
+# high.exp_genes <- pivot_longer(av.mat2, cols = clust.name)
+# high.exp_genes <- high.exp_genes[ ,c("gene", "value", "name")]
+# colnames(high.exp_genes) <- c("gene", "exprs", "cell_type")
+# 
+#  u.clusters <- as.numeric(gsub("c", "", clust.name))
+# exp.df_t <- 
+
+# data, top_genes = top.N.genes, stats = "mean"
+high.exp_genes <-rawParse2(data = exp.df_t,
+                           stats=parameter.list$aggregation.method)
+# high.exp_genes3 <- unique(high.exp_genes)
+# high.exp_genes <-unique(rawParse2(exp.df_t,top_genes=100000,stats=parameter.list$aggregation.method))
+
+# iTALK Analsis ################################################################
+message("Computing iTALK scores...")
+
+# inititate data.frames
+res.by_comm <- NULL
+# res.by_comm2 <- NULL
+for (j in 1:length(parameter.list$communication.type)){
+  comm.type <- parameter.list$communication.type[j]
   
-  # get data
-  exp.df_t <-  prep.output[[3]]
-  u.clusters <- prep.output[[1]]
-  rm(prep.output)
-  invisible({gc()})
+  # run ligand receptor interaction analysis 
   
-  # get highly expressed genes
-  high.exp_genes <-rawParse(exp.df_t,top_genes=top.N.genes,stats=aggregation.method)
+  # is.success <- F
   
-  # inititate data.frames
-  res.by_comm <- NULL
-  res.by_comm2 <- NULL
-  for (j in 1:length(communication.type)){
-    comm.type <- communication.type[j]
-    
-    # run ligand receptor interaction analysis 
-    res.comm.list[[comm.type]] <- analyze_LG.pairs(u.clusters = u.clusters, 
-                                                   exp.df_t = exp.df_t, 
-                                                   communication.type = comm.type,
-                                                   high.exp_genes = high.exp_genes, 
-                                                   aggregation.method = aggregation.method, 
-                                                   top.N.genes = top.N.genes, 
-                                                   n.LRpairs = n.LRpairs)
-    
-    # round values to nearest sig.fig.
-    res.comm.list[[comm.type]]$cell_from_mean_exprs <- signif(res.comm.list[[comm.type]]$cell_from_mean_exprs, 3)
-    res.comm.list[[comm.type]]$cell_to_mean_exprs <- signif(res.comm.list[[comm.type]]$cell_to_mean_exprs, 3)
-    res.by_comm<-rbind(res.by_comm,res.comm.list[[comm.type]])
-    
-    # subset data to include top n.LRpairs
-      top.data <- res.comm.list[[comm.type]][1:n.LRpairs,]
-      top.data <- top.data[complete.cases(top.data), ]
-      res.comm.list2[[comm.type]] <- top.data
-      res.by_comm2 <- rbind(res.by_comm2, res.comm.list2[[comm.type]] ) # for output plots
-    
-    if (print.inline){
-      # specify cell colors
-      my.cols <-colorRampPalette(brewer.pal(8, paste("Set", set_color = 2, sep = "")))(length(u.clusters))
-      cell_col<-structure(my.cols,names=unique(exp.df_t$cell_type ))
-      
-      # LR interaction plot
-      LRPlot( top.data,
-              datatype='mean count',
-              cell_col=cell_col,
-              link.arr.lwd= top.data$cell_from_mean_exprs,
-              link.arr.width= top.data$cell_to_mean_exprs)
-      title(comm.type)
-      
-    }
-  }
+  # try({
   
-  # store results
-  res.comm.list[["pooled"]] <- res.by_comm
-  res.comm.list2[["pooled"]] <- res.by_comm2
+  res.comm.list[[comm.type]]<-FindLR2(high.exp_genes, datatype= parameter.list$data.type, comm_type=comm.type)
+  # datatype= parameter.list$data.type, 
+  # sort by product of ligand*receptor expression
+  
+  
+  # res.comm.list[[comm.type]] <- analyze_LG.pairs(u.clusters = u.clusters, 
+  #                                                exp.df_t = exp.df_t, 
+  #                                                communication.type = comm.type,
+  #                                                high.exp_genes = high.exp_genes, 
+  #                                                aggregation.method = parameter.list$aggregation.method, 
+  #                                                # top.N.genes = top.genes.n, 
+  #                                                n.LRpairs = parameter.list$n.LRpairs)   
+  
+  if (is.null( res.comm.list[[comm.type]])) next
+  res.comm.list[[comm.type]]<-res.comm.list[[comm.type]][order(res.comm.list[[comm.type]]$cell_from_mean_exprs*
+                                                                 res.comm.list[[comm.type]]$cell_to_mean_exprs,decreasing=T),]
+  # is.success <- T
+  # }, silent=  T)
+  # if (!is.success) next
+  
+  # round values to nearest sig.fig.
+  res.comm.list[[comm.type]]$cell_from_mean_exprs <- signif(res.comm.list[[comm.type]]$cell_from_mean_exprs, 3)
+  res.comm.list[[comm.type]]$cell_to_mean_exprs <- signif(res.comm.list[[comm.type]]$cell_to_mean_exprs, 3)
+  res.by_comm<-rbind(res.by_comm,res.comm.list[[comm.type]])
+  
+  # subset data to include top n.LRpairs
+  # top.data <- res.comm.list[[comm.type]][1:parameter.list$n.LRpairs,]
+  # top.data <- top.data[complete.cases(top.data), ]
+  # res.comm.list2[[comm.type]] <- top.data
+  
+  # if (parameter.list$print.inline){
+  # specify cell colors
+  # my.cols <-colorRampPalette(brewer.pal(8, paste("Set", set_color = 2, sep = "")))(length(u.clusters))
+  # cell_col<-structure(my.cols,names=unique(exp.df_t$cell_type ))
+  
+  # LR interaction plot
+  # LRPlot( top.data,
+  #         datatype='mean count',
+  #         cell_col=cell_col,
+  #         link.arr.lwd= top.data$cell_from_mean_exprs,
+  #         link.arr.width= top.data$cell_to_mean_exprs)
+  # title(comm.type)
+  
+  # }
+}
+
+# store results
+res.comm.list[["pooled"]] <- res.by_comm
+
+rm(high.exp_genes);
+# rm(exp.df_t)
+invisible({gc()})
 
 
 ```
 
+```{r SingleCellSignalR interactions and scores, include=FALSE}
 
-
-```{r NEW single cell signal R, fig.width = 8, fig.height = 4}
-
-do.scsr <- F
-
-if (do.scsr){
-  
-
-
-library(SingleCellSignalR)
+message("Computing SCSR scores...")
 
 # get seurat clusters
 so.cluster <- as.character(so.query@meta.data[["seurat_clusters"]])
 so.cluster <- as.integer(so.cluster) + 1
 
 # cast as matrix and get genes
-so.data <- as.matrix(so.query@assays[[DefaultAssay(so.query)]]@data)
+so.data <- so.query@assays[[DefaultAssay(so.query)]]@data
 so.genes <- rownames(so.data)
 
-# score LR interactions (scsr method)
-sr.signal <- cell_signaling(data = so.data, genes = so.genes, cluster = so.cluster,species = "mus musculus")
-
-# some data wranlging...
 df.scsr <- NULL
-for (i in 1:length(sr.signal)){
-  scsr.results <- sr.signal[[i]]
-  origin.cluster <- colnames(scsr.results)[1]
-  destination.cluster <- colnames(scsr.results)[2]
+
+# Paracrine Interactions #######################################################
+scsr.para <- normScore(object = so.data, genes = so.genes, cluster = so.cluster, species = parameter.list$species, int.type = "paracrine")
+
+for (i in 1:length(scsr.para)){
+  scsr.results <- scsr.para[[i]]
+  if (nrow(scsr.results) == 0) next
+  cell_from <- colnames(scsr.results)[1]
+  cell_to <- colnames(scsr.results)[2]
   df.scsr <- bind_rows(df.scsr, data.frame(ligand = scsr.results[ ,1],
                                            receptor =  scsr.results[ ,2],
-                                           origin.cluster = origin.cluster,
-                                           destination.cluster = destination.cluster,
+                                           cell_from = cell_from,
+                                           cell_to = cell_to,
                                            interaction.type = scsr.results$`interaction type`,
                                            LR.score = scsr.results$LRscore))
 }
 
+
+```
+
+
+
+
+
+```{r Merge iTALK and SCSR scores, fig.width=10, fig.height = 5, include = FALSE}
+
+message("Comparing iTALK and SCSR scores...")
+
 # prep scsr data
-colnames(df.scsr) <- c("ligand", "receptor", "origin_cluster", "destination_cluster", "comm_type", "scrs.score")
-df.scsr <- df.scsr %>% dplyr::arrange(-scrs.score)
-df.scsr$origin_cluster <- paste0("c", as.numeric(gsub("cluster ", "", df.scsr$origin_cluster))-1)
-df.scsr$destination_cluster <- paste0("c", as.numeric(gsub("cluster ", "", df.scsr$destination_cluster))-1)
-df.scsr$ligand <- toupper(df.scsr$ligand)
-df.scsr$receptor <- toupper(df.scsr$receptor)
+colnames(df.scsr) <- c("ligand", "receptor", "cell_from", "cell_to", "comm_type", "scsr.score")
+df.scsr$ligand <- gene2species(df.scsr$ligand, parameter.list$species)
+df.scsr$receptor <- gene2species(df.scsr$receptor, parameter.list$species)
+# df.scsr$scsr.score[is.na(df.scsr$scsr.score)] <- 0
+df.scsr <- df.scsr %>% dplyr::arrange(-scsr.score)
+df.scsr$cell_from <- paste0("c", as.numeric(gsub("cluster ", "", df.scsr$cell_from))-1)
+df.scsr$cell_to <- paste0("c", as.numeric(gsub("cluster ", "", df.scsr$cell_to))-1)
+df.scsr <- unique(df.scsr)
 
 # prep italk data
 df.italk <- res.by_comm
-colnames(df.italk) <- c("ligand", "receptor", "origin_exp", "origin_cluster", "destination_exp", "destination_cluster", "comm_type")
-df.italk$italk.score <- df.italk$origin_exp * df.italk$destination_exp
+colnames(df.italk) <- c("ligand", "receptor", "cell_from_mean_exprs", "cell_from", "cell_to_mean_exprs", "cell_to", "type")
+# "type"
+df.italk$ligand <- gene2species(df.italk$ligand, parameter.list$species)
+df.italk$receptor <- gene2species(df.italk$receptor, parameter.list$species)
+
+df.italk$italk.score <- df.italk$cell_from_mean_exprs * df.italk$cell_to_mean_exprs
 df.italk <- df.italk %>% dplyr::arrange(-italk.score)
-df.italk$ligand <- toupper(df.italk$ligand)
-df.italk$receptor <- toupper(df.italk$receptor)
+df.italk$ligand <- gene2species(df.italk$ligand, parameter.list$species)
+df.italk$receptor <- gene2species(df.italk$receptor, parameter.list$species)
+df.italk <- unique(df.italk)
 
 # merge datasets
-df.merge.scores <- merge(df.scsr, df.italk, by = c("ligand", "receptor", "origin_cluster", "destination_cluster"))
+df.join.scores <- dplyr::full_join(df.scsr, df.italk, by = c("ligand", "receptor", "cell_from", "cell_to"))
+
+# add descriptives from LR.db
+LR.df <- LR.db$LR.df
+LR.df <- LR.df[LR.df$Ligand != LR.df$Receptor, ]
+LR.df$ligand <- gene2species(LR.df$Ligand, parameter.list$species)
+LR.df$receptor <- gene2species(LR.df$Receptor, parameter.list$species)
+LR.df$type <- LR.df$Type
+LR.df$pair <- paste0(LR.df$ligand, "-", LR.df$receptor)
+df.join.scores <- merge(df.join.scores, LR.df, by = c("ligand", "receptor", "type")) # , "type"
+
+df.join.scores <- unique(df.join.scores)
+df.join.scores$scsr.score[df.join.scores$italk.score == 0] <- 0
+# df.join.scores <- df.join.scores[df.join.scores$italk.score != 0, ]
 
 # rank LR-pairs
-df.merge.scores$scrs.rank <- rank(df.merge.scores$scrs.score)
-df.merge.scores$italk.rank <- rank(df.merge.scores$italk.score)
+df.join.scores$scsr.rank <- rank(df.join.scores$scsr.score)
+df.join.scores$italk.rank <- rank(df.join.scores$italk.score)
 
 # generate plots
-plt.score <- df.merge.scores %>%
-  ggplot(aes(x = italk.score, y = scrs.score)) + 
-  geom_point() + 
-  geom_smooth(method = "lm", se = F) + 
-  scMiko::theme_miko() + 
-  labs(title = "LR Interaction Scores", subtitle = "Score comparison between methods") + 
-  ylab("SCRS Score") + xlab("iTalk Score")
 
-plt.rank <- df.merge.scores %>%
-  ggplot(aes(x = italk.rank, y = scrs.rank)) + 
-  geom_point() + 
-  geom_smooth(method = "lm", se = F) + 
-  scMiko::theme_miko() + 
-  labs(title = "LR Interaction Scores", subtitle = "Rank comparison between methods") + 
-  ylab("SCRS Rank") + xlab("iTalk Rank")
-  
+# plt.score <- df.join.scores %>%
+#   ggplot(aes(x = italk.score, y = scsr.score)) + 
+#   geom_point() + 
+#   geom_smooth(method = "drm", method.args = list(fct = LL.4()), alpha = 0.5, se = F, color = "tomato", formula = y~x) +  
+#   scMiko::theme_miko() + 
+#   labs(title = "LR Scores", subtitle = "Score comparison") + 
+#   geom_hline(yintercept = 1, linetype = "dashed") + 
+#   ylab("SCSR Score") + xlab("iTalk Score")
+# plt.rank <- df.join.scores %>%
+#   dplyr::filter(complete.cases(.)) %>%
+#   ggplot(aes(x = italk.rank, y = scsr.rank)) + 
+#   geom_point() + 
+#   geom_smooth(method = "lm", se = F, color = "tomato", alpha = 0.5, formula = y~x) + 
+#   scMiko::theme_miko() + 
+#   labs(title = "LR Ranks", subtitle = "Rank comparison") + 
+#   ylab("SCSR Rank") + xlab("iTalk Rank")
+
 # combine plots
-plt.method.comparisons <- cowplot::plot_grid(plt.score, plt.rank)
+# plt.method.comparisons1 <- cowplot::plot_grid(plt.score, plt.rank)
 
-# visualize
-print(plt.method.comparisons)
-
-}
-
-
-
-# flex.asDT(df.merge.scores)
+# if (parameter.list$print.inline){
+#   print(plt.method.comparisons1)
+# }
 
 ```
 
 
 
 
-```{r GSVA, warning = FALSE}
 
-if (do.scsr){
+
+
+```{r calculate LR scores as in NATMI, fig.width=10, fig.height = 8, include = FALSE}
+
+message("Computing specificity (NATMI) scores...")
+
+u.lig <- unique(df.join.scores$ligand)
+u.rec <- unique(df.join.scores$receptor)
+u.lr <- unique(c(u.lig, u.rec))
+
+u.lr <- gene2species(u.lr, parameter.list$species)
+
+
+so.sub <- subset(so.query, features = u.lr)
+# a.mat <- avgGroupExpression(so.sub)
+a.mat <- av.mat[rownames(av.mat) %in% rownames(so.sub), ]
+
+
+
+# rownames(a.mat) <- a.mat$genes
+# a.mat <- a.mat %>% dplyr::select(-c("genes"))
+total.activity <- data.frame(apply(a.mat, 1, sum))
+total.activity$genes <- rownames(total.activity)
+colnames(total.activity) <- c("total.activity", "genes")
+
+ta.lig <- ta.rec <- total.activity
+colnames(ta.lig) <- c("ta.lig", "ligand")
+colnames(ta.rec) <- c("ta.rec", "receptor")
+df.LR <- merge(df.join.scores, ta.lig, by = "ligand")
+df.LR <- merge(df.LR, ta.rec, by = "receptor")
+
+df.LR$sw.lig <- df.LR$cell_from_mean_exprs / df.LR$ta.lig
+df.LR$sw.rec <- df.LR$cell_to_mean_exprs / df.LR$ta.rec
+df.LR$sw.product <- df.LR$sw.lig*df.LR$sw.rec
+
+# correct for rounding errors
+df.LR$sw.product[df.LR$sw.product > 1] <- 1
+df.LR$sw.product[df.LR$sw.product < 0] <- 0
+
+# remove memory-heavy objects
+rm(so.sub); rm(a.mat);
+invisible({gc()})
+
+# rank
+# df.LR$italk.rank <- rank(df.LR$italk.score, na.last = TRUE, ties.method = c("random"))
+# df.LR$natmi.rank <- rank(df.LR$sw.product, na.last = TRUE, ties.method = c("random"))
+# 
+# plt.score2 <- df.LR %>%
+#   ggplot(aes(x = italk.score, y = sw.product)) +
+#   geom_point() +
+#   geom_smooth(method = "gam", se = F, color = "tomato", formula = y ~ s(x, bs = "cs")) +
+#   scMiko::theme_miko() +
+#   labs(title = "LR Interaction Scores", subtitle = "Score comparison between methods") +
+#   ylab("NATMI Score") + xlab("iTalk Score")
+
+df.LR$synergy1 <- rescaleValues(df.LR$italk.score) * rescaleValues(df.LR$sw.product)
+df.LR$synergy2 <- (rescaleValues(df.LR$italk.score))^2 + (rescaleValues(df.LR$sw.product))^2
+df.LR$id <- paste0(df.LR$cell_from, "_", df.LR$ligand, " : ", df.LR$cell_to, "_", df.LR$receptor)
+
+df.LR.top <- unique(bind_rows(df.LR %>% dplyr::top_n(20, synergy2), df.LR %>% dplyr::top_n(20, synergy1)))
+
+# plt.score2 <- df.LR %>%
+#   ggplot(aes(x = italk.score, y = sw.product)) +
+#   geom_point(aes(color = synergy1)) +
+#   scMiko::theme_miko() +
+#   labs(title = "LR Interaction Scores", subtitle = "Score comparison between methods") +
+#   ylab("Specificity (NATMI)") + xlab("Activity (iTalk)") + 
+#   scale_color_gradient(low = "grey", high = "tomato") + 
+#   ggrepel::geom_text_repel(data= df.LR.top , aes(x = italk.score, y = sw.product, label = id), size = 2)
+# 
+# if (parameter.list$print.inline){
+#   print(plt.score2)
+# }
+
+
+# get synergy summary stats
+df.LR$percentile.synergy <- rank(df.LR$synergy2)/ nrow(df.LR)
+df.LR$percentile.interaction <- rank(df.LR$italk.score)/ nrow(df.LR)
+df.LR$percentile.specificity <- rank(df.LR$sw.product)/ nrow(df.LR)
+df.syn.sum <- df.LR %>%
+  dplyr::group_by(ligand, receptor) %>%
+  dplyr::summarize(
+    synergy.pr = mean(percentile.synergy, na.rm = T),
+    interaction.pr = mean(percentile.interaction, na.rm = T),
+    specificity.pr = mean(percentile.specificity, na.rm = T)
+  )
+
+
+```
+
+
+
+
+```{r GSVA, include=FALSE}
+
+message("Running GSVA...")
+
+# get cluster averages (expression matrix) 
+
+# get list of all genes in dataset 
+all.genes <- rownames(av.mat)
+
+# get gene list from LR pairs 
+LR.genes <- unique(c(df.LR$ligand, df.LR$receptor))
+
+# get symbol to entrez mapping
+my.symbol <- as.vector(all.genes)
+my.entrez <- sym2entrez(my.symbol, my.species = parameter.list$species)
+my.entrez <- my.entrez[complete.cases(my.entrez), ]
+match.ind.LR <- match(LR.genes, my.entrez$SYMBOL)
+LR.genes.entrez <- as.character(my.entrez$ENTREZID[match.ind.LR])
+match.ind.all <- match(all.genes, my.entrez$SYMBOL)
+all.genes.entrez <- as.character(my.entrez$ENTREZID[match.ind.all])
+
+# get all and relevant pathways
+
+suppressWarnings({
+  suppressMessages({
+    pathways.LR <- getAnnotationPathways(LR.genes.entrez, db = parameter.list$pathway.db, species = parameter.list$species)
+    pathways.all <- getAnnotationPathways(all.genes.entrez, db = parameter.list$pathway.db, species = parameter.list$species)
+    pathway.subset <- pathways.all[names(pathways.all) %in% names(pathways.LR)]  
+  })
+})
+
+
+
+# get entrez to symbol mappings
+e2s <-  my.entrez$SYMBOL
+names(e2s) <-  my.entrez$ENTREZID
+
+
+# convert entrez to symbols 
+for (j in 1:length(pathway.subset)){
+  pathway.subset[[j]] <- e2s[pathway.subset[[j]]]
+  pathway.subset[[j]] <- pathway.subset[[j]][!is.na(pathway.subset[[j]])]
+} 
+
+# GSVA enrichment 
+gsva.method <- "zscore"
+gsva.all <- GSVA::gsva(av.mat, pathway.subset, verbose = F, method = gsva.method)
+pathway.subset.names <- rownames(gsva.all)
+
+# delete all rows with unidentified GO ID
+gsva.all<-gsva.all[!grepl("GO ID NOT FOUND IN OBO FILE ONTOLOGY DEFINITIONS", rownames(gsva.all)),]
+
+# reorder using cluster names
+col.num <- as.numeric(gsub("c", "", colnames(gsva.all)))
+gsva.all <- gsva.all[, order(col.num)]
+
+```
+
+
+
+```{r Harmonize GSVA LR with pathways, include = FALSE}
+
+message("Harmonizing GSVA and receptor activity datasets...")
+
+# get unique LR pairs and clusters
+df.LR$LR.pair <- paste0(df.LR$ligand, "-", df.LR$receptor)
+u.sources <- unique(df.LR$cell_from)
+u.destinations <- unique(df.LR$cell_to)
+u.LR <- unique(df.LR$LR.pair)
+
+
+u.cluster <- as.numeric(as.character(orderedFactor(unique(so.query@meta.data[["seurat_clusters"]]))))
+u.cluster <- u.cluster[order(u.cluster)]
+df.clust.temp <- data.frame(cell_to = paste0("c", u.cluster))
+df.LR.slim <- df.LR[ ,c("ligand", "LR.pair", "receptor", "cell_to", "cell_to_mean_exprs")]
+
+u.r <- unique(df.LR.slim$receptor)
+df.clust.temp2 <- NULL
+
+pb <- progress::progress_bar$new(total = length(u.r))
+pb$tick(0)
+for (i in 1:length(u.r)){
   
-  # get cluster averages (expression matrix) #####################################
-  av.mat <- avgGroupExpression(
-    so.query,
-    which.data = "data",
-    which.assay = DefaultAssay(so.query))
-  rownames(av.mat) <- av.mat$genes
-  av.mat <- av.mat %>% dplyr::select(-c("genes"))
-  av.mat <- as.matrix(av.mat)
+  df.clust.temp.cur <- df.clust.temp
+  df.clust.temp.cur$receptor <- u.r[i]
+  df.clust.temp2 <- bind_rows(df.clust.temp2,
+                              df.clust.temp.cur)
+  pb$tick()
+}
+
+# handle missing clusters
+df.LR.slim <- unique(df.LR.slim)
+df.LR.slim2 <- dplyr::full_join(df.clust.temp2, df.LR.slim, by = c("cell_to", "receptor"))
+df.LR.slim2$cell_to_mean_exprs[is.na(df.LR.slim2$cell_to_mean_exprs)] <- 0
+
+# combine GSVA scores and R activities
+pivot.names <- colnames(gsva.all)
+df.gsva <- as.data.frame(gsva.all)
+df.gsva.names <- rownames(df.gsva)
+names(df.gsva.names) <- rownames(gsva.all)
+df.gsva$pathway <- rownames(df.gsva)
+gsva.all.long <- pivot_longer( data = df.gsva, cols = pivot.names)
+colnames(gsva.all.long) <- c("pathway", "cell_to", "gsva")
+df.LR.slim2 <- unique(df.LR.slim2[ ,c("cell_to", "receptor", "cell_to_mean_exprs")])
+df.LR.slim3 <- dplyr::full_join(gsva.all.long, df.LR.slim2, by = "cell_to")
+
+
+
+# compute correlation
+df.LR.slim3.cor <- df.LR.slim3 %>%
+  dplyr::group_by(pathway, receptor) %>%
+  dplyr::summarize(r = cor(gsva, cell_to_mean_exprs))
+
+plt.hist.cor <- df.LR.slim3.cor %>%
+  ggplot(aes(x = r)) + 
+  geom_histogram( color = "black", fill = "grey") + 
+  xlab("Correlation, r") + 
+  ylab("Count") + 
+  labs(title = "Receptor-Pathway Correlation Distribution", subtitle = "Pearson Correlation") + 
+  theme_miko(legend = F) + 
+  geom_vline(xintercept = c(-1, 0, 1), linetype = "dashed")
+
+if (parameter.list$print.inline){
+  print(plt.hist.cor)
+}
+
+
+df.path.sum <- df.LR.slim3.cor %>%
+  dplyr::group_by(pathway) %>%
+  dplyr::summarize(n.x = length(pathway),
+                   r.mean = mean(r, na.rm = T),
+                   r.sd = sd(r, na.rm = T),
+                   r.median = median(r, na.rm = T), 
+                   r.mad = mad(r, na.rm = T))
+
+# identify top hits 
+mad.threshold <- 4
+df.path.sum$hi.thresh <- df.path.sum$r.median + mad.threshold*(df.path.sum$r.mad)
+df.path.sum$hi.thresh[df.path.sum$hi.thresh>1] <- 1
+df.path.sum$lo.thresh <- df.path.sum$r.median - mad.threshold*(df.path.sum$r.mad)
+df.path.sum$lo.thresh[df.path.sum$lo.thresh< -1] <- -1
+df.path.sum.slim <- df.path.sum[ ,c("pathway", "hi.thresh", "lo.thresh", "r.median", "r.mad")]
+df.LR.slim4.cor <- inner_join(df.LR.slim3.cor, df.path.sum.slim, by = "pathway")
+df.LR.slim4.cor$sig <- (df.LR.slim4.cor$r > df.LR.slim4.cor$hi.thresh) | (df.LR.slim4.cor$r < df.LR.slim4.cor$lo.thresh)
+df.LR.slim4.cor$z <- (df.LR.slim4.cor$r - df.LR.slim4.cor$r.median)/df.LR.slim4.cor$r.mad
+
+# p values
+df.LR.slim4.cor$p <- 2*pnorm(df.LR.slim4.cor$z, lower.tail = F)
+df.LR.slim4.cor$p[df.LR.slim4.cor$p > 1] <- 1
+df.LR.slim4.cor$p.adj <- p.adjust(df.LR.slim4.cor$p, method = "BH")
+
+
+p.threshold <- 0.05
+p.sig1 <- sum(df.LR.slim4.cor$sig, na.rm = T)/nrow(df.LR.slim4.cor)
+p.sig2 <- sum(df.LR.slim4.cor$p < p.threshold, na.rm = T)/nrow(df.LR.slim4.cor)
+p.sig3 <- sum(df.LR.slim4.cor$p.adj < p.threshold, na.rm = T)/nrow(df.LR.slim4.cor)
+
+
+# top 3 pathways per receptor
+top.pperr <- 3
+df.LR.slim5.cor.a <- df.LR.slim4.cor %>% dplyr::group_by(receptor) %>% dplyr::top_n(top.pperr, abs(z))
+df.LR.slim5.cor.b <- df.LR.slim4.cor %>% dplyr::group_by(receptor) %>% dplyr::top_n(top.pperr, abs(r))
+df.LR.slim5.cor <- unique(bind_rows(df.LR.slim5.cor.a,df.LR.slim5.cor.b ))
+# significant receptor-pathway pairs
+# if (p.sig3 == 0){
+#   df.LR.slim5.cor <- df.LR.slim4.cor[df.LR.slim4.cor$p < p.threshold, ]
+# } else {
+#   df.LR.slim5.cor <- df.LR.slim4.cor[df.LR.slim4.cor$p.adj < p.threshold, ] 
+# }
+
+
+```
+
+```{r ggLRplot helper function}
+
+ggLRplot <- function(LR, lig, rec, scsr.threshold = 0.7){
   
-  # get gene list ################################################################
-  LR.genes <- unique(c(df.merge.scores$ligand, df.merge.scores$receptor))
+  df.lr.receptor.all <- LR %>%
+    dplyr::filter(receptor == rec)
+  df.lr.receptor <- df.lr.receptor.all %>% dplyr::filter(ligand == lig, 
+                                                         scsr.score >  quantile(df.lr.receptor.all$scsr.score, scsr.threshold, na.rm = T))
   
-  if (which.species == "Mm"){
-    LR.genes <- firstup(LR.genes)
-  } else if (which.species == "Hs") {
-    LR.genes <- toupper(LR.genes)
-  }
+  u.c <- unique(c(df.lr.receptor$cell_from, df.lr.receptor$cell_to))
+  my.cols <-colorRampPalette(brewer.pal(8, paste("Set", set_color = 2, sep = "")))(length(u.c))
+  cell_col<-structure(my.cols,names=u.c)
   
-  # get list of relevant pathways ################################################
-  all.genes <- rownames(av.mat)
+  return(list(
+    df.lr.receptor = df.lr.receptor,
+    cell_col = cell_col
+  ))
+  # }
   
-  # get symbol to entrez mapping
-  my.symbol <- as.vector(all.genes)
-  my.entrez <- sym2entrez(my.symbol, my.species = which.species )
-  my.entrez <- my.entrez[complete.cases(my.entrez), ]
-  
-  match.ind.LR <- match(LR.genes, my.entrez$SYMBOL)
-  LR.genes.entrez <- as.character(my.entrez$ENTREZID[match.ind.LR]) 
-  
-  match.ind.all <- match(all.genes, my.entrez$SYMBOL)
-  all.genes.entrez <- as.character(my.entrez$ENTREZID[match.ind.all]) 
-  
-  # get pathways
-  pathways.LR <- getAnnotationPathways(LR.genes.entrez, db = "Bader", species = which.species)
-  pathways.all <- getAnnotationPathways(all.genes.entrez, db = "Bader", species = which.species)
-  pathway.subset <- pathways.all[names(pathways.all) %in% names(pathways.LR)]
-  
-  # get entrez to symbol mappings
-  e2s <-  my.entrez$SYMBOL
-  names(e2s) <-  my.entrez$ENTREZID
-  
-  # convert entrez to symbols
-  for (j in 1:length(pathway.subset)){
-    pathway.subset[[j]] <- e2s[pathway.subset[[j]]]
-    pathway.subset[[j]] <- pathway.subset[[j]][!is.na(pathway.subset[[j]])]
-  }
-  
-  # GSVA enrichment ##############################################################
-  gsva.all <- GSVA::gsva(av.mat, pathway.subset)
-  
-  col.num <- as.numeric(gsub("c", "", colnames(gsva.all)))
-  gsva.all <- gsva.all[, order(col.num)]
-  
-  # Harmonize GSVA and LR interactions ###########################################
-  
-  # TODO
-  
-  df.italk$LR.pair <- paste0(df.italk$ligand, "-", df.italk$receptor)
-  u.sources <- unique(df.italk$origin_cluster)
-  u.destinations <- unique(df.italk$destination_cluster)
-  u.LR <- unique(df.italk$LR.pair)
-  
-  
-  df.gsva.lr <- NULL
-  for (i in 1:length(u.LR)){
+}
+
+
+```
+
+
+```{r visualization heat map, fig.height=10, fig.width=10, include = FALSE}
+
+do.heat <- F
+if (do.heat){
+  plt.hm <- NULL
+  try({
     
-    # get data for current LR pair
-    current.df <- df.italk[df.italk$LR.pair %in% u.LR[i], ]
+    show.n.path <- 150
+    if (show.n.path > nrow(df.LR.slim5.cor)) show.n.path <- nrow(df.LR.slim5.cor)
+    top.paths <- unique(unlist((df.LR.slim5.cor %>% dplyr::arrange(p))[1:150, "pathway"]))
+    top.receptors <- unique(unlist((df.LR.slim5.cor %>% dplyr::arrange(p))[1:150, "receptor"]))
     
-    # estimate receptor activity (integrate across all ligand inputs)
-    current.df.sum <- current.df %>%
-      group_by(destination_cluster) %>%
-      summarize(r.activity = sum(italk.score))
+    df.Rpath.cor <- df.LR.slim3.cor %>% dplyr::filter((pathway %in% top.paths) & (receptor %in% top.receptors))
+    df.Rpath.cor.wide <- pivot_wider(df.Rpath.cor, values_from = "r", names_from = "pathway")
+    receptor.names <- df.Rpath.cor.wide$receptor
+    df.Rpath.cor.wide <- df.Rpath.cor.wide %>% dplyr::select(-c("receptor"))
+    mat.Rpath <- as.matrix(df.Rpath.cor.wide)
+    rownames(mat.Rpath) <- receptor.names
+    colnames(mat.Rpath) <- make.unique(stringr::str_trunc(colnames(mat.Rpath), width = 40))
     
-    if (sum(current.df.sum$r.activity) == 0) next
+    # generate heatmap
+    plt.hm <-  ggplotify::as.ggplot(pheatmap::pheatmap(t(mat.Rpath), silent  = T, fontsize_row  = 7))
     
-    # reorder dataframe rows
-    row.num <- as.numeric(gsub("c", "", current.df.sum$destination_cluster))
-    current.df.sum <- current.df.sum[order(row.num), ]
-    
-    # filter for relevant pathways
-    rel.genes <- strsplit(u.LR[i], "-")
-    rel.genes2 <- c(rel.genes[[1]][1], rel.genes[[1]][2])
-    
-    if (which.species == "Mm"){
-      rel.genes2 <- firstup(rel.genes2)
-    } else if (which.species == "Hs") {
-      rel.genes2 <- toupper(rel.genes2)
+    if (parameter.list$print.inline){
+      print(plt.hm)
     }
     
-    match.ind.rel <- match(rel.genes2, my.entrez$SYMBOL)
-    rel.genes.entrez <- as.character(my.entrez$ENTREZID[match.ind.rel]) 
-    pathways.rel <- getAnnotationPathways(rel.genes.entrez, db = "Bader", species = which.species)
-    gsva.rel <- gsva.all[rownames(gsva.all) %in% names(pathways.rel), ]
-    
-    # find correlation ebtween receptor activity and pathways
-    gsva.cor <- cor(t(gsva.rel), current.df.sum$r.activity)
-    
-    # filter top paths
-    # all.values <- gsva.cor[,1]
-    # av.sd <- sd(all.values)
-    # av.z <- all.values/av.sd
-    which.sig <- gsva.cor[,1] > 0.8
-    if (sum(which.sig) == 0) next
-    which.paths <- rownames(gsva.cor)[which.sig]
-    
-    df.gsva.lr <- bind_rows(df.gsva.lr, data.frame(
-      LR.pair = u.LR[i],
-      ligand = rel.genes2[1],
-      receptor = rel.genes2[2],
-      pathways = which.paths,
-      r = gsva.cor[which.sig, ]
-    ))
-    
-  }
-  
+    # head(top.receptors)
+  }, silent = T)
 }
+
 
 ```
 
 
+```{r ligand-receptor cor plots, fig.width = 10, fig.height = 6}
 
-```{r Interaction SUMMARIES, warning = FALSE, message = FALSE}
+rgPlot <- function(rec, df.dat, df.cor, top.n.genes = 20, trunc.width = 50){
+  
+  
+  df.Rpath.cur <- df.cor %>% dplyr::filter( (receptor %in% rec))
+  
+  df.top.path <- bind_rows(
+    (df.Rpath.cur %>% arrange(r))[1:round(top.n.genes/2), ],
+    (df.Rpath.cur %>% arrange(-r))[1:round(top.n.genes/2), ]
+  )
+  
+  path.names <- unique(df.top.path$pathway)
+  # df.top.r <- unique(df.top.pr[ ,c("cell_to", "cell_to_mean_exprs")])
+  pathway.order <- as.character(df.top.path$pathway)[order(df.top.path$r)]
+  pathway.order2 <- stringr::str_trunc(pathway.order, width = trunc.width)
+  
+  
+  
+  
+  df.top.pr <- df.dat %>% dplyr::filter(pathway %in% path.names, 
+                                        receptor %in% gene2species(rec, parameter.list$species))
+  
+  df.top.r <- unique(df.top.pr[ ,c("cell_to", "cell_to_mean_exprs")])
+  cluster.order <- as.character(df.top.r$cell_to)[order(df.top.r$cell_to_mean_exprs)]
+  
+  df.top.pr$cell_to2 <- df.top.pr$cell_to
+  df.top.pr$cell_to2 <- gsub("c", "", as.character(df.top.pr$cell_to2))
+  df.top.pr$cell_to <- factor(df.top.pr$cell_to, levels = cluster.order)
+  df.top.pr$cell_to2 <- factor(df.top.pr$cell_to2, levels = gsub("c", "", cluster.order))
+  
+  df.top.pr$pathway.trunc <- stringr::str_trunc(df.top.pr$pathway, width = trunc.width)
+  df.top.pr$pathway <- factor(df.top.pr$pathway, levels = pathway.order)
+  df.top.pr$pathway.trunc <- factor(df.top.pr$pathway.trunc, levels = unique(pathway.order2))
+  
+  
+  df.top.pr <- df.top.pr %>% 
+    dplyr::group_by(pathway) %>%
+    dplyr::mutate(gsva.scale = scale(gsva))
+  
+  pcor1 <- df.top.pr %>%
+    ggplot(aes(x = cell_to2, y = pathway.trunc, color = gsva.scale, size = gsva.scale)) + 
+    geom_point() + 
+    theme_miko(legend = T) + 
+    viridis::scale_colour_viridis() + 
+    xlab("Cluster") + 
+    ylab("Pathway") + 
+    labs(color = "GSVA", size = "GSVA") + theme(legend.position="bottom") + 
+    scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) 
+  
+  # get legend object
+  pcor.legend <- cowplot::get_legend(pcor1)
+  
+  # clear legend from plot
+  pcor1 <- pcor1+ theme(legend.position="none")
+  
+  
+  df.top.path.bar <- df.top.path
+  df.top.path.bar$pathway.trunc <- stringr::str_trunc(df.top.path.bar$pathway, width = trunc.width)
+  df.top.path.bar$pathway <- factor(df.top.path.bar$pathway, levels = pathway.order)
+  df.top.path.bar$pathway.trunc <- factor(df.top.path.bar$pathway.trunc, levels = unique(pathway.order2))
+  df.top.path.bar <- df.top.path.bar[!duplicated(df.top.path.bar$pathway.trunc), ]
+  
+  pcor2 <- df.top.path.bar %>%
+    ggplot(aes(x = reorder(as.character(seq(1:length(r))), r), y = r)) + # reorder(as.character(seq(1:length(r))), r)
+    geom_bar(stat = "identity", fill = "grey80", color = "black") + 
+    ylab("Correlation, r") + 
+    xlab("") + 
+    theme_miko() + 
+    geom_hline(yintercept = c(-1, 0, 1), linetype = "dashed") +
+    theme(axis.text.y=element_blank()) + 
+    coord_flip() 
+  
+  df.top.r$cell_to2 <- df.top.r$cell_to
+  df.top.r$cell_to2 <- factor(df.top.r$cell_to2, levels = cluster.order)
+  pcor3 <- df.top.r %>%
+    ggplot(aes(x = cell_to2, y = cell_to_mean_exprs)) + 
+    geom_bar(stat = "identity", fill = "grey80", color = "black") +
+    theme_miko() + 
+    ylab("Receptor\nExpression") +  
+    xlab("") + 
+    theme(axis.text.x=element_blank())
+  
+  # combine plots 
+  ptop <- cowplot::plot_grid(pcor3, pcor1, rel_heights = c(1,4), ncol = 1, align = "v", axis = "l")
+  pbot <- cowplot::plot_grid(NULL, pcor2 ,rel_heights = c(1,4),ncol = 1, align = "v")
+  p.cor <- cowplot::plot_grid(ptop, pbot, rel_widths = c(4,1), align = c("hv"), ncol = 2, axis = "bt")  
+  pcor.final <- cowplot::plot_grid(p.cor, pcor.legend, ncol = 1, rel_heights = c(5.5,1))
+  return(pcor.final)
+  
+  
+}
+
+######################################################
+
+
+```
+
+
+```{r Interaction SUMMARIES, warning = FALSE, message = FALSE, include = FALSE}
 
 # consolidate interaction scores ###############################################
 
@@ -525,117 +1380,131 @@ if (do.scsr){
 u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
 
 # specify which communication types to consolidate
-which.communication <- c("cytokine", "checkpoint", "growth factor", "other")
+# which.communication <- c("cytokine", "checkpoint", "growth factor", "other", "pooled")
+
+which.communication <- names(res.comm.list)
+
+message("Summarizing global interactions...")
 
 dot.res.list <- list()
 for (k in 1:length(which.communication)){ # for each communication type...
-
-# get LR interactions for current communcation type...
-df.comm <- res.comm.list[[which.communication[k]]]
-
-# compute interaction score
-df.comm$interaction.score <- df.comm$cell_from_mean_exprs * df.comm$cell_to_mean_exprs
-
-# initiate data frame (results will be stored here)
-df.rollingThreshAll <- NULL
-df.rollingThreshAll.IS <- NULL
-
-
-for (i in 1:length(u.clust)){ # for each cluster...
-
-  # get cluster names
-  cluster.name <- paste0("c", u.clust[i])
   
-  # filter LR interactions for current cluster
-  df.comm.sub <- df.comm[df.comm$cell_from %in% cluster.name, ]
   
-  # set expression thresholds
-  int.min <- 0
-  int.max <- max(df.comm$interaction.score)
-  int.by <- (int.max - int.min)/30
-  exp.thresh <- seq(int.min,int.max, int.by)
   
-  # initiate data.frame objects to store results
-  df.rollingThresh <- NULL
-  df.rollingThreshIntScore <- NULL
-  for (j in 1:length(exp.thresh)){
-    df.tally <- NULL
+  # get LR interactions for current communcation type...
+  df.comm <- res.comm.list[[which.communication[k]]]
+  if (is.null(df.comm)) next
+  if (nrow(df.comm) == 0) next
+  
+  # compute interaction score
+  df.comm$interaction.score <- df.comm$cell_from_mean_exprs * df.comm$cell_to_mean_exprs
+  
+  
+  n.pair <- ulength(paste0(df.comm$ligand, "_", df.comm$receptor))
+  
+  # initiate data frame (results will be stored here)
+  df.rollingThreshAll <- NULL
+  df.rollingThreshAll.IS <- NULL
+  
+  
+  for (i in 1:length(u.clust)){ # for each cluster...
     
-    # specicy interaction-score filter
-    filter1 <- df.comm.sub$interaction.score > exp.thresh[j]
+    # get cluster names
+    cluster.name <- paste0("c", u.clust[i])
     
-    # filter data by interaction score
-    df.comm.sub2 <- df.comm.sub[filter1, ]
+    # filter LR interactions for current cluster
+    df.comm.sub <- df.comm[df.comm$cell_from %in% cluster.name, ]
     
-    # tally number of recipient clusters
-    df.tally <- data.frame(table(df.comm.sub2$cell_to))
+    # set expression thresholds
+    int.min <- 0
+    int.max <- max(df.comm$interaction.score)
+    int.by <- (int.max - int.min)/30
+    exp.thresh <- seq(int.min,int.max, int.by)
     
-    # get average interactio score for recipient clusters
-    df.intscore <- df.comm.sub2 %>% dplyr::group_by(cell_to) %>% dplyr::summarize(int.score = mean(interaction.score))
-    colnames(df.intscore) <- c("Var1", "int.score")
-    
-    # store results 
-    if (nrow(df.tally) == 0){
-      df.tally <- data.frame(Var1 = paste0("c", u.clust), Freq = 0)
-       df.intscore <- data.frame(Var1 = paste0("c", u.clust), int.score = 0)
-    } else if (nrow(df.tally) < length(u.clust)) {
-      which.missing <- u.clust[!(paste0("c", u.clust) %in% df.tally$Var1)]
-      df.tally <- bind_rows(df.tally, data.frame(Var1 =  paste0("c", which.missing), Freq = 0))
-      df.intscore <- bind_rows(df.intscore, data.frame(Var1 =  paste0("c", which.missing), int.score = 0))
+    # initiate data.frame objects to store results
+    df.rollingThresh <- NULL
+    df.rollingThreshIntScore <- NULL
+    for (j in 1:length(exp.thresh)){
+      df.tally <- NULL
+      
+      # specicy interaction-score filter
+      filter1 <- df.comm.sub$interaction.score > exp.thresh[j]
+      
+      # filter data by interaction score
+      df.comm.sub2 <- df.comm.sub[filter1, ]
+      
+      # tally number of recipient clusters
+      df.tally <- data.frame(table(df.comm.sub2$cell_to))
+      
+      # get average interactio score for recipient clusters
+      df.intscore <- df.comm.sub2 %>% dplyr::group_by(cell_to) %>% dplyr::summarize(int.score = mean(interaction.score))
+      colnames(df.intscore) <- c("Var1", "int.score")
+      
+      # store results 
+      if (nrow(df.tally) == 0){
+        df.tally <- data.frame(Var1 = paste0("c", u.clust), Freq = 0)
+        df.intscore <- data.frame(Var1 = paste0("c", u.clust), int.score = 0)
+      } else if (nrow(df.tally) < length(u.clust)) {
+        which.missing <- u.clust[!(paste0("c", u.clust) %in% df.tally$Var1)]
+        df.tally <- bind_rows(df.tally, data.frame(Var1 =  paste0("c", which.missing), Freq = 0))
+        df.intscore <- bind_rows(df.intscore, data.frame(Var1 =  paste0("c", which.missing), int.score = 0))
+      }
+      
+      df.tally$threshold <- exp.thresh[j]
+      df.intscore$threshold <- exp.thresh[j]
+      
+      df.rollingThresh <- bind_rows(df.rollingThresh,df.tally)
+      df.rollingThreshIntScore <- bind_rows(df.rollingThreshIntScore,df.intscore)
+      
     }
     
-    df.tally$threshold <- exp.thresh[j]
-    df.intscore$threshold <- exp.thresh[j]
+    df.rollingThresh$Source = paste0("c", u.clust[i])
+    df.rollingThreshIntScore$Source = paste0("c", u.clust[i])
     
-    df.rollingThresh <- bind_rows(df.rollingThresh,df.tally)
-    df.rollingThreshIntScore <- bind_rows(df.rollingThreshIntScore,df.intscore)
-  
+    df.rollingThreshAll <- bind_rows(df.rollingThreshAll, df.rollingThresh)
+    df.rollingThreshAll.IS <- bind_rows(df.rollingThreshAll.IS, df.rollingThreshIntScore)
   }
   
-  df.rollingThresh$Source = paste0("c", u.clust[i])
-  df.rollingThreshIntScore$Source = paste0("c", u.clust[i])
   
-  df.rollingThreshAll <- bind_rows(df.rollingThreshAll, df.rollingThresh)
-  df.rollingThreshAll.IS <- bind_rows(df.rollingThreshAll.IS, df.rollingThreshIntScore)
-}
-
-
-# VERSION 1: NUMBER OF INTERACTIONS
-df.rollingThreshAllSum <- df.rollingThreshAll %>% 
-  group_by(Var1, Source) %>% 
-  summarize(Freq.sum = log1p(sum(Freq)))
-df.rta.wide <- pivot_wider(df.rollingThreshAllSum, names_from = "Source", values_from = "Freq.sum")
-rownames(df.rta.wide) <- df.rta.wide$Var1
-df.rta.wide <- df.rta.wide %>% ungroup() %>% dplyr::select(-c("Var1"))
-mat.rta.wide <- data.matrix(df.rta.wide)
-
-
-# VERSION 2: INERACTION SCORES
-df.rollingThreshAllISscore <- df.rollingThreshAll.IS %>% 
-  group_by(Var1, Source) %>% 
-  summarize(IS.sum = log1p(sum(int.score)))
-df.rta.is.wide <- pivot_wider(df.rollingThreshAllISscore, names_from = "Source", values_from = "IS.sum")
-rownames(df.rta.is.wide) <- df.rta.is.wide$Var1
-df.rta.is.wide <- df.rta.is.wide %>% ungroup() %>% dplyr::select(-c("Var1"))
-mat.rta.is.wide <- data.matrix(df.rta.is.wide)
-
-# store results
-dot.res.list[[which.communication[k]]] <- list(
-  freq = df.rollingThreshAll,
-  interaction = df.rollingThreshAll.IS
-)
+  # VERSION 1: NUMBER OF INTERACTIONS
+  df.rollingThreshAllSum <- df.rollingThreshAll %>% 
+    dplyr::group_by(Var1, Source) %>% 
+    dplyr::summarize(Freq.sum = log1p(sum(Freq)))
+  df.rta.wide <- pivot_wider(df.rollingThreshAllSum, names_from = "Source", values_from = "Freq.sum")
+  rownames(df.rta.wide) <- df.rta.wide$Var1
+  df.rta.wide <- df.rta.wide %>% ungroup() %>% dplyr::select(-c("Var1"))
+  mat.rta.wide <- data.matrix(df.rta.wide)
+  
+  
+  # VERSION 2: INTERACTION SCORES
+  df.rollingThreshAllISscore <- df.rollingThreshAll.IS %>% 
+    dplyr::group_by(Var1, Source) %>% 
+    dplyr::summarize(IS.sum = log1p(sum(int.score)))
+  df.rta.is.wide <- pivot_wider(df.rollingThreshAllISscore, names_from = "Source", values_from = "IS.sum")
+  rownames(df.rta.is.wide) <- df.rta.is.wide$Var1
+  df.rta.is.wide <- df.rta.is.wide %>% ungroup() %>% dplyr::select(-c("Var1"))
+  mat.rta.is.wide <- data.matrix(df.rta.is.wide)
+  
+  # store results
+  dot.res.list[[which.communication[k]]] <- list(
+    n.pair = n.pair,
+    freq = df.rollingThreshAll,
+    interaction = df.rollingThreshAll.IS
+  )
+  
   
 }
+
 
 ```
 
-```{r LR dotplot, fig.width=8, fig.height=8, warning = FALSE, message = FALSE}
+```{r LR dotplot, fig.width=8, fig.height=8, warning = FALSE, message = FALSE, include = FALSE}
 
 # Aggregate LR interaction ######################################################
 # here we generate plots that summarize the LR interaction volumne between pairwise clusters. 
+message("Net interaction plots...")
 
 plt.agg.LR.list <- list()
-
 
 for (i in 1:length(dot.res.list)){ # for each interaction type...
   
@@ -650,20 +1519,30 @@ for (i in 1:length(dot.res.list)){ # for each interaction type...
   
   # get frequency and interaction score summaries
   df.rollMerge.sum <- df.rollMerge %>%
-    group_by(Var1, Source) %>%
-    summarize(freq.mean = mean(Freq),
-              is.mean = mean(int.score))
+    dplyr::group_by(Var1, Source) %>%
+    dplyr::summarize(freq.mean = mean(Freq),
+                     is.mean = mean(int.score))
   
   # cast cluster membership as factors
+  df.rollMerge.sum$Var2 <- gsub("c", "", df.rollMerge.sum$Var1)
+  df.rollMerge.sum$Var2 <- factor(df.rollMerge.sum$Var2, levels = u.clusters)
   df.rollMerge.sum$Var1 <- factor(df.rollMerge.sum$Var1, levels = paste0("c", u.clusters))
+  df.rollMerge.sum$Source2 <-   gsub("c", "", df.rollMerge.sum$Source)
+  df.rollMerge.sum$Source2 <- factor(df.rollMerge.sum$Source2, levels =u.clusters)
   df.rollMerge.sum$Source <- factor(df.rollMerge.sum$Source, levels = paste0("c", u.clusters))
   
-  # generate dot plot for LR interactions
   p <- df.rollMerge.sum %>%
-    ggplot(aes(x = Var1, y = Source, size = freq.mean, fill = is.mean )) +
-    geom_point(pch=21, color = "black")  +
-    xlab("Recipient") + ylab("Source") + theme(legend.position="bottom") + 
-    viridis::scale_fill_viridis("Interaction (log)") + coord_flip()
+    ggplot(aes(x = Var2, y = Source2, fill = is.mean)) +
+    geom_tile(pch=21)  +
+    theme_miko(legend = T) + 
+    xlab("Recipient Cluster") + ylab("Source Cluster") + theme(legend.position="bottom") + 
+    viridis::scale_fill_viridis("Activity") + coord_flip() + 
+    theme(plot.title = element_text(hjust = 0.5),
+          plot.subtitle = element_text(hjust = 0.5),
+          panel.grid.major =   element_line(colour = "grey95",size=0.1)) + 
+    scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+    scale_y_discrete(guide = guide_axis(check.overlap = TRUE)) +
+    labs(size = "N Interactions (mean)")
   
   # get legend object
   p.legend <- cowplot::get_legend(p)
@@ -673,250 +1552,1276 @@ for (i in 1:length(dot.res.list)){ # for each interaction type...
   
   # generate marginal barplots (average LR interactions)
   p1 <- df.rollMerge.sum %>%
-    group_by(Var1) %>%
-    summarize(is.sum = mean(is.mean, na.rm = T),
-              is.se = sd(is.mean, na.rm = T)/ sqrt(length(is.mean))) %>%
-    ggplot(aes(x = Var1, y = is.sum)) +
-    geom_bar(stat = "identity") + xlab("") + ylab("Score") +
+    dplyr::group_by(Var2) %>%
+    dplyr::summarize(is.sum = mean(is.mean, na.rm = T),
+                     is.se = sd(is.mean, na.rm = T)/ sqrt(length(is.mean))) %>%
+    ggplot(aes(x = Var2, y = is.sum, fill= is.sum)) +
+    geom_bar(stat = "identity", color = "black") + xlab("") + ylab("Activity") +
     geom_errorbar(aes(ymin=is.sum-is.se, ymax=is.sum+is.se), width=.2,
                   position=position_dodge(.9)) + 
     coord_flip() + 
-    geom_hline(aes(yintercept = mean(is.sum)), linetype = "dashed")
+    geom_hline(aes(yintercept = mean(is.sum)), linetype = "dashed") + 
+    theme_miko(legend = F) + 
+    # scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+    scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+    viridis::scale_fill_viridis()
   
   p2 <- df.rollMerge.sum %>%
-    group_by(Source) %>%
-    summarize(is.sum = mean(is.mean, na.rm = T),
-              is.se = sd(is.mean, na.rm = T) / sqrt(length(is.mean))) %>%
-    ggplot(aes(x = Source, y = is.sum)) +
-    geom_bar(stat = "identity") + 
+    dplyr::group_by(Source2) %>%
+    dplyr::summarize(is.sum = mean(is.mean, na.rm = T),
+                     is.se = sd(is.mean, na.rm = T) / sqrt(length(is.mean))) %>%
+    ggplot(aes(x = Source2, y = is.sum, fill= is.sum)) +
+    geom_bar(stat = "identity", color = "black") + 
     geom_errorbar(aes(ymin=is.sum-is.se, ymax=is.sum+is.se), width=.2,
                   position=position_dodge(.9)) + 
-    xlab("") + ylab("Score") + 
-    geom_hline(aes(yintercept = mean(is.sum)), linetype = "dashed")
+    xlab("") + ylab("Activity") + 
+    theme_miko(legend = F) + 
+    geom_hline(aes(yintercept = mean(is.sum)), linetype = "dashed") +
+    scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+    viridis::scale_fill_viridis()
   
   # combine plots 
   p.merge <- cowplot::plot_grid(p2, NULL, p, p1 ,rel_widths = c(3,1), rel_heights = c(1,3), align = c("hv"))
   
   # add titles to plots
-  p.title <- ggplot() + labs(title = communication.name, subtitle = "marginal plots show mean interaction +/- se")
+  p.title <- ggplot() + labs(title = firstup(communication.name), 
+                             subtitle = paste0("marginal plots: mean activity\n", dot.res.list[[communication.name]][["n.pair"]], " ligand-receptor pairs"))
   p.merge.final <- cowplot::plot_grid(p.title, p.merge, p.legend, ncol = 1, rel_heights = c(0.5,5,1))
   
   # print plot (if print.inline TRUE)
-  if (print.inline) print(p.merge.final)
+  if (parameter.list$print.inline) print(p.merge.final)
   
   # store plot
   plt.agg.LR.list[[communication.name]] <- p.merge.final
   
 }
 
+# p.merge.final
+# plt.agg.LR.list
+# p.merge.final
 ```
 
 
-```{r cluster differentials, warning = FALSE, message = FALSE}
+```{r cluster-specific LR new , fig.width = 20, fig.height = 5, warning = FALSE, message = FALSE, include = FALSE}
 
-# get expression  matrix
-ef.mat <- (so.query@assays[[DefaultAssay(so.query)]]@data)
-sc.meta <- so.query@meta.data[["seurat_clusters"]]
-u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
-
-# initiate empty matrices
-f.mat <- matrix(nrow = nrow(ef.mat), ncol = length(u.clust))
-
-# get cluster-level aggregate scores
-for (i in 1:length(u.clust)){
-  which.cells <- sc.meta %in% u.clust[i]
+do.clust <- F
+if (do.clust){
   
-  n.cells.current <- sum(which.cells)
+  df.LR.cluster <- df.LR[ ,c("receptor", "ligand", "cell_from", "cell_to", "scsr.score", "sw.product")]
+  colnames(df.LR.cluster) <- c("receptor", "ligand", "cell_from", "cell_to", "a", "s")
   
-  gene.detected <- as.matrix(ef.mat[, which.cells] > 0)
-  # expressing fraction
-  if (n.cells.current == 1){
-    f1 <- 1*(gene.detected)
-  } else {
-    f1 <- rowMeans(gene.detected)
+  df.LR.cluster <- unique(df.LR.cluster)
+  
+  u.source <- unique(df.LR.cluster$cell_from)
+  u.dest <- unique(df.LR.cluster$cell_to)
+  
+  df.LR.cluster$a[is.na(df.LR.cluster$a)] <- 0
+  df.LR.cluster$s[is.na(df.LR.cluster$s)] <- 0 
+  
+  # get symbol to entrez mapping
+  my.symbol <- rownames(so.query)
+  my.entrez <- sym2entrez(my.symbol, my.species = parameter.list$species )
+  my.entrez <- my.entrez[complete.cases(my.entrez), ]
+  
+  plt.cluster.dash <- list()
+  all.lr.top <- c() # pairs to show
+  all.lr.top2 <- c() # pairs for stats
+  
+  u.source2 <- as.numeric(gsub("c", "", u.source))
+  u.source2 <- u.source2[order(u.source2)]
+  u.source <- paste0("c", u.source2)
+  
+  message(paste0("Running cluster-level analysis...")) 
+  
+  
+  iter.list <- list()
+  for (i in 1:length(u.source)){
+    
+    if ((i%%2 == 0) | (i ==length(u.source))) {
+      message(paste0("\tcluster-level analysis: ", 100*signif(i/length(u.source), 3), "%"))
+    }
+    
+    suppressWarnings({suppressMessages({
+      source.name <- u.source[i] 
+      
+      df.LR.cur.receptor <- df.LR.cluster[df.LR.cluster$cell_to %in% source.name, ] 
+      df.LR.cur.receptor$lr.pair <- paste0(df.LR.cur.receptor$ligand, "-", df.LR.cur.receptor$receptor)
+      df.LR.cur.ligand <- df.LR.cluster[df.LR.cluster$cell_from %in% source.name, ] 
+      df.LR.cur.ligand$lr.pair <- paste0(df.LR.cur.ligand$ligand, "-", df.LR.cur.ligand$receptor)
+      
+      df.LR.r.sum <- df.LR.cur.receptor %>%
+        dplyr::group_by(cell_from) %>%
+        dplyr::summarize(
+          total.a = sum(a),
+          total.s = sum(s)
+        )
+      
+      df.LR.r.sum <- df.LR.r.sum %>%
+        mutate(
+          a.scale = (total.a - median(total.a)) / mad(total.a),
+          s.scale = (total.s - median(total.s)) / mad(total.s)
+        )
+      
+      df.LR.l.sum <- df.LR.cur.ligand %>%
+        dplyr::group_by(cell_to) %>%
+        dplyr::summarize(
+          total.a = sum(a),
+          total.s = sum(s)
+        )
+      
+      df.LR.l.sum <- df.LR.l.sum %>%
+        mutate(
+          a.scale = (total.a - median(total.a)) / mad(total.a),
+          s.scale = (total.s - median(total.s)) / mad(total.s)
+        )
+      
+      
+      # get top LR pairs for visualization
+      df.LR.cur.receptor$idx <- seq(1, nrow(df.LR.cur.receptor))
+      df.LR.cur.ligand$idx <- seq(1, nrow(df.LR.cur.ligand))
+      
+      df.LR.cur.receptor$a.sig <- df.LR.cur.receptor$s.sig <- df.LR.cur.ligand$a.sig <- df.LR.cur.ligand$s.sig <- F
+      
+      df.LR.cur.receptor$a.sig <- df.LR.cur.receptor$a > 0
+      df.LR.cur.ligand$a.sig <- df.LR.cur.ligand$a > 0
+      # df.LR.cur.receptor$a.sig[unique(df.LR.cur.receptor %>% top_n(parameter.list$threshold.n, a))[ ,"idx"]] <- T
+      # df.LR.cur.receptor$s.sig[unique(df.LR.cur.receptor %>% top_n(parameter.list$threshold.n, s))[ ,"idx"]] <- T
+      # df.LR.cur.ligand$a.sig[unique(df.LR.cur.ligand %>% top_n(parameter.list$threshold.n, a))[ ,"idx"]] <- T
+      # df.LR.cur.ligand$s.sig[unique(df.LR.cur.ligand %>% top_n(parameter.list$threshold.n, s))[ ,"idx"]] <- T
+      
+      # get top percentile LR pairs for statistics
+      # df.LR.cur.receptor$a.sig2 <- df.LR.cur.receptor$a > quantile(df.LR.cur.receptor$a, parameter.list$threshold.pct)
+      # df.LR.cur.receptor$s.sig2 <- df.LR.cur.receptor$s > quantile(df.LR.cur.receptor$s, parameter.list$threshold.pct)
+      # df.LR.cur.ligand$a.sig2 <- df.LR.cur.ligand$a > quantile(df.LR.cur.ligand$a, parameter.list$threshold.pct)
+      # df.LR.cur.ligand$s.sig2 <- df.LR.cur.ligand$s > quantile(df.LR.cur.ligand$s, parameter.list$threshold.pct)   
+      
+      # LR pairs to show
+      # r.intersect <-  r.a.pair <- unique(df.LR.cur.receptor$lr.pair[df.LR.cur.receptor$a.sig])
+      r.intersect <-  r.a.pair <- unique(df.LR.cur.receptor$receptor[df.LR.cur.receptor$a.sig])
+      # r.s.pair <- unique(df.LR.cur.receptor$lr.pair[df.LR.cur.receptor$s.sig])
+      # r.intersect <- unique(c(r.a.pair, r.s.pair))
+      
+      # l.intersect <- l.a.pair <- unique(df.LR.cur.ligand$lr.pair[df.LR.cur.ligand$a.sig])
+      l.intersect <- l.a.pair <- unique(df.LR.cur.ligand$ligand[df.LR.cur.ligand$a.sig])
+      # l.s.pair <- unique(df.LR.cur.ligand$lr.pair[df.LR.cur.ligand$s.sig])
+      # l.intersect <- unique(c(l.a.pair, l.s.pair))
+      
+      # LR pairs for stats
+      # r.a.pair2 <- unique(df.LR.cur.receptor$lr.pair[df.LR.cur.receptor$a.sig2])
+      # r.s.pair2 <- unique(df.LR.cur.receptor$lr.pair[df.LR.cur.receptor$s.sig2])
+      # r.intersect2 <- unique(c(r.a.pair, r.s.pair))
+      # 
+      # l.a.pair2 <- unique(df.LR.cur.ligand$lr.pair[df.LR.cur.ligand$a.sig2])
+      # l.s.pair2 <- unique(df.LR.cur.ligand$lr.pair[df.LR.cur.ligand$s.sig2])
+      # l.intersect2 <- unique(c(l.a.pair2, l.s.pair2))
+      
+      if ((length(r.intersect) == 0) & (length(l.intersect) == 0) ) {
+        next
+      }
+      
+      #   
+      # if ((length(r.intersect) == 0) & (length(l.intersect) == 0) & (length(r.intersect2) == 0) & (length(l.intersect2) == 0)) {
+      #   next
+      # } else if ((length(r.intersect) > 0) & (length(l.intersect) > 0) & (length(r.intersect2) == 0) & (length(l.intersect2) == 0)){
+      #   r.intersect2 <- r.intersect; l.intersect2 <- l.intersect
+      # } else if ((length(r.intersect) == 0) & (length(l.intersect) == 0) & (length(r.intersect2) > 0) & (length(l.intersect2) > 0)){
+      #   r.intersect <- r.intersect2; l.intersect <- l.intersect2
+      # }
+      all.lr.top <- c(all.lr.top, l.intersect, r.intersect)
+      # all.lr.top2 <- c(all.lr.top2, l.intersect2, r.intersect2)
+      
+      # enrich top LR pairs ########################################################
+      lr.gene.list <- list(
+        ligand = l.intersect,
+        receptor = r.intersect
+      )
+      
+      # lr.gene.list2 <- list(
+      #   ligand = unlist(strsplit(l.intersect2, "-")),
+      #   receptor = unlist(strsplit(r.intersect2, "-"))
+      # )
+      # 
+      gene.uni <- unique(c(df.LR.cur.ligand$receptor, df.LR.cur.ligand$ligand))
+      
+      
+    })})
+    
+    
+    iter.list[[source.name]] <- list(
+      gene.uni = gene.uni,
+      lr.gene.list = lr.gene.list,
+      # lr.gene.list2 = lr.gene.list2,
+      df.LR.cur.ligand = df.LR.cur.ligand,
+      df.LR.cur.receptor = df.LR.cur.receptor,
+      df.LR.r.sum = df.LR.r.sum,
+      df.LR.l.sum = df.LR.l.sum
+    )
+    
   }
   
-  f.mat[ ,i] <- f1
+  
+  lr.gl <- list()
+  for (i in 1:length(iter.list)){
+    lr.gl.cur <- iter.list[[i]]$lr.gene.list
+    names(lr.gl.cur) <- paste0(names(iter.list)[i], "_", names(lr.gl.cur))
+    lr.gl <- c(lr.gl, lr.gl.cur)
+  }
+  
+  
+  ###############################
+  lr.hg.res <- runHG(gene.list = lr.gl, gene.universe = rownames(so.all), pathway.db = parameter.list$pathway.db,  species = parameter.list$species)
+  
+  lr.gl.res <- list()
+  for (i in 1:length(iter.list)){
+    cluster.name <- names(iter.list)[i]
+    lr.hg.res.cur <-  lr.hg.res[grepl(paste0(cluster.name, "_"), names(lr.hg.res))]
+    names(lr.hg.res.cur) <- gsub(paste0(cluster.name, "_"), "", names(lr.hg.res.cur))
+    lr.gl.res[[cluster.name]] <- lr.hg.res.cur
+  }
+  
+  
+  for (i in 1:length(u.source)){
+    
+    suppressWarnings({suppressMessages({
+      source.name <- u.source[i] 
+      
+      
+      lr.gl.cur <- iter.list[[source.name]]$lr.gene.list
+      n.lig <- ulength(lr.gl.cur$ligand)
+      n.rec <- ulength(lr.gl.cur$receptor)
+      
+      l.enrich <- lr.gl.res[[source.name]][["ligand"]] 
+      r.enrich <- lr.gl.res[[source.name]][["receptor"]] 
+      
+      df.LR.cur.ligand <- iter.list[[source.name]][["df.LR.cur.ligand"]]
+      df.LR.cur.receptor <- iter.list[[source.name]][["df.LR.cur.receptor"]]
+      df.LR.r.sum <- iter.list[[source.name]][["df.LR.r.sum"]]
+      df.LR.l.sum <- iter.list[[source.name]][["df.LR.l.sum"]]
+      
+      l.enrich$pathway <- gsub("_", " ", l.enrich$pathway)
+      l.enrich$pathway <- stringr::str_wrap(l.enrich$pathway, 40)
+      
+      r.enrich$pathway <- gsub("_", " ", r.enrich$pathway)
+      r.enrich$pathway <- stringr::str_wrap(r.enrich$pathway, 40)
+      
+      # if (!do.query){
+      l.enrich.top <- (l.enrich %>% dplyr::arrange(pval))[1:10]
+      l.enrich.top$LR.type <- "ligand"
+      r.enrich.top <- (r.enrich %>% dplyr::arrange(pval))[1:10]
+      r.enrich.top$LR.type <- "receptor"
+      enrich.top <- bind_rows(l.enrich.top, r.enrich.top)    
+      # } else
+      
+      
+      suppressMessages({
+        suppressWarnings({
+          enrich.top$set <- lapply(enrich.top$overlapGenes,
+                                   mapvalues,from = my.entrez$ENTREZID, to = my.entrez$SYMBOL)      
+        })
+      })
+      
+      # enrich.top$pathway <- make.unique(stringr::str_trunc(enrich.top$pathway, width = 40))
+      enrich.top <- enrich.top[,c("pathway", "pval", "padj", "overlap", "size", "set", "LR.type")]
+      enrich.top[ ,c("pval", "padj")] <- signif(enrich.top[ ,c("pval", "padj")], 3)
+      
+      
+      
+      plt.hg.lig <- enrich.top %>%
+        dplyr::filter(LR.type == "ligand") %>%
+        ggplot(aes( y = reorder(pathway, -log10(pval)))) +
+        geom_bar(aes(x = -log10(pval), fill = -log10(pval)), stat = "identity") + 
+        geom_point(aes(x = -log10(padj), fill = -log10(padj)), pch=21) +
+        geom_vline(xintercept = -log10(0.05), linetype = "dashed") + 
+        theme_miko(legend = T, center.title = T) + 
+        xlab("-log(p)") + ylab("") +
+        labs(title = "'Incoming' Signal", subtitle = paste0(source.name), fill = "-log(p)", 
+             size =  "-log(p)", caption = "bar = p, point = FDR, dashed line = 5% threshold") +
+        viridis::scale_fill_viridis(option ="B") +
+        theme(axis.text.y = element_text(size=7)) + 
+        theme(legend.position = "bottom")
+      
+      
+      plt.hg.rec <- enrich.top %>%
+        dplyr::filter(LR.type == "receptor") %>%
+        ggplot(aes( y = reorder(pathway, -log10(pval)))) +
+        geom_bar(aes(x = -log10(pval), fill = -log10(pval)), stat = "identity") + 
+        geom_point(aes(x = -log10(padj), fill = -log10(padj)), pch=21) +
+        geom_vline(xintercept = -log10(0.05), linetype = "dashed") + 
+        theme_miko(legend = T, center.title = T) + 
+        xlab("-log(p)") + ylab("") +
+        labs(title = "'Outgoing' Signal", fill = "-log(p)", subtitle = paste0(source.name),
+             size =  "-log(p)", caption = "bar = p, point = FDR, dashed line = 5% threshold") +
+        viridis::scale_fill_viridis(option ="B") +
+        theme(axis.text.y = element_text(size=7)) + 
+        theme(legend.position = "bottom")
+      
+      
+      
+      
+      
+      ### heatmaps = LiGAND ########################################################
+      # df.LR.cur.ligand$clust <- as.numeric(gsub("c", "", df.LR.cur.ligand$cell_from))
+      # u.c <- unique(df.LR.cur.ligand$clust); u.c <- u.c[order(u.c)]
+      # df.LR.cur.ligand$clust <- factor(df.LR.cur.ligand$clust, levels = u.c)
+      # 
+      # df.LR.cur.lig2a <- df.LR.cur.ligand[ ,c("lr.pair", "clust", "s")]
+      # colnames(df.LR.cur.lig2a) <- c("lr.pair", "clust", "score")
+      # df.LR.cur.lig2a$interaction <- "specificity"
+      # df.LR.cur.lig2b <- df.LR.cur.ligand[ ,c("lr.pair", "clust", "a")]
+      # colnames(df.LR.cur.lig2b) <- c("lr.pair", "clust", "score")
+      # df.LR.cur.lig2b$interaction <- "activity"
+      # df.LR.cur.lig2 <- bind_rows(df.LR.cur.lig2a, df.LR.cur.lig2b)
+      # df.LR.cur.lig2 <- df.LR.cur.lig2 %>% dplyr::filter(lr.pair %in% l.intersect)
+      # df.LR.cur.lig2$score[df.LR.cur.lig2$interaction %in% "specificity"] <-  max(df.LR.cur.lig2$score[df.LR.cur.lig2$interaction %in% "activity"]) * df.LR.cur.lig2$score[df.LR.cur.lig2$interaction %in% "specificity"]/max(df.LR.cur.lig2$score[df.LR.cur.lig2$interaction %in% "specificity"])
+      # 
+      # pl.all <- NULL
+      # if (nrow(df.LR.cur.lig2) > 0){
+      #   pl.all <- df.LR.cur.ligand %>%
+      #     dplyr::filter(lr.pair %in% l.intersect) %>%
+      #     ggplot(aes(x = lr.pair, y = clust, fill = a, size =s)) + 
+      #     geom_point(color = "black", pch = 21) + 
+      #     theme_miko(legend = T, center.title = T) + 
+      #     viridis::scale_fill_viridis() + viridis::scale_fill_viridis() +
+      #     theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+      #     scale_y_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+      #     ylab("Receptor-Expressing Cluster")  + xlab("Ligand-Receptor Pair") + 
+      #     # facet_wrap(~interaction) + 
+      #     labs(caption = paste0("Top N pairs shown (activity + specificity)"),  title = "'Incoming' Signals", 
+      #          subtitle = paste0(source.name, " is the receptor-expressing cluster"),
+      #          fill = "Activity", size = "Specificity") + theme(legend.position="bottom",  panel.grid.major =   element_line(colour = "grey95",size=0.1))
+      # }
+      # 
+      
+      
+      ### heatmaps = RECEPTOR ######################################################
+      
+      # df.LR.cur.receptor$clust <- as.numeric(gsub("c", "", df.LR.cur.receptor$cell_to))
+      # u.c <- unique(df.LR.cur.receptor$clust); u.c <- u.c[order(u.c)]
+      # df.LR.cur.receptor$clust <- factor(df.LR.cur.receptor$clust, levels = u.c)
+      # 
+      # df.LR.cur.receptor2a <- df.LR.cur.receptor[ ,c("lr.pair", "clust", "s")]
+      # colnames(df.LR.cur.receptor2a) <- c("lr.pair", "clust", "score")
+      # df.LR.cur.receptor2a$interaction <- "specificity"
+      # df.LR.cur.receptor2b <- df.LR.cur.receptor[ ,c("lr.pair", "clust", "a")]
+      # colnames(df.LR.cur.receptor2b) <- c("lr.pair", "clust", "score")
+      # df.LR.cur.receptor2b$interaction <- "activity"
+      # df.LR.cur.receptor2 <- bind_rows(df.LR.cur.receptor2a, df.LR.cur.receptor2b)
+      # df.LR.cur.receptor2 <- df.LR.cur.receptor2 %>% dplyr::filter(lr.pair %in% r.intersect)
+      # df.LR.cur.receptor2$score[df.LR.cur.receptor2$interaction %in% "specificity"] <-  max(df.LR.cur.receptor2$score[df.LR.cur.receptor2$interaction %in% "activity"]) * df.LR.cur.receptor2$score[df.LR.cur.receptor2$interaction %in% "specificity"]/max(df.LR.cur.receptor2$score[df.LR.cur.receptor2$interaction %in% "specificity"])
+      
+      # pr.all <- NULL
+      # if (nrow(df.LR.cur.receptor) > 0){
+      #   pr.all <- df.LR.cur.receptor %>%
+      #     dplyr::filter(lr.pair %in% r.intersect) %>%
+      #     ggplot(aes(x = lr.pair, y = clust, fill = a, size =s)) + 
+      #     geom_point(color = "black", pch = 21) + 
+      #     theme_miko(legend = T, center.title = T) + 
+      #     viridis::scale_color_viridis() + viridis::scale_fill_viridis() +
+      #     theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+      #     scale_y_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+      #     ylab("Ligand-Expressing Cluster")  + xlab("Ligand-Receptor Pair") + 
+      #     labs(caption = paste0("Top N pairs shown (activity + specificity)"),  title = "'Outgoing' Signals", 
+      #          subtitle = paste0(source.name, " is the ligand-expressing cluster"),
+      #          fill = "Activity", size = "Specificity") + theme(legend.position="bottom",  
+      #                                                            panel.grid.major =   element_line(colour = "grey95",size=0.1))
+      # }
+      
+      
+      plt.rs <- df.LR.r.sum %>%
+        ggplot(aes(x = a.scale, y = s.scale, label = cell_from)) + 
+        geom_hline(yintercept = 0, color = "grey") + 
+        geom_vline(xintercept = 0, color = "grey") + 
+        geom_text() + 
+        theme_miko(center.title = T) + 
+        xlab("Cluster Interaction Activity") + 
+        ylab("Cluster Interaction Specificity") + 
+        labs(title = "'Outgoing' Signal'", subtitle = paste0(source.name, " expresses the ligand (", n.lig, " active ligands)"))
+      
+      plt.ls <-  df.LR.l.sum %>%
+        ggplot(aes(x = a.scale, y = s.scale, label = cell_to)) + 
+        geom_hline(yintercept = 0, color = "grey") + 
+        geom_vline(xintercept = 0, color = "grey") + 
+        geom_text() + 
+        theme_miko(center.title = T) + 
+        xlab("Cluster Interaction Activity") + 
+        ylab("Cluster Interaction Specificity") + 
+        labs(title = "'Incoming' Signal", subtitle = paste0(source.name, " expresses the receptor (", n.rec, " active receptors)")) 
+      
+      ptop.clust <- cowplot::plot_grid(plt.ls, plt.rs, ncol = 2)
+      
+      
+      plt.enrich.all <- cowplot::plot_grid(plt.hg.lig, plt.hg.rec, rel_widths =  c(1, 1), ncol = 2)
+      plt.all.left <- cowplot::plot_grid(ptop.clust, plt.enrich.all, rel_widths =  c(1, 1), ncol = 2, labels = c("A", "B"))
+      # plr.all <- cowplot::plot_grid(pl.all, pr.all, labels = c("C", "D"))
+      plt.cluster.dash[[source.name]] <- plt.all.left
+      # plt.cluster.dash[[source.name]] <- cowplot::plot_grid(plt.all.left, plr.all, rel_heights  =  c(1, 2.5), ncol = 1,align = "h")
+      
+      
+    })})
+    
+  }
+  
+  # plt.cluster.dash[[source.name]]
+  # plt.cluster.dash
+  
+  df.lr.tally <- data.frame(table(all.lr.top))
+  
+  # 
+  # plt.cluster.dash[[source.name]]
+  #  
+  # plt.cluster.dash
+  
+  
 }
-
-rm(f1); invisible({gc()})
-
-# assign col and row names
-colnames(f.mat) <-   u.clust
-rownames(f.mat) <-   rownames(ef.mat)
-
-# cast to data.frame
-df.f.wide <- data.frame(gene = rownames(ef.mat), as.data.frame(f.mat)); colnames(df.f.wide) <- c("gene", u.clust)
-
-# wide to long
-df.f.long <- pivot_longer(df.f.wide, colnames(df.f.wide)[2:ncol(df.f.wide)])
-
-# assign col names to long dataframe
-colnames(df.f.long) <- c("gene", "cluster", "value")
-
-# ensure clusters are ordered factors
-df.f.long$cluster <- factor(df.f.long$cluster, levels = u.clust)
-
-# clear baggage
-rm(ef.mat); invisible({gc()})
 
 ```
 
-```{r, fig.width = 15, fig.height=5, warning = FALSE, message = FALSE, include = FALSE}
+
+```{r interaction matrix helper function}
+
+# df.imat.cur <- df.imat %>% dplyr::filter(module == module.name)
+
+
+interactionMatrix <- function(dat){
+  p <- dat %>%
+    ggplot(aes(x = R.clust , y = L.clust, fill = interaction)) +
+    geom_tile(pch=21)  +
+    theme_miko(legend = T) + 
+    xlab("Recipient Cluster") + ylab("Source Cluster") + theme(legend.position="bottom") + 
+    viridis::scale_fill_viridis("Activity") + coord_flip() + 
+    theme(plot.title = element_text(hjust = 0.5),
+          plot.subtitle = element_text(hjust = 0.5),
+          panel.grid.major =   element_line(colour = "grey95",size=0.1)) + 
+    scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+    scale_y_discrete(guide = guide_axis(check.overlap = TRUE)) 
+  # labs(size = "N Interactions (mean)")
+  
+  # get legend object
+  p.legend <- cowplot::get_legend(p)
+  
+  # clear legend from plot
+  p <- p+ theme(legend.position="none")
+  
+  # generate marginal barplots (average LR interactions)
+  p1 <- dat %>%
+    dplyr::group_by(R.clust) %>%
+    dplyr::summarize(is.sum = mean(interaction, na.rm = T),
+                     is.se = sd(interaction, na.rm = T)/ sqrt(length(interaction))) %>%
+    ggplot(aes(x = R.clust, y = is.sum, fill= is.sum)) +
+    geom_bar(stat = "identity", color = "black") + xlab("") + ylab("Activity") +
+    geom_errorbar(aes(ymin=is.sum-is.se, ymax=is.sum+is.se), width=.2,
+                  position=position_dodge(.9)) + 
+    coord_flip() + 
+    geom_hline(aes(yintercept = mean(is.sum)), linetype = "dashed") + 
+    theme_miko(legend = F) + 
+    # scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+    scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+    viridis::scale_fill_viridis()
+  
+  p2 <- dat %>%
+    dplyr::group_by(L.clust) %>%
+    dplyr::summarize(is.sum = mean(interaction, na.rm = T),
+                     is.se = sd(interaction, na.rm = T) / sqrt(length(interaction))) %>%
+    ggplot(aes(x = L.clust, y = is.sum, fill= is.sum)) +
+    geom_bar(stat = "identity", color = "black") + 
+    geom_errorbar(aes(ymin=is.sum-is.se, ymax=is.sum+is.se), width=.2,
+                  position=position_dodge(.9)) + 
+    xlab("") + ylab("Activity") + 
+    theme_miko(legend = F) + 
+    geom_hline(aes(yintercept = mean(is.sum)), linetype = "dashed") +
+    scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+    viridis::scale_fill_viridis()
+  
+  # combine plots 
+  p.merge <- cowplot::plot_grid(p2, NULL, p, p1 ,rel_widths = c(3,1), rel_heights = c(1,3), align = c("hv"))
+  
+  # add titles to plots
+  p.title <- ggplot() + labs(title = "Cluster Interaction Matrix") + theme( plot.title = element_text(face = "bold")) +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    theme(plot.subtitle = element_text(hjust = 0.5))
+  # subtitle = paste0("marginal plots: mean activity"))
+  p.merge.final <- cowplot::plot_grid(p.title, p.merge, p.legend, ncol = 1, rel_heights = c(0.5,5,1))
+  return(p.merge.final)
+}
+
+
+
+```
+
+```{r LR network, fig.width=20, fig.height=5, include = FALSE}
+
+suppressWarnings({
+  suppressMessages({
+    
+    
+    df.LR.cluster <- df.LR[ ,c("receptor", "ligand", "cell_from", "cell_to", "scsr.score", "sw.product")]
+    colnames(df.LR.cluster) <- c("receptor", "ligand", "cell_from", "cell_to", "a", "s")
+    df.LR.cluster <- unique(df.LR.cluster)
+    u.source <- unique(df.LR.cluster$cell_from)
+    u.dest <- unique(df.LR.cluster$cell_to)
+    df.LR.cluster$a[is.na(df.LR.cluster$a)] <- 0
+    df.LR.cluster$s[is.na(df.LR.cluster$s)] <- 0 
+    
+    df.LR.cluster$LR_pair <- paste0(df.LR.cluster$ligand, "_", df.LR.cluster$receptor)
+    df.LR.cluster$cluster_pair <- paste0(df.LR.cluster$cell_from, "_", df.LR.cluster$cell_to)
+    df.LR.cluster2 <- df.LR.cluster[ ,c("LR_pair", "cluster_pair", "a")]
+    df.LR.cluster2.wide <- pivot_wider(df.LR.cluster2, names_from = "LR_pair", values_from = "a")
+    df.LR.cluster2.wide <- col2rowname(df.LR.cluster2.wide, "cluster_pair")
+    
+    # create UMAP
+    so.lr <- CreateSeuratObject(cor(df.LR.cluster2.wide, method = "spearman"))
+    so.lr <- ScaleData(so.lr, do.scale = F, do.center = F, verbose = F)
+    so.lr <- RunPCA(so.lr, features = rownames(so.lr), verbose = F)
+    so.lr <- RunUMAP(so.lr, dims = 1:30, verbose = F)
+    so.lr <- FindNeighbors(so.lr, verbose = F)
+    so.lr <- FindClusters(so.lr, resolution = 2, verbose = F)
+    
+    # get connectivitiy
+    snn.graph <- as.matrix(so.lr@graphs[["RNA_snn"]])
+    
+    df.connectivity <- getConnectivity(snn.graph, rownames(snn.graph))
+    
+    graph.threshold <- quantile(snn.graph[snn.graph > 0], 0.85)
+    df.graph.edges <- NULL
+    
+    knn.weights <- apply(snn.graph, 2, function(x) x[x>=graph.threshold])
+    df.kw <- bind_rows(knn.weights)
+    df.kw <- as.data.frame(df.kw)
+    rownames(df.kw) <- names(knn.weights)
+    df.kw.col <- colnames(df.kw)
+    df.kw$start <- names(knn.weights)
+    df.graph.edges <- pivot_longer(df.kw, cols = df.kw.col)
+    df.graph.edges <- df.graph.edges[complete.cases(df.graph.edges), ]
+    colnames(df.graph.edges) <- c("end", "start", "weights")
+    
+    snnUMAP.list <- getUMAP(so.lr, umap.key = "umap", node.type = "text")
+    
+    df.snn.umap <- snnUMAP.list$df.umap
+    df.snn.umap.x <- df.snn.umap
+    colnames(df.snn.umap.x) <- c("x.start", "y.start", "start", "cluster")
+    df.snn.umap.y <- df.snn.umap
+    colnames(df.snn.umap.y) <- c("x.end", "y.end", "end", "cluster")
+    df.ux <- merge(df.graph.edges, df.snn.umap.x, by = "start")
+    df.uy <- merge(df.graph.edges, df.snn.umap.y, by = "end")
+    df.umap.merge <- merge(df.ux, df.uy, by = c("start", "end"))
+    
+    df.snn.umap$genes <- df.snn.umap$var
+    df.snn.umap <- merge(df.snn.umap, df.connectivity, by = "genes")
+    
+    
+    # generate connectivity plots
+    plt.lr.connectivitiy <- ggplot() + 
+      ggrastr::rasterise(geom_segment(data =df.umap.merge, aes(x = x.start, y = y.start,
+                                                               xend = x.end, yend= y.end,
+      ), color = "black", alpha = 0.015), dpi = 700)  +
+      theme_miko(legend = T) +
+      theme(
+        panel.border = element_blank(),
+        axis.text = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank()
+      ) + xlab("") + ylab("") 
+    
+    df.lr.umap <- getUMAP(so.lr)[["df.umap"]]
+    
+    df.lr.umap.center <- df.lr.umap %>%
+      dplyr::group_by(seurat_clusters) %>%
+      dplyr::summarize(x.mean = median(x, na.rm = T),
+                       y.mean = median(y, na.rm = T))
+    plt.lr.network <-  plt.lr.connectivitiy + 
+      geom_point(data = df.lr.umap, aes(x = x, y = y, color = seurat_clusters)) + 
+      geom_text(data = df.lr.umap.center, aes(x = x.mean, y = y.mean, label = seurat_clusters), size = 5) + 
+      theme_miko(legend = F) + 
+      theme_void()  + 
+      labs(x = "UMAP 1", y = "UMAP 2", color = "LR Cluster", title = "LR Similarity Network", subtitle = "nodes: LR pairs, links: similarity") + 
+      theme(legend.position = "none")  +
+      theme(plot.title = element_text(hjust = 0.5)) +
+      theme(plot.subtitle = element_text(hjust = 0.5)) + 
+      theme( plot.title = element_text(face = "bold"))
+    
+    # get LR modules
+    u.clust <- unique(df.lr.umap$seurat_clusters)
+    lr.gene.list <- list()
+    lr.gene.list2 <- list()
+    for(i in 1:length(u.clust)){
+      
+      df.lr.umap.cur <- df.lr.umap %>% dplyr::filter(seurat_clusters %in% u.clust[i])
+      
+      lr.split <- strsplit(df.lr.umap.cur$var, "_")
+      lig <- unlist(lapply(lr.split, function(x) x[1]))
+      rec <- unlist(lapply(lr.split, function(x) x[2]))
+      
+      lr.gene.list[[paste0("m",u.clust[i], "_Ligands" )]] <- unique(lig)
+      lr.gene.list[[paste0("m",u.clust[i], "_Receptors" )]] <- unique(rec)
+      lr.gene.list2[[paste0("m",u.clust[i])]] <- unique(c(lig, rec))
+      
+    }
+    lr.gene.list2 <- lr.gene.list2[order(as.numeric(as.character(gsub("m", "", names(lr.gene.list2)))))]
+    
+    # get activity scores
+    if (ncol(so.all) > 70000) {
+      do.raster <- T
+      do.size <- 1
+    } else {
+      do.raster <- F
+      do.size <- autoPointSize(ncol(so.all))
+    }
+    lr.ms <- runMS(object = so.all, genelist = lr.gene.list, raster = do.raster, size =do.size)
+    
+    # run enrichments
+    col.pal <- scales::hue_pal()(length(lr.gene.list2))  
+    names(col.pal) <- names(lr.gene.list2)
+    lr.hg <- runHG(gene.list = lr.gene.list2, gene.universe = rownames(so.all), species = parameter.list$species)
+    lr.hg.sum <- summarizeHG(lr.hg, show.n = 10, col.pal = col.pal)
+    
+    # consolidate results
+    df.lr.ms <- lr.ms$data
+    df.lr.ms$cluster <- so.all@meta.data$seurat_clusters
+    
+    df.lr.ms2 <- df.lr.ms[ ,c("cluster", names(lr.gene.list))]
+    df.lr.ms2.long <- pivot_longer(df.lr.ms2, cols = names(lr.gene.list))
+    df.lr.ms2.sum <- df.lr.ms2.long %>%
+      dplyr::group_by(cluster, name) %>%
+      dplyr::summarize(x = mean(value))
+    
+    df.lr.ms2.sum$type <- NA
+    df.lr.ms2.sum$type[grepl("Ligands", df.lr.ms2.sum$name)] <- "Ligands"
+    df.lr.ms2.sum$type[grepl( "Receptors", df.lr.ms2.sum$name)] <- "Receptors"
+    df.lr.ms2.sum$module <- stringr::str_extract(df.lr.ms2.sum$name, "m[0-9]*")
+    
+    df.lr.ms2.sum.wide <- pivot_wider(df.lr.ms2.sum %>% dplyr::select(-c("name")), names_from = "type", values_from = "x")
+    df.lr.ms2.sum.wide <- df.lr.ms2.sum.wide %>%
+      dplyr::group_by(module) %>%
+      dplyr::mutate(L.norm = rescale(Ligands),
+                    R.norm = rescale(Receptors))
+    
+    df.lr.ms2.sum.wide$activity <- df.lr.ms2.sum.wide$L.norm * df.lr.ms2.sum.wide$R.norm
+    df.lr.ms2.sum.long <- pivot_longer(df.lr.ms2.sum.wide, cols = c("L.norm", "R.norm"))
+    df.imat <- NULL
+    u.clust <- unique(df.lr.ms2.sum.wide$cluster)
+    u.mod <- unique(df.lr.ms2.sum.wide$module)
+    for (i in 1:length(u.mod)){
+      
+      df.lr.ms2.cur <- df.lr.ms2.sum.wide %>% dplyr::filter(module == u.mod[i])
+      
+      for (k in 1:nrow(df.lr.ms2.cur)){
+        
+        df.imat <- bind_rows(df.imat,
+                             data.frame(
+                               module  = u.mod[i],
+                               L.clust = df.lr.ms2.cur$cluster,
+                               R.clust = df.lr.ms2.cur$cluster[k],
+                               L.score = df.lr.ms2.cur$L.norm,
+                               R.score = df.lr.ms2.cur$R.norm[k],
+                               interaction = df.lr.ms2.cur$L.norm * df.lr.ms2.cur$R.norm[k]
+                             )
+        )
+        
+        
+      }
+      
+    }
+    
+    
+    df.imat$pair <- seq(1,nrow(df.imat))
+    df.imat.long <- pivot_longer(df.imat, cols = c("L.clust", "R.clust"))
+    df.imat.long$cluster <- as.character(df.imat.long$value)
+    
+    df.imat.long$LR <- NA
+    df.imat.long$LR[grepl("L", df.imat.long$name)] <- "Ligand"
+    df.imat.long$LR[grepl("R", df.imat.long$name)] <- "Receptor"
+    df.lr.ms2.sum.long$LR <- NA
+    df.lr.ms2.sum.long$LR[grepl("L", df.lr.ms2.sum.long$name)] <- "Ligand"
+    df.lr.ms2.sum.long$LR[grepl("R", df.lr.ms2.sum.long$name)] <- "Receptor"
+    
+    df.imat.long2 <- df.imat.long %>% dplyr::filter(interaction > 0)
+    
+    df.imat.long2$cluster <- orderedFactor(df.imat.long2$cluster )
+    df.lr.ms2.sum.long$cluster <- orderedFactor(df.lr.ms2.sum.long$cluster )
+    
+    p.net.list <- list()
+    for (i in 1:length(lr.gene.list2)){
+      module.name <- names(lr.gene.list2)[i]
+      module.id <- as.numeric(as.character(gsub("m", "", module.name)))
+      
+      df.lr.umap.cur <-  df.lr.umap %>% dplyr::filter(seurat_clusters == module.id)
+      
+      p1 <-plt.lr.connectivitiy + 
+        geom_point(data = df.lr.umap.cur, aes(x = x, y = y, color = seurat_clusters)) + 
+        ggrepel::geom_text_repel(data = df.lr.umap.cur, aes(x = x, y = y, label = var), size = 3) + 
+        scale_color_manual(values = as.vector(col.pal)[i]) + 
+        theme_miko(legend = F) + 
+        theme_void()  + 
+        labs(x = "UMAP 1", y = "UMAP 2", color = "LR Cluster") + theme(legend.position = "none")
+      
+      p2 <- lr.hg.sum$plots[[module.name]] + 
+        labs(title = "Connectivity Module Enrichment") 
+      
+      df.lr.ms2.sum.long.cur <- df.lr.ms2.sum.long %>% dplyr::filter(module == module.name )
+      df.imat.long2.cur <- df.imat.long2 %>% dplyr::filter(module == module.name ) 
+      p3 <- df.lr.ms2.sum.long.cur %>%
+        ggplot() +
+        
+        geom_line(data = df.imat.long2.cur, aes(x = (LR), y = cluster, group = pair, alpha = interaction, color = interaction)) +
+        geom_point(aes(x = LR, y = cluster, size = value, color = value)) +
+        facet_wrap(~module) +
+        theme_miko(legend = T) +
+        scale_alpha(range = c(0,1)) +
+        labs(color = "Line: Interaction\nDot: Activity", size = "Activity", alpha = "Interaction", y = "Cell Cluster",
+             caption = "Interaction  = L x R activity\nActivity = Connectivity module score", x = NULL,
+             title = "Cluster Interactions", subtitle = "activity & interaction scores") +
+        scale_color_gradient2(high = scales::muted("red"), low = scales::muted("blue")) + theme(
+          panel.grid.major =   element_line(colour = "grey95",size=0.1)) + 
+        scale_y_discrete(guide = guide_axis(check.overlap = TRUE)) 
+      
+      
+      p4.list <- lr.ms$plot.list[grepl(paste0(module.name, "_"), names(lr.ms$plot.list))]
+      p4.list <- lapply(p4.list, function(x)  x + labs(subtitle = NULL, color = "Activity") + theme(legend.position = "none"))
+      p4 <- cowplot::plot_grid(plotlist = p4.list, ncol = 1)
+      
+      df.imat.cur <- df.imat %>% dplyr::filter(module == module.name)
+      
+      suppressMessages({suppressWarnings({
+        p.im <- interactionMatrix(df.imat.cur)
+      })})
+      
+      
+      p.net <- cowplot::plot_grid(p1, p2,p3, p.im, p4, nrow = 1, labels = c("E", "F", "G", "H", "I"), 
+                                  rel_widths = c(1,1,0.7,1,0.5), align = "h")
+      p.net.list[[module.name]] <- p.net
+    }
+    
+  })
+})
+# p.net.list
+# p.net
+
+
+```
+
+
+
+
+
+```{r network module heatmap, fig.width=20, fig.height=5, include = FALSE}
+
+# df.lr.ms2.sum.wide
+
+df.l.hm <- pivot_wider(df.lr.ms2.sum.wide[ ,c("cluster", "module", "L.norm")], names_from = "module", values_from = "L.norm")
+df.l.hm$cluster <- paste0("c", df.l.hm$cluster)
+df.l.hm <- col2rowname(df.l.hm, "cluster")
+df.r.hm <- pivot_wider(df.lr.ms2.sum.wide[ ,c("cluster", "module", "R.norm")], names_from = "module", values_from = "R.norm")
+df.r.hm$cluster <- paste0("c", df.r.hm$cluster)
+df.r.hm <- col2rowname(df.r.hm, "cluster")
+
+colnames(df.lr.ms2.sum.wide)
+
+
+plt.l.hm <- ggplotify::as.ggplot(pheatmap::pheatmap(df.l.hm, silent = T,
+                                                    color  = Seurat::CustomPalette(low = "white", high = scales::muted("red"), mid = NULL, k = 50))) + 
+  labs(title = "Ligand Meta-Activitiy", subtitle = "x = connectivity modules, y = cell clusters, z = activity score") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(plot.subtitle = element_text(hjust = 0.5)) + 
+  theme( plot.title = element_text(face = "bold"))
+plt.r.hm <- ggplotify::as.ggplot(pheatmap::pheatmap(df.r.hm, silent = T,
+                                                    color  = Seurat::CustomPalette(low = "white", high = scales::muted("blue"), mid = NULL, k = 50))) + 
+  labs(title = "Receptor Meta-Activitiy", subtitle = "x = connectivity modules, y = cell clusters, z = activity score") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(plot.subtitle = element_text(hjust = 0.5)) + 
+  theme( plot.title = element_text(face = "bold"))
+
+
+plt.umap.clust <- cluster.UMAP(so.query) + theme_miko(legend = F) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(plot.subtitle = element_text(hjust = 0.5)) + 
+  theme( plot.title = element_text(face = "bold")) + 
+  labs( title = "Cellular UMAP", subtitle = "stratified by cell clusters")
+
+plt.lr.net.overall <- cowplot::plot_grid(plt.umap.clust,  plt.lr.network, plt.l.hm, plt.r.hm, nrow = 1, labels = "AUTO") 
+
+
+
+# prep table for output
+df.lr.umap.final <- df.lr.umap
+lr.split <- strsplit(df.lr.umap.final$var, "_")
+df.lr.umap.final$Ligand <- unlist(lapply(lr.split, function(x) x[[1]]))
+df.lr.umap.final$Receptor <- unlist(lapply(lr.split, function(x) x[[2]]))
+df.lr.umap.final$umap.x <- df.lr.umap.final$x
+df.lr.umap.final$umap.y <- df.lr.umap.final$y
+df.lr.umap.final$Module <- paste0("m", df.lr.umap.final$seurat_clusters)
+df.lr.umap.final <- df.lr.umap.final[, c("Ligand", "Receptor", "umap.x", "umap.y", "Module")]
+
+```
+
+
+```{r score LR pairs, fig.height = 10, fig.width=14, include = FALSE}
+
+message("Computing aggregate activity and specificity scores...")
+
+u.LR <- unique(df.LR$LR.pair)
+n.cluster <- length(unique(so.query@meta.data[["seurat_clusters"]]))
+
+
+df.LR$ligand <- gene2species(df.LR$ligand, parameter.list$species)
+df.LR$receptor <- gene2species(df.LR$receptor, parameter.list$species)
+df.ap <- NULL
+for (i in 1:length(u.LR)){
+  
+  
+  if ((i%%5 == 0) | (i == length(u.LR))) {
+    message(paste0("\tScoring progress: ", 100*signif(i/length(u.LR), 3), "%"))
+  }
+  
+  LR.split <- strsplit(u.LR[i], "-")
+  lig <- LR.split[[1]][1]
+  rec <- LR.split[[1]][2]
+  if (lig == rec) next
+  
+  df.lr.cur <- df.LR %>% dplyr::filter(ligand == gene2species(lig, parameter.list$species),
+                                       receptor == gene2species(rec, parameter.list$species)) 
+  df.lr.cur$scsr.score[is.na(df.lr.cur$scsr.score)] <- 0
+  df.lr.cur$sw.product[is.na(df.lr.cur$sw.product)] <- 0
+  
+  
+  p <- df.lr.cur$sw.product 
+  p <- p/sum(p)
+  gini <- 100*signif(ineq::ineq(x = p, type = "Gini"), 3)
+  a <- 100*signif(sum(df.lr.cur$scsr.score, na.rm = T)/ (n.cluster*n.cluster), 2)
+  
+  df.ap <- bind_rows(df.ap, 
+                     data.frame(
+                       ligand = lig,
+                       receptor = rec,
+                       activity = a,
+                       specificity = gini
+                     ))
+  
+}
+
+df.ap$LR.pair <- paste0(df.ap$ligand, " : ", df.ap$receptor)
+# plt.act.spec <- df.ap %>%
+#   ggplot(aes(x = activity, y = specificity, label = LR.pair)) +
+#   geom_hline(yintercept = 50, color = "grey80") + 
+#   geom_vline(xintercept = 50, color = "grey80") + 
+#   geom_point() + 
+#   # ggiraph::geom_text_interactive(size = 2) + 
+#   ggrepel::geom_text_repel(size = 2) +
+#   xlab("Global Activity (%max)") + 
+#   ylab("Specificity (Gini Index)") + 
+#   theme_miko() + 
+#   labs(title = "Activity and Specificity", captions = "Specific Interaction: Giti index = 100\nNon-specific Interaction: Giti index = 0") 
+# 
+# if (parameter.list$print.inline){
+#   print(plt.act.spec)
+# }
+
+
+# define quantiles (for classification)
+lower.quant <- 0.25
+activity.quantiles <- quantile(df.ap$activity, probs = c(lower.quant, 1-lower.quant), na.rm = T)
+specificity.quantiles <- quantile(df.ap$specificity, probs = c(lower.quant, 1-lower.quant), na.rm = T)
+
+df.ap$a.percentile <- 100*signif(rank(df.ap$activity)/nrow(df.ap), 3)
+df.ap$s.percentile <- 100*signif(rank(df.ap$specificity)/nrow(df.ap), 3)
+
+# Score set 1 ##################################################################
+do.p <- F
+if (do.p){
+  
+  set2.sign <- 1  # 1
+  set1.sign <- 1  # -1
+  
+  sign.multiplier <- 1*(df.ap$activity > df.ap$specificity)
+  sign.multiplier[sign.multiplier == 0] <- -1
+  sign.multiplier[(1*(df.ap$activity > df.ap$specificity)) == 0] <- set2.sign
+  sign.multiplier[(1*(df.ap$activity > df.ap$specificity)) == 1] <- set1.sign
+  
+  # proj scores onto point on line
+  for (i in 1:nrow(df.ap)){
+    if (set1.sign == set2.sign){
+      cur.proj <- mosaic::project(x = c(df.ap$activity[i], df.ap$specificity[i]), u =c(1,1))
+    } else if (set2.sign > set1.sign){
+      cur.proj <- mosaic::project(x = c(df.ap$activity[i], df.ap$specificity[i]), u =c(1,-1))
+    } else if (set1.sign > set2.sign){
+      cur.proj <- mosaic::project(x = c(df.ap$activity[i], df.ap$specificity[i]), u =c(1,-1))
+    }
+    #cur.proj <- mosaic::project(x = c(df.bk.gsva.score$y1[i], df.bk.gsva.score$y2[i]), u =c(1,-1))
+    
+    df.ap$proj.x.ne[i] <- cur.proj[1] #+50
+    df.ap$proj.y.ne[i] <- cur.proj[2] #+50
+  }
+  
+  # get distance of point from origin
+  df.ap$score.ne <- sqrt(df.ap$proj.x.ne^2  + df.ap$proj.y.ne^2)* sign.multiplier
+  
+  
+  plt.project.1 <-  df.ap %>%
+    ggplot() +
+    geom_hline(yintercept = 50, color = "grey80") + 
+    geom_vline(xintercept = 50, color = "grey80") + 
+    geom_segment(aes(x = activity, y = specificity, xend = proj.x.ne, yend = proj.y.ne),color = "grey80") + 
+    geom_point(aes(x = activity, y = specificity, label = LR.pair)) + 
+    geom_point(aes(x = proj.x.ne, y = proj.y.ne, label = LR.pair), color = "red") + 
+    xlab("Global Activity (%max)") + 
+    ylab("Specificity (Gini Index)") + 
+    theme_miko() + 
+    labs(title = "Activity and Specificity")
+  
+  
+  # Score set 2 ##################################################################
+  
+  set2.sign <- 1  # 1
+  set1.sign <- -1  # -1
+  
+  sign.multiplier <- 1*(df.ap$activity > df.ap$specificity)
+  sign.multiplier[sign.multiplier == 0] <- -1
+  sign.multiplier[(1*(df.ap$activity > df.ap$specificity)) == 0] <- set2.sign
+  sign.multiplier[(1*(df.ap$activity > df.ap$specificity)) == 1] <- set1.sign
+  
+  # proj scores onto point on line
+  for (i in 1:nrow(df.ap)){
+    if (set1.sign == set2.sign){
+      cur.proj <- mosaic::project(x = c(df.ap$activity[i], df.ap$specificity[i]), u =c(1,1))
+    } else if (set2.sign > set1.sign){
+      cur.proj <- mosaic::project(x = c(df.ap$activity[i], df.ap$specificity[i]), u =c(1,-1))
+    } else if (set1.sign > set2.sign){
+      cur.proj <- mosaic::project(x = c(df.ap$activity[i], df.ap$specificity[i]), u =c(1,-1))
+    }
+    
+    df.ap$proj.x.nw[i] <- cur.proj[1] +50#+50
+    df.ap$proj.y.nw[i] <- cur.proj[2] +50#+50
+  }
+  
+  df.ap$score.nw <- sqrt((df.ap$proj.x.nw-50)^2  + (df.ap$proj.y.nw-50)^2)* sign.multiplier
+  
+  plt.project.2 <-  df.ap %>%
+    ggplot() +
+    geom_hline(yintercept = 50, color = "grey80") + 
+    geom_vline(xintercept = 50, color = "grey80") + 
+    geom_segment(aes(x = activity, y = specificity, xend = proj.x.nw, yend = proj.y.nw),color = "grey80") + 
+    geom_point(aes(x = activity, y = specificity, label = LR.pair)) + 
+    geom_point(aes(x = proj.x.nw, y = proj.y.nw, label = LR.pair), color = "red") + 
+    xlab("Global Activity (%max)") + 
+    ylab("Specificity (Gini Index)") + 
+    theme_miko() + 
+    labs(title = "Activity and Specificity")
+  
+  
+  plt.projection <- cowplot::plot_grid(plt.act.spec,
+                                       cowplot::plot_grid(plt.project.1, plt.project.2, ncol = 1),
+                                       ncol = 2, rel_widths = c(2,1), align = "h"
+  )
+  
+  
+  
+  df.ap$z.ne <- (df.ap$score.ne - median(df.ap$score.ne, na.rm = T))/(mad(df.ap$score.ne, na.rm = T))
+  df.ap$z.nw <- (df.ap$score.nw - median(df.ap$score.nw, na.rm = T))/(mad(df.ap$score.nw, na.rm = T))
+  
+  df.ap$p.ne <- 2*pnorm(df.ap$z.ne, lower.tail = F)
+  df.ap$p.nw <- 2*pnorm(df.ap$z.nw, lower.tail = F)
+  
+  df.ap$q.ne <- p.adjust(df.ap$p.ne, method = "BH")
+  df.ap$q.nw <- p.adjust(df.ap$p.nw, method = "BH")
+  
+} 
+
+# top LR pairs
+if (do.query){
+  df.top.lr <- unique(df.ap)
+  df.top.lr$pair.name <- paste0(df.top.lr$ligand, "-", df.top.lr$receptor) 
+} else {
+  n.pair <- nrow(df.ap)
+  n2s <- round(parameter.list$top.n.dash / 2)
+  hi.spec.lo.act <- df.ap %>% dplyr::top_n(n2s, s.percentile)
+  lo.spec.hi.act <- df.ap %>% dplyr::top_n(n2s, a.percentile)
+  df.top.lr <- unique(bind_rows(hi.spec.lo.act, lo.spec.hi.act))
+}
+
+```
+
+```{r get top LR pairs}
+
+# as.character(df.lr.tally$all.lr.top)
+df.top.lr$pair.name <- paste0(df.top.lr$ligand, "-", df.top.lr$receptor)
+top.lr.all <- unique(c(as.character(df.top.lr$pair.name)))
+top.activty.lr <- data.frame(table(unlist(strsplit(top.lr.all, "-"))))
+
+```
+
+
+```{r ggplot rendering fuctions, include = FALSE}
+
+as.ggplot2 <- function (gglr, scale = 1, hjust = 0, vjust = 0) {
+  
+  dlr <- gglr[["df.lr.receptor"]]
+  ccc <- gglr$cell_col
+  
+  iTALK::LRPlot(dlr, datatype = "mean count", 
+                cell_col = ccc, link.arr.lwd = dlr$cell_from_mean_exprs, 
+                link.arr.width = dlr$cell_to_mean_exprs)
+  gridGraphics::grid.echo()
+  p.asgrob <- grid.grab()
+  
+  ymin <- xmin <- 1 - scale
+  xmax <- ymax <- scale
+  plt.gg.circ <- ggplot(data.frame(x = 0:1, y = 0:1), aes_(x = ~x, y = ~y)) + 
+    geom_blank() + scale_x_continuous(limits = c(0, 1), 
+                                      expand = c(0, 0)) + 
+    scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) + 
+    annotation_custom(p.asgrob, 
+                      xmin = xmin + hjust, xmax = xmax + hjust, ymin = ymin + 
+                        vjust, ymax = ymax + vjust) + theme_void()
+}
+
+
+```
+
+
+
+```{r dash report new, fig.width = 16, fig.height=12, warning = FALSE, message = FALSE, include = FALSE}
+
+
+message("Preparing all results to consolidate into final report...")
+
+LR.df$Ligand <- gene2species(LR.df$Ligand, parameter.list$species)
+LR.df$Receptor <- gene2species(LR.df$Receptor, parameter.list$species)
 
 # get cluster-labeled UMAP plot
 plt.umap <- DimPlot(so.query, reduction = "umap", 
-                                       label = T, 
-                                       group.by = "seurat_clusters")  + 
-    xlab("UMAP 1") + ylab("UMAP 2") + 
-    labs(title = "UMAP", subtitle = "clusters") + theme_miko() +   theme(axis.title.x=element_blank(),
+                    label = T, 
+                    pt.size = autoPointSize(ncol(so.query)),
+                    group.by = "seurat_clusters")  + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+  labs(title = "UMAP", subtitle = paste0(ncol(so.query), " cells | ", length(unique(so.query@meta.data[["seurat_clusters"]])), " clusters")) + 
+  theme_miko() +   
+  theme(axis.title.x=element_blank(),
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank()) +
   theme(axis.title.y=element_blank(),
         axis.text.y=element_blank(),
         axis.ticks.y=element_blank(),
-            plot.title = element_text(hjust = 0.5),
-            plot.subtitle = element_text(hjust = 0.5))
+        plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
 
-plt.granular.list <- list()
-plt.top.int <- list()
+df.LR.pr <- df.LR.slim3
+df.LR.pr$receptor <- gene2species(df.LR.pr$receptor, parameter.list$species) 
 
-for (k in 1:length(which.communication)){
+df.comm <- df.LR
+df.comm$interaction.score <- df.comm$cell_from_mean_exprs * df.comm$cell_to_mean_exprs
+
+# LR name
+df.comm$LR <- paste0(gene2species(df.comm$ligand, parameter.list$species), " :", gene2species(df.comm$receptor, parameter.list$species))
+
+# cast clusters as factors
+df.comm$cell_to <- gsub("c", "", df.comm$cell_to)
+df.comm$cell_to <- factor(df.comm$cell_to, levels = paste0(u.clust))
+df.comm$cell_from <- gsub("c", "", df.comm$cell_from)
+df.comm$cell_from <- factor(df.comm$cell_from, levels = paste0(u.clust))
+
+# clone
+df.comm.all <- df.comm
+df.comm <- df.comm[df.comm$LR.pair %in% unique(top.lr.all), ]
+
+u.lr.all <- unique(df.comm.all$LR)
+u.lr.filt <- unique(df.comm$LR)
+which.keep <- (df.comm.all$LR) %in% u.lr.filt
+df.comm.sub <- df.comm.all[which.keep, ]
+
+df.comm.sub$ligand <- gene2species(df.comm.sub$ligand, parameter.list$species)
+df.comm.sub$receptor <- gene2species(df.comm.sub$receptor, parameter.list$species)
+max.spec <- max(df.comm.sub$sw.product)
+plt.gran.ind.list <- list()
+
+
+df.comm.sub$LR2 <- u.lr.cur <- gsub(" ", "", gsub(":", "_", df.comm.sub$LR) ) 
+
+u.lr.cur <- u.lr.filt 
+u.lr.cur <- gsub(":", "_", u.lr.cur)
+u.lr.cur <- gsub(" ", "", u.lr.cur)
+
+plt.circ.list <- list()
+
+df.lr.h.all <- df.LR
+df.lr.h.all$ligand <- gene2species(df.lr.h.all$ligand, parameter.list$species)
+df.lr.h.all$receptor <- gene2species(df.lr.h.all$receptor, parameter.list$species)
+
+message("Generating LR circular plots...")
+
+for (i in 1:length(u.lr.cur)){
   
-  # get LR interaction
-  df.comm <- res.comm.list[[which.communication[k]]]
-  df.comm$interaction.score <- df.comm$cell_from_mean_exprs * df.comm$cell_to_mean_exprs
+  ligand.name <- stringr::str_replace(u.lr.cur[i], "_.*", "")
+  receptor.name <- stringr::str_replace(u.lr.cur[i], ".*_", "")
+  ligand.name <- gene2species(ligand.name, parameter.list$species)
+  receptor.name <- gene2species(receptor.name, parameter.list$species)
+  df.LR.circ <- df.lr.h.all %>% dplyr::filter((ligand) == gene2species(ligand.name, parameter.list$species),
+                                              (receptor) == gene2species(receptor.name, parameter.list$species)) 
   
-  # LR name
-  df.comm$LR <- paste0(df.comm$ligand, " -> ", df.comm$receptor)
+  st <- (1-(30/nrow(df.LR.circ)))
+  if (st < 0) st <- 0
+  gglr.list <- ggLRplot(LR = df.LR.circ, lig = gene2species(ligand.name, parameter.list$species),
+                        rec = gene2species(receptor.name, parameter.list$species),
+                        scsr.threshold = st)
   
-  # cast clusters as factors
-  df.comm$cell_to <- gsub("c", "", df.comm$cell_to)
-  df.comm$cell_to <- factor(df.comm$cell_to, levels = paste0(u.clust))
-  df.comm$cell_from <- gsub("c", "", df.comm$cell_from)
-  df.comm$cell_from <- factor(df.comm$cell_from, levels = paste0(u.clust))
+  cur.circ <- NULL
+  try({
+    cur.circ <- as.ggplot2(gglr = gglr.list)
+  }, silent = T)
   
-  # clone
-  df.comm.all <- df.comm
   
-  # expression fraction merge
-  df.f.ligand <- df.f.long
-  df.f.ligand$cluster <- paste0(df.f.ligand$cluster)
-  df.f.ligand$gene <- toupper(df.f.ligand$gene)
-  colnames(df.f.ligand) <- c("ligand", "cell_from", "source.fraction")
-  df.comm <- merge(df.comm, df.f.ligand)
+  plt.circ.list[[u.lr.cur[[i]]]] <- cur.circ
   
-  df.f.receptor <- df.f.ligand
-  colnames(df.f.receptor) <- c("receptor", "cell_to", "target.fraction")
-  df.comm <- merge(df.comm, df.f.receptor)
+}
+
+
+message(paste0("Generating ", length(u.lr.cur), " LR reports..."))
+plt.gran.ind.list <-list()
+u.lr.cur <- u.lr.cur[order(u.lr.cur)]
+for (i in 1:length(u.lr.cur)){
   
-  # filter top interactions
-  filter1 <- df.comm$interaction.score > 0
-  df.comm <- df.comm[filter1, ]
-  if (nrow(df.comm) == 0) next
+  if (((100*(signif(i/length(u.lr.cur)))) %% 2) == 0){
+    message(paste0("\tReport progress: ", 100*(signif(i/length(u.lr.cur))), "%"))
+  }
   
-  df.comm <- df.comm %>% dplyr::arrange(-interaction.score)
-  
-  u.lr.cur <- 0
-  iter.n <- 0
-  u.lr.top <- NULL; df.comm.top <- NULL
-  n.top.int <- 20
-  while((u.lr.cur < 20) & ((iter.n + n.top.int) < nrow(df.comm))){
-    df.comm.top <- df.comm %>% dplyr::top_n(n.top.int+iter.n, interaction.score)
-    u.lr.top <- unique(df.comm.top$LR)
-    u.lr.cur <- length(u.lr.top)
-    if (u.lr.cur >= n.top.int){
-      break
+  suppressMessages({suppressWarnings({
+    
+    ligand.name <- stringr::str_replace(u.lr.cur[i], "_.*", "")
+    receptor.name <- stringr::str_replace(u.lr.cur[i], ".*_", "")
+    
+    ligand.name <- gene2species(ligand.name, parameter.list$species)
+    receptor.name <- gene2species(receptor.name, parameter.list$species)
+    
+    
+    # all ligand and receptor pairs
+    other.ligReceptors <-  unique(LR.df[LR.df$Ligand %in% ligand.name, "Receptor"])
+    other.ligReceptors <- other.ligReceptors[!(other.ligReceptors %in% receptor.name)]
+    other.recLigands <-  unique(LR.df[LR.df$Receptor %in% receptor.name, "Ligand"])
+    other.recLigands <- other.recLigands[!(other.recLigands %in% ligand.name)]
+    if (length(other.ligReceptors) == 0){
+      olr <- ""
     } else {
-      iter.n <- iter.n + 1
-    }
-  }
-  
-  if (is.null(df.comm.top) || (nrow(df.comm.top) == 0)) next
-  df.comm <- df.comm.top; rm(df.comm.top)
-  
-  if (nrow(df.comm) == 0) {
-    plt.granular.list[[which.communication[k]]] <- NULL
-    next
-  }
-  
-  u.lr.all <- unique(df.comm.all$LR)
-  u.lr.filt <- unique(df.comm$LR)
-  
-  which.keep <- (df.comm.all$LR) %in% u.lr.filt
-  df.comm.sub <- df.comm.all[which.keep, ]
-  
-  plt.gran.ind.list <- list()
-  
-  for (i in 1:u.lr.cur){
-
-    ligand.name <- sub(" .*", "", u.lr.filt[i])
-    receptor.name <- stringr::str_replace(u.lr.filt[i], "[A-Za-z0-9]*\ ->\ ", "")
-    
-    if (which.species == "Mm"){
-      ligand.name <- firstup(ligand.name)
-      receptor.name <- firstup(receptor.name)
-    } else if (which.species == "Hs"){
-      ligand.name <- toupper(ligand.name)
-      receptor.name <- toupper(receptor.name)      
+      olr <- paste0(ligand.name, " is also a ligand for ", paste(other.ligReceptors, collapse = ", "), " receptors")
     }
     
-    # LR-level dot plot
+    if (length(other.recLigands) == 0){
+      orl <- ""
+    } else {
+      orl <- paste0(receptor.name, " is also a receptor for ", paste(other.recLigands, collapse = ", "), " ligands")
+    }
+    
+    # score summary table ######################################################
+    df.lr.h <- df.LR %>% dplyr::filter(toupper(ligand) == toupper(ligand.name),
+                                       toupper(receptor) == toupper(receptor.name)) 
+    df.lr.h$scsr.score[is.na(df.lr.h$scsr.score)] <- 0
+    df.lr.h$sw.product[is.na(df.lr.h$sw.product)] <- 0
+    
+    p <- df.lr.h$sw.product 
+    p <- p/sum(p)
+    gini <- 100*signif(ineq::ineq(x = p, type = "Gini"), 3)
+    a <- 100*signif(sum(df.lr.h$scsr.score, na.rm = T)/ (n.cluster*n.cluster), 3)
+    
+    
+    a.per <- df.ap$a.percentile[(df.ap$ligand == ligand.name) & (df.ap$receptor == receptor.name)]
+    if (length(a.per) == 0) a.per <- NA
+    s.per <- df.ap$s.percentile[(df.ap$ligand == ligand.name) & (df.ap$receptor == receptor.name)]
+    if (length(s.per) == 0) s.per <- NA
+    
+    df.info <- data.frame(
+      Activity = c("%max (percentile)", paste0(a, " (", a.per, "th)")),
+      Specificity = c("Gini Index (percentile)", paste0(gini, " (",s.per,  "th)"))
+    )
+    
+    plt.info <- grob_layout(
+      grob_row(
+        border = TRUE,
+        grob_col(df.info)
+      ),
+      height = 100,
+      width = 100,
+      padding_p = 0
+    ) 
+    
+    # score distributions ######################################################
+    
+    plt.hist.specificity <- df.lr.h %>% ggplot() + geom_histogram(aes(x = sw.product), bins = 30, color = "black", fill = "grey60") + 
+      theme_miko() + xlab("Specificity") + ylab("Count") + labs(title = "Specificity", bins = 30, subtitle = paste0("Gini Index= ", gini))
+    plt.hist.interaction <- df.lr.h %>% ggplot() + geom_histogram(aes(x = scsr.score), color = "black", fill = "grey60") + 
+      theme_miko() + xlab("Activity") + ylab("Count") + labs(title = "Activity", subtitle = paste0("%max = ", a, "%"))  
+    plt.hist.combo <- cowplot::plot_grid(plt.hist.interaction, plt.hist.specificity, ncol = 1)
+    
+    # dot plot #################################################################
+    # a <- df.comm.sub %>%
+    #   dplyr::filter(LR.pair %in% u.lr.cur[i])
+    
+    df.comm.sub$scsr.score[is.na(df.comm.sub$scsr.score)] <- 0
     plt.grain.dot <- df.comm.sub %>%
-      dplyr::filter(LR %in% u.lr.filt[i]) %>%
+      dplyr::filter(LR2 %in% u.lr.cur[i]) %>%
+      # dplyr::filter(complete.cases(.)) %>%
       dplyr::group_by(LR) %>%
-      ggplot(aes(x = cell_from, y = cell_to, fill = interaction.score, size = interaction.score)) + 
+      ggplot(aes(x = cell_from, y = cell_to, fill = scsr.score, size = sw.product)) + 
       geom_point() +
       geom_point(pch=21, color = "black")  +
       xlab("Source Cluster") + ylab("Recipient Cluster") + 
-      viridis::scale_fill_viridis("Interaction.Score") + 
-      facet_wrap(~LR) + 
+      viridis::scale_fill_viridis() + #limits = c(0,1)
+      labs(fill = "Activity", size = "Specificity") + 
+      scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+      scale_y_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+      facet_wrap(~LR.pair) + 
+      theme_miko(legend = T) + 
       theme(plot.title = element_text(hjust = 0.5),
-            plot.subtitle = element_text(hjust = 0.5))
+            plot.subtitle = element_text(hjust = 0.5),
+            panel.grid.major =   element_line(colour = "grey95",size=0.1)) 
     
-    # LIGAND UMAP
+    
+    # LIGAND UMAP ##############################################################
+    # ,    adjust.pt.size = F
     plt.lig <- scExpression.UMAP(
       so.query,
       ligand.name,
       x.label = "UMAP 1",
       y.label = "UMAP 2",
-      plot.name = NULL,
-      adjust.pt.size = F) +
+      plot.name = NULL) +
       theme_miko(legend = T) +
       viridis::scale_color_viridis(option = "A") + 
       labs(title = ligand.name, subtitle = "Ligand (Source)") + 
-        theme(axis.title.x=element_blank(),
-        axis.text.x=element_blank(),
-        axis.ticks.x=element_blank()) +
-  theme(axis.title.y=element_blank(),
-        axis.text.y=element_blank(),
-        axis.ticks.y=element_blank(),
-            plot.title = element_text(hjust = 0.5),
-            plot.subtitle = element_text(hjust = 0.5))
-    
-    # RECEPTOR UMAP
-    plt.rec <- scExpression.UMAP(
-      so.query,
-      receptor.name,
-      x.label = "UMAP 1",
-      y.label = "UMAP 2",
-      plot.name = NULL,
-      adjust.pt.size = F) +
-      theme_miko(legend = T) +
-      viridis::scale_color_viridis(option = "A") + 
-      labs(title = receptor.name, subtitle = "Receptor (Recipient)")  + 
-  theme(axis.title.x=element_blank(),
-        axis.text.x=element_blank(),
-        axis.ticks.x=element_blank()) +
+      theme(axis.title.x=element_blank(),
+            axis.text.x=element_blank(),
+            axis.ticks.x=element_blank()) +
       theme(axis.title.y=element_blank(),
             axis.text.y=element_blank(),
             axis.ticks.y=element_blank(),
             plot.title = element_text(hjust = 0.5),
             plot.subtitle = element_text(hjust = 0.5))
     
-    # EXPRESSION DOTPLOT
+    # RECEPTOR UMAP ############################################################
+    # ,    # adjust.pt.size = F
+    plt.rec <- scExpression.UMAP(
+      so.query,
+      receptor.name,
+      x.label = "UMAP 1",
+      y.label = "UMAP 2",
+      plot.name = NULL) +
+      theme_miko(legend = T) +
+      viridis::scale_color_viridis(option = "A") + 
+      labs(title = receptor.name, subtitle = "Receptor (Recipient)")  + 
+      theme(axis.title.x=element_blank(),
+            axis.text.x=element_blank(),
+            axis.ticks.x=element_blank()) +
+      theme(axis.title.y=element_blank(),
+            axis.text.y=element_blank(),
+            axis.ticks.y=element_blank(),
+            plot.title = element_text(hjust = 0.5),
+            plot.subtitle = element_text(hjust = 0.5))
+    
+    # EXPRESSION DOTPLOT #######################################################
     lr.feature <- c(ligand.name,receptor.name )
-    names(lr.feature) <- c("L", "R")
+    if (ligand.name == receptor.name){
+      lr.feature <- c(ligand.name)
+      names(lr.feature) <- c("LR")
+    } else {
+      lr.feature <- c(ligand.name,receptor.name )
+      names(lr.feature) <- c("L", "R")
+    }
+    
     plt.dot.exp <- DotPlot(
       so.query,
       assay = NULL,
@@ -929,64 +2834,184 @@ for (k in 1:length(which.communication)){
       scale = T,
       scale.by = "radius") + 
       xlab("Genes") + ylab("Cluster") + 
-        theme(axis.title.x=element_blank(),
-              legend.title = element_text(size = 5),
-              legend.text = element_text(size = 5),
+      theme(axis.title.x=element_blank(),
+            legend.title = element_text(size = 5),
+            legend.text = element_text(size = 5),
             plot.title = element_text(hjust = 0.5),
-            plot.subtitle = element_text(hjust = 0.5))
+            plot.subtitle = element_text(hjust = 0.5)) + 
+      scale_y_discrete(guide = guide_axis(check.overlap = TRUE)) 
     
-    # COMBINE LIGAND-RECEPTOR UMAPS
+    plt.rg <- NULL
+    try({
+      plt.rg <- rgPlot(rec = receptor.name, df.dat = df.LR.pr,df.cor =  df.LR.slim3.cor, top.n.genes = 15)
+    }, silent = T)
+    
+    # generate LR plot ###########################################################
+    plt.circ <- plt.circ.list[[u.lr.cur[i]]]
+    
+    # COMBINE LIGAND-RECEPTOR UMAPS ##############################################
     plt.umap.exp <- cowplot::plot_grid(plt.lig, plt.rec, ncol = 1, align = "hv")
+    plt.left <- cowplot::plot_grid(
+      cowplot::plot_grid(plt.info %>% view_grob(height = 20, width = 100),align = "v", 
+                         plt.umap, ncol = 1, rel_heights = c(1,4), labels = c("A", "B")), 
+      plt.umap.exp,
+      ncol = 2, rel_widths  = c(1,0.7), labels = c("", "C")
+    )
     
-    # COMBINE REMAINDING PLOTS
-    plt.gran <- cowplot::plot_grid(plt.umap, plt.umap.exp, plt.dot.exp, 
-                                   plt.grain.dot, ncol = 4, align = "hv", rel_widths = c(1,0.7,0.7, 1.5), labels = "AUTO")
+    # COMBINE REMAINDING PLOTS ###################################################
     
-    if (print.inline) {
-      print(plt.gran)
+    plt.gran.top <- cowplot::plot_grid(plt.left, plt.dot.exp, 
+                                       plt.grain.dot, ncol = 3, align = "hv", 
+                                       rel_widths = c(1.7,0.7, 1.5), labels = c("", "D", "E"))
+    
+    
+    plt.gran.bottom <- cowplot::plot_grid(plotlist = list(plt.hist.combo,plt.circ, plt.rg), 
+                                          rel_widths = c(3, 5, 8), 
+                                          ncol = 3, 
+                                          labels = c("F", "G", "H"))
+    plt.gran.graph <- cowplot::plot_grid(plt.gran.top, plt.gran.bottom, rel_heights = c(6,5), ncol = 1)
+    
+    # generate TITLE #############################################################   
+    a.class <- s.class <- NA
+    if (all(activity.quantiles > a)){
+      a.class <- "low"
+    } else if (all(activity.quantiles < a)){
+      a.class <- "high"
+    } else {
+      a.class <- "moderate"
     }
     
-    plt.gran.ind.list[[u.lr.filt[i]]] <- plt.gran
-  }
-  
-  plt.granular.list[[which.communication[k]]] <- plt.gran.ind.list
-
-  # top interactions
-  df.comm.u <- unique(df.comm[ ,c("LR", "cell_from")])
-  df.lig <- data.frame(table(df.comm.u$LR))
-  
-  plt.lig.profile <- df.lig %>%
-    top_n(20, Freq) %>%
-    ggplot(aes(x = reorder(Var1, Freq), y = Freq)) + 
-    geom_bar(stat = "identity") + 
-    coord_flip() + 
-    ylab("N sources with paired target") + 
-    xlab("Ligand") + 
-    labs(title = "LR Pair Activity", subtitle = which.communication[k]) + 
-    theme_miko()
-  
-  plt.top.int[[which.communication[k]]] <- plt.lig.profile
-  
-  if (print.inline) print(plt.lig.profile)
+    if (all(specificity.quantiles > gini)){
+      s.class <- "low"
+    } else if (all(activity.quantiles < gini)){
+      s.class <- "high"
+    } else {
+      s.class <- "moderate"
+    }
+    
+    lr.type <- paste0("Class: ", firstup(a.class), " activity, ", s.class, " specificity")
+    lr.location <- paste0("Location: ", firstup(unique(df.lr.h$Ligand_location)))
+    lr.communication <- paste0("Type: ", firstup(unique(df.lr.h$Type)))
+    lr.ligand <- paste0("Ligand: ", ligand.name)
+    lr.receptor <- paste0("Receptor: ", receptor.name)
+    
+    plt.title1 <- ggdraw() +
+      draw_label(
+        paste0(lr.ligand, "\n", lr.receptor, "\n "),
+        fontface = 'bold',
+        x = 0, hjust = 0
+      ) +
+      theme(plot.margin = margin(0, 0, 0, 7))
+    
+    plt.title2 <- ggdraw() +
+      draw_label(
+        paste0(lr.type,  "\n", lr.location,  "\n", lr.communication),
+        x = 0, hjust = 0
+      ) +
+      theme(plot.margin = margin(0, 0, 0, 7))
+    
+    plt.title3 <- ggdraw() +
+      draw_label(
+        paste0("Notes:\n", orl,  "\n", olr),
+        size = 8,
+        x = 0, hjust = 0
+      ) +
+      theme(plot.margin = margin(0, 0, 0, 7))   
+    
+    # Combine plots #############################################################
+    plt.title <- cowplot::plot_grid(plt.title1, plt.title2, plt.title3, ncol = 3, rel_widths = c(1,2, 5))
+    plt.gran <- cowplot::plot_grid(plt.title, plt.gran.graph, rel_heights = c(1, 12), ncol = 1)
+    # return((plt.gran))
+    
+    plt.gran.ind.list[[u.lr.cur[i]]] <- plt.gran
+    
+  })})
 }
 
-plt.gran
+
+# plt.gran
+
+
+```
+
+```{r final global score plot, include = F}
+
+
+df.ap$highlight <- df.ap$LR.pair %in% gsub("_", " : ", u.lr.cur)
+
+if (nrow(df.ap) > 100){
+  df.ap.shown <- df.ap %>% dplyr::filter(highlight)
+} else {
+  df.ap.shown <- df.ap
+}
+
+plt.act.spec <- df.ap %>%
+  ggplot() +
+  geom_hline(yintercept = 50, color = "grey80") + 
+  geom_vline(xintercept = 50, color = "grey80") + 
+  geom_point(aes(x = activity, y = specificity, label = LR.pair, color = highlight)) + 
+  # ggiraph::geom_text_interactive(size = 2) + 
+  scale_color_manual(values = c("TRUE" = "black", "FALSE" = "grey")) + 
+  ggrepel::geom_text_repel(size = 2, data = df.ap.shown, aes(x = activity, y = specificity, label = LR.pair, color = highlight)) +
+  xlab("Global Activity (%max)") + 
+  ylab("Specificity (Gini Index)") + 
+  theme_miko() + 
+  labs(title = "Activity and Specificity") 
+
+# , captions = "Specific Interaction: Giti index = 100\nNon-specific Interaction: Giti index = 0"
+
+df.ap.final <- df.ap
+df.ap.final <- df.ap.final[ ,c("ligand", "receptor", "LR.pair", "activity", "specificity","a.percentile", "s.percentile", "highlight")]
+colnames(df.ap.final) <- c("ligand", "receptor", "LR_pair", "activity_%max", "specificity_giti","activity_%tile", "specificity_%tile", "shown")
+# print(plt.act.spec)
+
+# colnames(df.ap.final)
+```
+
+```{r results table}
+
+message("Preparing final results table...")
+
+
+# cluster-level results ########################################################
+df.final <- df.LR[ ,c("ligand", "receptor", "type", "Ligand_location", "cell_from", "cell_to", "cell_from_mean_exprs", "cell_to_mean_exprs", "italk.score", "scsr.score", "sw.product")]
+colnames(df.final) <- c("ligand", "receptor", "type", "localization", "source_cluster", "dest_cluster", "ligand_exprs", "receptor_expres", "activity_italk", "activity_scsr", "specificity_natmi")
+df.final$activity_scsr[is.na(df.final$activity_scsr)] <- 0
+df.final[ ,c("ligand_exprs", "receptor_expres", "activity_italk", "activity_scsr", "specificity_natmi")] <- signif(df.final[ ,c("ligand_exprs", "receptor_expres", "activity_italk", "activity_scsr", "specificity_natmi")], 3)
+
+ln <- unlist(lapply(strsplit(top.lr.all, "-"), function(x) x[[1]]))
+rn <- unlist(lapply(strsplit(top.lr.all, "-"), function(x) x[[2]]))
+# top.df <- df.top.lr$pair.name <- paste0(df.top.lr$ligand, "-", df.top.lr$receptor)
+df.final.top <- df.final  %>% dplyr::filter(ligand %in% ln, receptor %in% rn)
+
+# aggregate results ############################################################
+# , "score.nw", "score.ne" , "as_para_score", "as_perp_score" , "as_para_score", "as_perp_score" , "as_para_score", "as_perp_score"
+df.final2 <- df.ap[ ,c("ligand", "receptor", "activity", "specificity", "a.percentile", "s.percentile")]
+colnames(df.final2) <- c("ligand", "receptor", "overall_activity", "overall_specificity", "percentile_activity", "percentile_specificity")
+df.final2[ ,c("percentile_activity", "percentile_specificity")] <- signif(df.final2[, c("percentile_activity", "percentile_specificity")], 3)
+
 
 ```
 
 
-
 ```{r central log}
 
+message("Updating central log...")
 # update central log
 run.id <- NULL
 if (!exists("user")) user <- "guest"
 
 clog.update.success <- F
-try({
-  run.id <-  updateCentralLog(Module = "M12", input.data = input.file, input.subset = NA, pdf.flag = save.pdf)
-  clog.update.success <-  T
-}, silent = F)
+
+if (parameter.list$update.log){
+  try({
+    run.id <-  updateCentralLog(Module = "M12", input.data = parameter.list$input.file, input.subset = NA, pdf.flag = parameter.list$save.pdf)
+    clog.update.success <-  T
+  }, silent = F) 
+}
+
+
+
 if (is.null(run.id))  {
   warning("Central log update was unsuccessful :(\n")
   run.id <- paste("M12_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
@@ -1003,46 +3028,134 @@ output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys
 # create output directories
 dir.create(output.path)
 dir.create(paste0(output.path, "Tables/"))
-if (save.pdf) dir.create(paste0(output.path, "PDF/"))
+if (parameter.list$save.pdf) dir.create(paste0(output.path, "PDF/"))
+
+message("Generating HTML report...")
 
 ```
 
 
-UMAP
+
+Sample Overview
 ===================================== 
 
-```{r ph1,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+Sidebar {.sidebar }
+-------------------------------------
 
-plt.umap.final <- DimPlot(so.query, reduction = "umap", 
-                                       label = T, 
-                                       group.by = "seurat_clusters")  + 
-    xlab("UMAP 1") + ylab("UMAP 2") + 
-    labs(title = "UMAP", subtitle = "clusters") + theme_miko() 
+**Description**: Ligand Receptor Analysis\
 
-print(plt.umap.final)
+**Figure Legends**:\
+**A|** UMAP\
+**B|** Number of ligands and receptors included in analysis, based on inclusion criteria (i.e., exceeds minimum cluster-level expression threshold). All ligand and receptors are taken from curated LR database (data sources shown in D)\
+**D|** Upset plot of ligand and receptor datasets consolidated from public databases.\
 
-savePDF(file.name = paste0(output.path, "PDF/", "M12_UMAP.pdf"), plot.handle = plt.umap.final, 
-        fig.width = 5, fig.height = 5, save.flag = save.pdf)
+**Definitions**:\
+TODO
 
-```
+**Notes**:\
+**1. Purity Score**: TODO
 
-LR Descriptives
-===================================== 
+**Sample Overview**:\
+Cells, n: `r ncol(so.query)`\
+Genes, n: `r nrow(so.query)`\
+Variable genes, n: `r length(VariableFeatures(so.query))`\
+
+UMI/cell, median: `r round(median(so.query@meta.data[["nCount_RNA"]]))`\
+genes/cell, median: `r round(median(so.query@meta.data[["nFeature_RNA"]]))`\
+Species: `r parameter.list$species`
+
 
 Row {.tabset}
 -------------------------------------
 
-```{r lr desc,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+### Overview
+
+```{r ph1,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE, fig.width = 15, fig.height = 5}
+
+plt.umap.final <- plt.umap + 
+  xlab("UMAP 1") + ylab("UMAP 2") 
+
+# theme_miko()
+
+plt.upset2 <- ggplotify::as.ggplot(plt.upset) + labs(title = "LR Database", subtitle = "Upset plot") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(plot.subtitle = element_text(hjust = 0.5)) +
+  theme( plot.title = element_text(face = "bold"))
+
+plt.inclusion <- plt.inclusion + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(plot.subtitle = element_text(hjust = 0.5)) +
+  theme( plot.title = element_text(face = "bold"))
+
+plt.db.stat <- cowplot::plot_grid(plt.umap.final, plt.upset2, plt.inclusion,  
+                                  labels ="AUTO", nrow = 1, align = "h", axis= "tb")
+print(plt.db.stat)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M12_UMAP.pdf"), plot.handle = plt.db.stat, 
+        fig.width = 15, fig.height = 5, save.flag = parameter.list$save.pdf)
+
+```
+
+LR Network
+===================================== 
+
+Sidebar {.sidebar }
+-------------------------------------
+
+**Description**: LR Network
+
+Overview of aggregate cluster-to-cluster communication for each communication type. Marginal plots are average LR activity for each source and recipient cluster. Use to identify clusters of interest for subsequent inquiry.
+
+**A|** Cell cluster UMAP. *Nodes*: individual cells. \
+**B|** Ligand-receptor (LR) similarity network. *Nodes* LR pairs, *linkages*: similarity between LR pairs, *color*: LR connectivity module.  \
+**C|** Ligand activity scores for all ligands belonging to LR connectivity modules.\
+**D|** Receptor activity scores for all receptors belonging to LR connectivity modules.\
+**E|** Ligand-receptor (LR) similarity network with highlighted LR connectivity module. *Labels*: LR pairs belonging to module. 
+**F|** Gene set enrichment of LR connectivity module. Gene set included all lignads and receptors belonging to module. 
+**G|** Pairwise cluster interaction plot. *Nodes*: LR connectivity module activity, *Linkages*: Interaction score.\
+**H|** Cluster interaction matrix. Marginal plots are average LR interaction for each source and recipient cluster. \
+**I|** Ligand and receptor metagene scores represented on UMAP. Scores represent metagene score for all ligands or receptors belonging to LR connectivity module.
+
+Row {.tabset}
+-------------------------------------
+
+### Network Summary
+
+```{r overall lr net, fig.width=20, fig.height=5}
+
+try({
+  plot.name <- paste0("M12_LR_network_overall.pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name),
+          plot.handle =  plt.lr.net.overall,
+          fig.width = 20, fig.height = 5, save.flag = parameter.list$save.pdf)
+}, silent = T)
+
+print(plt.lr.net.overall)
+```
+
+### Table
+
+```{r}
+
+flex.asDT(df.lr.umap.final)
+```
+
+
+Row {.tabset}
+-------------------------------------
+
+
+```{r modular lr net, fig.width=20, fig.height=5}
 
 out_lr <- NULL
 
-out_lr <- lapply(seq_along(plt.agg.LR.list), function(i) {
+out_lr <- lapply(seq_along(p.net.list), function(i) {
   
-  s1 <- names(plt.agg.LR.list)[i]
-  s2 <- paste0("plt.agg.LR.list[[", i, "]]")
+  s1 <- names(p.net.list)[i]
+  s2 <- paste0("p.net.list[[", i, "]]")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,fig.width=10, fig.height=10, message=FALSE, warning=FALSE}", paste("lr_sum", i, sep = "")))
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,fig.width=20, fig.height=5, message=FALSE, warning=FALSE}", paste("mod_lr_net_", i, sep = "")))
   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
   
@@ -1050,205 +3163,211 @@ out_lr <- lapply(seq_along(plt.agg.LR.list), function(i) {
   
 })
 
+# p.net.list[[1]]
 ```
 
 `r paste(knitr::knit(text = paste(out_lr, collapse = '\n')))`
 
 
-```{r lr desc save,include = FALSE}
-
-for (i in 1:length(plt.agg.LR.list)){
-  plot.name <- paste0("M12_LR_summary_", names(plt.agg.LR.list)[i] ,".pdf")
-  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
-          plot.handle =  plt.agg.LR.list[[i]], 
-          fig.width = 10, fig.height = 10, save.flag = save.pdf)
-}
-
-```
-
-Top LR Pairs
-===================================== 
-
-Row {.tabset}
--------------------------------------
-
-```{r top lr,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
-
-out_lr <- NULL
-
-out_lr <- lapply(seq_along(plt.top.int), function(i) {
-  
-  s1 <- names(plt.top.int)[i]
-  s2 <- paste0("plt.top.int[[", i, "]]")
-  
-  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,fig.width=8, fig.height=8, message=FALSE, warning=FALSE}", paste("lr_top", i, sep = "")))
-  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
-  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-  
-  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
-  
-})
-
-```
-
-`r paste(knitr::knit(text = paste(out_lr, collapse = '\n')))`
-
-```{r top lr save,include = FALSE}
-
-for (i in 1:length(plt.top.int)){
-  plot.name <- paste0("M12_top_LR_pairs_", names(plt.top.int)[i] ,".pdf")
-  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
-          plot.handle =  plt.top.int[[i]], 
-          fig.width = 5, fig.height = 7, save.flag = save.pdf)
-}
-
-```
-
-LR Interactions
-===================================== 
-
-Row {.tabset}
--------------------------------------
-
-```{r ph4,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
-
-out2 <- tryCatch({
-    out2 <- lapply(seq_along(res.comm.list2), function(j) {
-
-    clust_a <- as.vector(res.comm.list2[[j]][["cell_from"]])
-    clust_b <- as.vector(res.comm.list2[[j]][["cell_to"]])
-    clust_all <- as.vector(unique(c(clust_a, clust_b)))
-    
-    # specify cell colors
-    comm.type <- names(res.comm.list2)[j]
-    my.cols <-colorRampPalette(brewer.pal(8, paste("Set", set_color = 2, sep = "")))(length(clust_all))
-    cell_col <-my.cols
-
-    # LR plot
-    s1 <- sprintf("LRPlot( res.comm.list2[[%d]], 
-    datatype='mean count', 
-    link.arr.lwd= res.comm.list2[[%d]]$cell_from_mean_exprs, 
-    link.arr.width= res.comm.list2[[%d]]$cell_to_mean_exprs)",j, j, j)
-
-    s2 <- comm.type
-
-    b1 <- knitr::knit_expand(text = sprintf("\n### %s\n", comm.type)) # tab header
-    b2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=10, fig.height=10, message=FALSE, warning=FALSE}", 
-                                            paste("chunk", j, sep = ""))) 
-    b3 <- knitr::knit_expand(text = sprintf("\n %s",s1)) 
-    b5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-    
-    out2 <- paste(b1, b2, b3, b5, collapse = '\n')
-    return(out2) 
-    
-  })
-}, error= function(e){
-  print(e)
-  out2 <- NULL
-  return(out2)
-})
-
-
-
-```
-
-`r try({paste(knitr::knit(text = paste(out2, collapse = '\n')))}, silent = T)`
-
-```{r ph4 save,include = FALSE}
+```{r lr desc save2,include = FALSE}
 
 try({
-  for (i in 1:length(res.comm.list2)){
-    plot.name <- paste0("M12_LR_interaction_circle_", names(res.comm.list2)[i] ,".pdf")
+  for (i in 1:length(p.net.list)){
+    plot.name <- paste0("M12_LR_modular_network_", names(p.net.list)[i] ,".pdf")
     savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
-            plot.handle =  LRPlot( res.comm.list2[[i]], 
-                                   datatype='mean count', 
-                                   link.arr.lwd= res.comm.list2[[i]]$cell_from_mean_exprs, 
-                                   link.arr.width= res.comm.list2[[i]]$cell_to_mean_exprs), 
-            fig.width = 10, fig.height = 10, save.flag = save.pdf)
-  } 
+            plot.handle =  p.net.list[[i]], 
+            fig.width = 20, fig.height = 5, save.flag = parameter.list$save.pdf)
+  }
+}, silent = T)
+
+```
+
+
+
+
+
+```{r lr desc,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10}
+
+# 
+# Cluster-Specific Interactions
+# ===================================== 
+# 
+# Sidebar {.sidebar }
+# -------------------------------------
+# 
+# **Description**: Cluster-level 
+# 
+# Overview of aggregate cluster-to-cluster communication for each communication type. Marginal plots are average LR activity for each source and recipient cluster. Use to identify clusters of interest for subsequent inquiry. 
+# 
+# Row {.tabset}
+# -------------------------------------
+#   
+# out_lr <- NULL
+# 
+# out_lr <- lapply(seq_along(plt.agg.LR.list), function(i) {
+#   
+#   s1 <- names(plt.agg.LR.list)[i]
+#   s2 <- paste0("plt.agg.LR.list[[", i, "]]")
+#   
+#   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+#   a2 <- knitr::knit_expand(text = sprintf("\n```{r %s,fig.width=10, fig.height=10, message=FALSE, warning=FALSE}", paste("lr_sum", i, sep = "")))
+#   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+#   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+#   
+#   paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+#   
+# })
+
+
+
+# plt.agg.LR.list[[1]]
+
+
+
+# `r paste(knitr::knit(text = paste(out_lr, collapse = '\n')))`
+
+
+# ```{r lr desc save,include = FALSE}
+
+# try({
+#   for (i in 1:length(plt.agg.LR.list)){
+#     plot.name <- paste0("M12_LR_summary_", names(plt.agg.LR.list)[i] ,".pdf")
+#     savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+#             plot.handle =  plt.agg.LR.list[[i]], 
+#             fig.width = 10, fig.height = 10, save.flag = parameter.list$save.pdf)
+#   }
+# }, silent = T)
+
+```
+
+
+
+
+```{r cluster-level results dash, fig.width = 20, fig.height=5}
+
+# Row {.tabset}
+# -------------------------------------
+
+# if (is.null(plt.cluster.dash)){
+#   out <- NULL
+# } else {
+#   
+#   out <- lapply(seq_along(plt.cluster.dash), function(i) {
+#     
+#     s1 <- names(plt.cluster.dash)[i]
+#     s2 <- paste0("plt.cluster.dash[[", i, "]]")
+#     
+#     a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+#     a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 20, fig.height=5, message=FALSE, warning=FALSE}", paste("ppp", i, sep = "")))
+#     a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+#     a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+#     
+#     paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+#     
+#   })
+#   
+# }
+# # plt.cluster.dash[[1]]
+# 
+# # plt.cluster.dash[[length(plt.cluster.dash)]]
+# 
+# 
+# `r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+# 
+# try({
+#   for (i in 1:length(plt.cluster.dash)){
+#     plot.name <- paste0("M12_cluster_dash_", names(plt.cluster.dash)[i] ,".pdf")
+#     plot.name <- gsub(" -> ", "-", plot.name)
+#     plot.name <- gsub(":", "-", plot.name)
+#     plot.name <- gsub(" ", "", plot.name)
+#     savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+#             plot.handle = plt.cluster.dash[[i]], 
+#             fig.width = 20, fig.height=5, save.flag = parameter.list$save.pdf)
+#   } 
+# }, silent = T)
+
+
+
+```
+
+
+Ligand-Receptor Report
+===================================== 
+
+Sidebar {.sidebar }
+-------------------------------------
+
+**Description**: Ligand Receptor Analysis. Result summary for top LR pairs.
+
+**Figure Legends**:\
+**A|** Aggregate activity (%max) and specificity (giti index). \
+**B|** Cluster-stratfied UMAP.\
+**C|** UMAP of ligand- (*top*) and receptor- (*bottom*) expression.\
+**D|** Dot plot of ligand- (L, *left*) and receptor- (R, *right*) expression.\
+**E|** Dot plot of cluster-cluster level interactions.\
+**F|** Distribution of cluster-cluster level specificity (*top*) and activity (*bottom*) scores.\
+**G|** LR circular plot of cluster-cluster interactions.\
+**H|** Top receptor expression vs. pathway GSVA score correlations.\ 
+
+**Definitions**:\
+TODO
+
+**Notes**:\
+**1. Purity Score**: TODO
+
+Row {.tabset}
+-------------------------------------
+
+### LR Scores Overview
+
+```{r  fig.width = 10, fig.height = 10}
+
+
+### Score Projections
+try({
+  plot.name <- paste0("M12_LR_score_global.pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name),
+          plot.handle =  plt.act.spec,
+          fig.width = 10, fig.height = 10, save.flag = parameter.list$save.pdf)
+}, silent = T)
+
+try({
+  print(plt.act.spec)
 }, silent = T)
 
 
+
+```
+
+### Scores Table
+
+```{r LR score table}
+
+flex.asDT(df.ap.final)
+
 ```
 
 
-1| Cytokines
-===================================== 
+```{r dash report all, fig.width=19, fig.height=12}
 
-Row {.tabset}
--------------------------------------
+# plt.cur <-  plt.granular.list[["cytokine"]] 
+# if (is.null(plt.gran.ind.list)){
+#   out <- NULL
+# } else {
 
-```{r pp1}
-
- plt.cur <-  plt.granular.list[["cytokine"]] 
-if (is.null(plt.cur)){
-  out <- NULL
-} else {
+out <- lapply(seq_along(plt.gran.ind.list), function(i) {
   
-  out <- lapply(seq_along(plt.cur), function(i) {
-  
-  s1 <- names(plt.cur)[i]
-  s2 <- paste0("plt.cur[[", i, "]]")
+  s1 <- names(plt.gran.ind.list)[i]
+  s2 <- paste0("plt.gran.ind.list[[", i, "]]")
   
   a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 18, fig.height=7, message=FALSE, warning=FALSE}", paste("p1", i, sep = "")))
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 19, fig.height=12, message=FALSE, warning=FALSE}", paste("pppp1", i, sep = "")))
   a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
   a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
   
   paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
   
 })
-  
-}
-
-```
-
-`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
-
-```{r pp1 save,include = FALSE}
-
-try({
-  for (i in 1:length(plt.cur)){
-    plot.name <- paste0("M12_LR_dotplot_cytokines_", names(plt.cur)[i] ,".pdf")
-    plot.name <- gsub(" -> ", "-", plot.name)
-    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
-            plot.handle = plt.cur[[i]], 
-            fig.width = 18, fig.height=7, save.flag = save.pdf)
-  } 
-}, silent = T)
-
-
-```
-
-2| Checkpoint
-===================================== 
-
-Row {.tabset}
--------------------------------------
-
-```{r pp2}
-
- plt.cur <-  plt.granular.list[["checkpoint"]] 
-if (is.null(plt.cur)){
-  out <- NULL
-} else {
-  
-    out <- lapply(seq_along(plt.cur), function(i) {
-  
-  s1 <- names(plt.cur)[i]
-  s2 <- paste0("plt.cur[[", i, "]]")
-  
-  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 18, fig.height=7, message=FALSE, warning=FALSE}", paste("p2", i, sep = "")))
-  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
-  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-  
-  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
-  
-})
-  
-}
 
 ```
 
@@ -1257,12 +3376,14 @@ if (is.null(plt.cur)){
 ```{r pp2 save,include = FALSE}
 
 try({
-  for (i in 1:length(plt.cur)){
-    plot.name <- paste0("M12_LR_dotplot_checkpoint_", names(plt.cur)[i] ,".pdf")
+  for (i in 1:length(plt.gran.ind.list)){
+    plot.name <- paste0("M12_LR_dash_", names(plt.gran.ind.list)[i] ,".pdf")
     plot.name <- gsub(" -> ", "-", plot.name)
+    plot.name <- gsub(":", "-", plot.name)
+    plot.name <- gsub(" ", "", plot.name)
     savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
-            plot.handle = plt.cur[[i]], 
-            fig.width = 18, fig.height=7, save.flag = save.pdf)
+            plot.handle = plt.gran.ind.list[[i]], 
+            fig.width = 19, fig.height=12, save.flag = parameter.list$save.pdf)
   } 
 }, silent = T)
 
@@ -1270,126 +3391,57 @@ try({
 ```
 
 
-3| Growth Factors
+
+
+Tables
 ===================================== 
+
+Sidebar {.sidebar }
+-------------------------------------
+
+**Description**: Ligand Receptor Analysis
+
+Cluster- and Aggregate- LR score summararies. Only top cluster scores shown here, for entire table see module output directory. 
+
+CLUSTER SCORES. ligand_exprs: Ligand expression in 'source_cluster' [0, Inf]; receptor_exprs: Receptor expression in 'dest_cluster' [0, Inf]; activity_italk: iTALK LR interaction score, ligand x receptor expression product [0,Inf]; activity_scsr: SCSR LR interaction score [0,1]; specificity_natmi: NATMI specificity score [0, 1]. 
+
+AGGREGATE SCORES. overall_activity: %max activity [0,100]; overall_specificity: giti index [0,100]; percentile_activity: 'overall_activity' percentile rank [0,100]; percentile_specificity: 'overall_specificity' percentile rank [0,100]; as_para_score: projection onto parallel a-s axis [-141, 141]; as_perp_score: projection onto perpendicular a-s axis [-141, 141]. 
 
 Row {.tabset}
 -------------------------------------
 
-```{r pp3}
+### Cluster Scores
 
- plt.cur <-  plt.granular.list[["growth factor"]] 
-if (is.null(plt.cur)){
-  out <- NULL
-} else {
-  
-    out <- lapply(seq_along(plt.cur), function(i) {
-  
-  s1 <- names(plt.cur)[i]
-  s2 <- paste0("plt.cur[[", i, "]]")
-  
-  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 18, fig.height=7, message=FALSE, warning=FALSE}", paste("p3", i, sep = "")))
-  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
-  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-  
-  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
-  
-})
-  
-}
-
-```
-
-`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
-
-```{r pp3 save,include = FALSE}
+```{r overall tables}
 
 try({
-  for (i in 1:length(plt.cur)){
-    plot.name <- paste0("M12_LR_dotplot_growthfactor_", names(plt.cur)[i] ,".pdf")
-    plot.name <- gsub(" -> ", "-", plot.name)
-    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
-            plot.handle = plt.cur[[i]], 
-            fig.width = 18, fig.height=7, save.flag = save.pdf)
-  } 
+  write.csv(df.final, file = paste0(output.path, "Tables/", "LR_cluster_scores.csv"), 
+            row.names = F) 
 }, silent = T)
 
-
-```
-
-4| Other
-===================================== 
-
-Row {.tabset}
--------------------------------------
-
-```{r pp4}
-
- plt.cur <-  plt.granular.list[["other"]] 
-if (is.null(plt.cur)){
-  out <- NULL
-} else {
-  
-    out <- lapply(seq_along(plt.cur), function(i) {
-  
-  s1 <- names(plt.cur)[i]
-  s2 <- paste0("plt.cur[[", i, "]]")
-  
-  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
-  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width = 18, fig.height=7, message=FALSE, warning=FALSE}", paste("p4", i, sep = "")))
-  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
-  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-  
-  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
-  
-})
-  
-}
-
-```
-
-`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
-
-```{r pp4 save,include = FALSE}
-
 try({
-  for (i in 1:length(plt.cur)){
-    plot.name <- paste0("M12_LR_dotplot_other_", names(plt.cur)[i] ,".pdf")
-    plot.name <- gsub(" -> ", "-", plot.name)
-    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
-            plot.handle = plt.cur[[i]], 
-            fig.width = 18, fig.height=7, save.flag = save.pdf)
-  } 
+  write.csv(df.final.top, file = paste0(output.path, "Tables/", "LR_top_cluster_scores.csv"), 
+            row.names = F) 
 }, silent = T)
 
-
-```
-
-
-LR Table
-===================================== 
-
-```{r detailed table output,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
-
 try({
-  df.comm.output <- res.comm.list[["pooled"]]
-  df.comm.output$interaction.score <- signif(df.comm.output$cell_from_mean_exprs * df.comm.output$cell_to_mean_exprs, 3)
-  df.comm.output <- df.comm.output %>% dplyr::filter(interaction.score > 0.1)
-  
-  datatable(df.comm.output, 
-            filter = 'top',
-            extensions = 'Buttons',
-            options = list(pageLength = 50,
-                           dom = 'Bfrtip', 
-                           buttons = c('copy', 'csv', 'pdf')))
-  
-  write.csv(df.comm.output, file = paste0(output.path, "Tables/", "LR_table.csv"), 
+  write.csv(df.final2, file = paste0(output.path, "Tables/", "LR_aggregate_scores.csv"), 
             row.names = F) 
 }, silent = T)
 
 
+flex.asDT(df.final.top)
 ```
+
+### Aggregate Scores
+
+```{r}
+
+try({
+  flex.asDT(df.final2)
+}, silent = T)
+```
+
 
 ```{r analysis log final}
 
@@ -1449,14 +3501,14 @@ try({
 
 ```{r merge pdfs, include = FALSE}
 
-# combine pdfs into single binder
-if (save.pdf){
-  try({
-    pdf.list <- list.files (path = paste0(output.path, "PDF/") )
-    pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
-    pdf.list <- pdf.list[validUTF8(pdf.list)]
-    pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
-  }, silent = T)
-}
+# # combine pdfs into single binder
+# if (save.pdf){
+#   try({
+#     pdf.list <- list.files (path = paste0(output.path, "PDF/") )
+#     pdf.list <- paste0( paste0(output.path, "PDF/"), pdf.list[grepl(".pdf", pdf.list)])
+#     pdf.list <- pdf.list[validUTF8(pdf.list)]
+#     pdftools::pdf_combine(pdf.list, output =  paste0(output.path, "PDF/merged_binder.pdf"))
+#   }, silent = T)
+# }
 
 ```
