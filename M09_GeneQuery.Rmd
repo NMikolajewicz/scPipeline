@@ -88,11 +88,12 @@ which.input <- list(
   #   4: top N cluster markers
   #   5: M09_type5_queries.csv; GO/Reactome genesets
   #   6: scMiko internal geneset
-  query_input_format = 3,
+  query_input_format = 1,
   do.module = NA, #options: T, F, NA; if NA, takes default, otherwise overides. 
   
   # specify gene set (only if query_input_format == 1 | 2 | 5 | 6)
   which.gene.set =c('MesoList_240421') # character (e.g., sex.specific)
+  # which.gene.set =c("gene1", "gene2")
 )
 
 # cgr8_cluster_markers
