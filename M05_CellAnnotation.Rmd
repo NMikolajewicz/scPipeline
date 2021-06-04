@@ -1634,7 +1634,7 @@ Sidebar {.sidebar}
 
 **Gene set expression**: Visualize top cell-type-specific gene sets based on composite scoring. 
 
-**A**| Dotplot visualizing gee expression across different cell clusters.\
+**A**| Dotplot visualizing gene expression across different cell clusters.\
 **B**| Cluster-level gene set composite scores.\
 **C**| Gene set enrichment using hypergeometric over-representation analysis. 
 
