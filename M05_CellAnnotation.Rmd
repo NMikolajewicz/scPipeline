@@ -38,7 +38,7 @@ start.time <- proc.time()
 
 # List of packages to load
 packages2load <- c("Seurat", "GSVA", "scMiko", "presto",
-                   "plyr", "dplyr", "tidyr", "reshape2", "preprocessCore", "stringr", "RColorBrewer", "ggplot2", "gridExtra", 
+                   "plyr", "dplyr", "tidyr", "reshape2", "preprocessCore", "stringr", "RColorBrewer", "ggplot2", "gridExtra", "GGally", "splines",
                    "DT", "flexdashboard", "ggpmisc", "ggExtra", "grid", "ggrepel", "future", "gridGraphics", "ggwordcloud", "scales",
                    "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "tm", "homologene", "parallel", "doParallel", "foreach", "quantreg")
 
@@ -51,12 +51,12 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 
 ```{r analysis specifications}
-
+# , "invitro.GBM", "MCA_50", "Zhang_2019", "Panglao.Hs"  "GBM", "GBM.immune",   "cancerSEA", 
 parameter.list <- list(
-  input.file = "R443_M02_NM2_p9_GBM_PR_integrated_SCTrerun_110521.Rdata",
-  which.references = c("cancerSEA", "immune.signatures", "immuneSubtype", "GBM",  
-                       "cycling.seurat", "immune.Monaco", "invitro.GBM", "MCA_50", "Zhang_2019", "Panglao.Hs"),
-  cluster.resolution = 1, # OPTIONAL; range 0 to inf (default = 1)
+  input.file = "p13_renca_clean_300521.rds",
+  which.references = c("immune.signatures", "immuneSubtype",
+                       "cycling.seurat", "immune.Monaco", "MCA_50", "Zhang_2019", "Panglao.Hs",  "cancerSEA", "Kidney_Healthy_Mm"), #"MCA_50", "Zhang_2019", "Panglao.Hs"
+  cluster.resolution = 0.4, # OPTIONAL; range 0 to inf (default = 1)
   clean.clusters = T,
   subsample_factor = 1, # OPTIONAL; range 0 to 1 (default = 1)
   min.geneset.size = 3, # recommended: 3 (for TF classification, set to 1)
@@ -66,7 +66,9 @@ parameter.list <- list(
   n.workers = list(
     scoring = 12
   ),
-  save.pdf = T,
+  save.pdf = F,
+  show.top.n.gene.panels = 5,
+  max.gene.panels.allowed = 75,
   print.inline = FALSE ,
   update.log = T
   
@@ -168,7 +170,12 @@ invisible({gc()})
 if (parameter.list$clean.clusters) so.query <- cleanCluster(so.query, return.plots = F)
 parameter.list$species <- detectSpecies(so.query)
 
+
+
+     
+
 ```
+
 
 
 ```{r analysis log}
@@ -1195,6 +1202,8 @@ for (i in 1:length(u.cl)){
 
 message("Generating dotplots...")
 
+
+
 # wrangle genesets into workable format
 all.signatures.list <- list()
 if (length(signatures.symbol) > 0){
@@ -1220,9 +1229,12 @@ if (length(signatures.symbol) > 0){
 plt.signature.subset <- TRUE # (flag specifying whether to plot all or just subset)
 
 # select top genesets to visualize
-df.sig2plt.cluster <- unique((vst.merge.cloud %>% dplyr::group_by(cluster) %>% dplyr::top_n(5, composite))[ ,c("cell.type", "ref.set")])
+
+df.sig2plt.cluster <- unique((vst.merge.cloud %>% 
+                                dplyr::group_by(cluster) %>% 
+                                dplyr::top_n(parameter.list$show.top.n.gene.panels, composite))[ ,c("cell.type", "ref.set")])
 df.sig2plt <- unique((vst.merge.cloud %>% dplyr::filter(sig.lenient,composite > 1) %>% dplyr::arrange(-composite))[ ,c("cell.type", "ref.set")])
-if (nrow(df.sig2plt) > 50) df.sig2plt <- df.sig2plt[1:50, ]
+if (nrow(df.sig2plt) > parameter.list$max.gene.panels.allowed) df.sig2plt <- df.sig2plt[1:parameter.list$max.gene.panels.allowed, ]
 df.sig2plt <- unique(bind_rows(df.sig2plt, df.sig2plt.cluster))
 
 # geneset pathway enrichement
@@ -1284,6 +1296,10 @@ if (show.gene.exp){
       if (n.genes > 70) xlab.size <- 7
       if (n.genes > 80) xlab.size <- 6
       
+      
+
+      
+    # orderedFactor()
       p1 <- DotPlot(so.query, features = cur.signature.genes, dot.scale = 8, cols="RdBu") +
         theme_miko(legend =T)  +
         theme(legend.position = "bottom") + 
@@ -1483,7 +1499,7 @@ Scores are calculated for each gene set using each of the following methods:\
 * LogFC: Log fold-change (average)\
 * Pd: Difference in expressing fraction (average)\
 **Step 2**: Center scores.\
-For each scoring method, component scores are stratified by cluster the relationship between gene set size and component score is fitted using loess regression. The residuals are *centered component scores*.\
+For each scoring method, component scores are stratified by cluster and the relationships between gene set size and component score are fitted using loess regression. The residuals are *centered component scores*.\
 **Step 3**: Perform variance stabilization and standardization.\
 Centered component scores are stratified by scoring method and cluster, and a variance stabilizing transform is applied using quantile B-spline regression. The scores are then standardized to obtain *standardized component scores*.\
 **Step 4**: Determine *composite score*.\
@@ -1618,7 +1634,7 @@ Sidebar {.sidebar}
 
 **Gene set expression**: Visualize top cell-type-specific gene sets based on composite scoring. 
 
-**A**| Dotplot visualizing gee expression across different cell clusters.\
+**A**| Dotplot visualizing gene expression across different cell clusters.\
 **B**| Cluster-level gene set composite scores.\
 **C**| Gene set enrichment using hypergeometric over-representation analysis. 
 
