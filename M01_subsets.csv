@@ -65,4 +65,9 @@ pilot12.Hs,LM,"01, 02, 03"
 pilot12.Hs,LM.trouble,"01, 02, 03, 04"
 pilot14.Hs,meso,MesoDiff
 pilot14.Mm,esc,ESC
-pilot14.Mm,gbm,"CT2A_, GL261_"
+pilot14.Mm,invitro.gbm,"CT2A_, GL261_"
+pilot14.Hs,mix,08_
+pilot14.Mm,mix,08_
+pilot14.Hs,lung,"L1, L2, L3"
+pilot14.Hs,PR,"37_, 38_"
+pilot14.Mm,invivo.gbm,"39_, 40_"
