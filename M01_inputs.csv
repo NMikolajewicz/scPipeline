@@ -44,3 +44,6 @@ richards.gbm,Hs,Richards_NatureCancer_GBM_scRNAseq_counts.csv,,,Raw_Datasets/Exp
 richards.gsc,Hs,Richards_NatureCancer_GSC_scRNAseq_counts.csv,,,Raw_Datasets/Expression_matrix/Richards_2021_GSC/,3
 pilot13.Mm,Mm,pilot_13_celsius_Renca_23Feb21_sci_summary.RData,Renca32_pcr_barcodes_20201006_96used.txt,Renca32_rt_barcodes_20200111NewFormat_288used.txt,Raw_Datasets/pilots/,1
 15-Neftel_2019,Hs,15-Neftel_2019,,,Raw_Datasets/cell_ranger/,2
+pilot12.Hs,Hs,pilot12_ParallelMapped_sci_summary.RData,HH12_pcr_barcodes_20201006_96used.txt,HH12_rt_barcodes_20201006NewFormat_192used.txt,Raw_Datasets/pilots/,1
+pilot14.Hs,Hs,pilot14_ParallelMappedHS_sci_summary.RData,Run14_pcr_barcodes_20210730_96used.txt,Run14_rt_barcodes_20210730NewFormat_288used.txt,,1
+pilot14.Mm,Mm,pilot14_ParallelMappedMM_sci_summary.RData,Run14_pcr_barcodes_20210730_96used.txt,Run14_rt_barcodes_20210730NewFormat_288used.txt,,1
