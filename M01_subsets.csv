@@ -71,3 +71,11 @@ pilot14.Mm,mix,08_
 pilot14.Hs,lung,"L1_, L2_, L3_"
 pilot14.Hs,PR,"37_, 38_"
 pilot14.Mm,invivo.gbm,"39_, 40_"
+pilot14.Hs_1mm,meso,MesoDiff
+pilot14.Mm_1mm,esc,ESC
+pilot14.Mm_1mm,invitro.gbm,"CT2A_, GL261_"
+pilot14.Hs_1mm,mix,08_
+pilot14.Mm_1mm,mix,08_
+pilot14.Hs_1mm,lung,"L1_, L2_, L3_"
+pilot14.Hs_1mm,PR,"37_, 38_"
+pilot14.Mm_1mm,invivo.gbm,"39_, 40_"

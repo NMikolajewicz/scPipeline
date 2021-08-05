@@ -46,3 +46,5 @@ pilot13.Mm,Mm,pilot_13_celsius_Renca_23Feb21_sci_summary.RData,Renca32_pcr_barco
 15-Neftel_2019,Hs,15-Neftel_2019,,,Raw_Datasets/cell_ranger/,2
 pilot14.Hs,Hs,pilot14_ParallelMappedHS_sci_summary.RData,Run14_pcr_barcodes_20210730_96used.txt,Run14_rt_barcodes_20210730NewFormat_288used.txt,Raw_Datasets/pilots/,1
 pilot14.Mm,Mm,pilot14_ParallelMappedMM_sci_summary.RData,Run14_pcr_barcodes_20210730_96used.txt,Run14_rt_barcodes_20210730NewFormat_288used.txt,Raw_Datasets/pilots/,1
+pilot14.Hs_1mm,Hs,pilot14_ParallelMappedHS_1MM_sci_summary.Rdata,Run14_pcr_barcodes_20210730_96used.txt,Run14_rt_barcodes_20210730NewFormat_288used.txt,Raw_Datasets/pilots/,1
+pilot14.Mm_1mm,Mm,pilot14_ParallelMappedMM_1MM_sci_summary.Rdata,Run14_pcr_barcodes_20210730_96used.txt,Run14_rt_barcodes_20210730NewFormat_288used.txt,Raw_Datasets/pilots/,1
