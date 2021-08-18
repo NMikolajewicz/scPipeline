@@ -57,16 +57,16 @@ parameter.list <- list(
   # input.file = "M01_NM2_R1_test_300720.Rdata",
   # input.file = "so_immune_PR_invivo_integrated_210421.rds",
   # input.file = "p13_renca_clean_300521.rds",
-  # input.file = "R554_M02_NM2_p10_p14_CGR8_integrated_byReplicate_rpca_SCTrerun_110821.Rdata",
+  input.file = "R554_M02_NM2_p10_p14_CGR8_integrated_byReplicate_rpca_SCTrerun_110821.Rdata",
   # input.file = "R443_M02_NM2_p9_GBM_PR_integrated_SCTrerun_110521.Rdata",
   # input.file = "R404_M02_NM2_celsius_renca_rpca_filtered_220321.Rdata",
   
-  input.file = "R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
+  # input.file = "R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
    # input.file = "R71_M01_NM2_p10_CGR8_310820.Rdata",
   # input.file = "branch_p12_meso_020521.rds",
   # input.file = 	"R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
   # input.file = "R416_M02_NM2_p12_meso_integrated_170421.Rdata",
-  cluster.resolution = 0.5,
+  cluster.resolution = 0.9,
   subsample_factor = 1,
   subset.data = NA,
   pathway.db = "Bader", #Bader, GO
@@ -99,18 +99,20 @@ parameter.list <- list(
   #                       p14 = c("B2m_MHC1pos.sc", "B2m_MHC1pos.ortho")),
   # da.control = "WT.sc", 
   da.which.pairs = list(P1 = c("C15", "C50"), 
-                        P2 = c("C15", "WT"), 
-                        P3 = c("C15", "C76"), 
-                        P4 = c("C15", "C68"), 
+                        P2 = c("C15", "WT"),
+                        P3 = c("C15", "C76"),
+                        P4 = c("C15", "C68"),
                         P5 = c("C15", "C2"),
-                        P6 = c("WT", "C50"), 
-                        P7 = c("WT", "C15"), 
-                        P8 = c("WT", "C76"), 
-                        P9 = c("WT", "C68"), 
-                        P10 = c("WT", "C2")),   # specify specific pairs to compare; list (e.g., list(pair1 = c("wt", "c1"), pair2 = c("wt", "c2"))
+                        P6 = c("C15", "C53"),
+                        P7 = c("WT", "C50"),
+                        P8 = c("WT", "C15"),
+                        P9 = c("WT", "C76"),
+                        P10 = c("WT", "C68"),
+                        P11 = c("WT", "C2"),
+                        P12 = c("WT", "C53")),   # specify specific pairs to compare; list (e.g., list(pair1 = c("wt", "c1"), pair2 = c("wt", "c2"))
   # da.control = NA       # specify control group to compare all others pairs to
 
-  table.output.n = 200, # output top N results in tables (per group)
+  table.output.n = 100, # output top N results in tables (per group)
   print.inline = FALSE ,
   save.pdf = T,
   update.log = T
@@ -141,10 +143,10 @@ filter.parameters <- list(
 
 
 # print inline
-print.inline <- FALSE # OPTIONAL; TRUE/FALSE
+# print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 
 # save PDF
-save.pdf <- update.log <- T
+# save.pdf <- update.log <- T
 
 
 ```
@@ -424,6 +426,8 @@ if ((length(da.par.av) == 0) | length(da.comp.list) == 0){
 
 ```{r DA analysis - MILO}
 
+# set seed prior to subsampling during DA analysis
+set.seed(1023)
 
 miko_message("Performing differential abudnance analysis (modified Milo method)...")
 da.res.list <- list()
@@ -441,7 +445,7 @@ for (i in 1:length(da.comp.list)){
 
     res.current <- da_Run(object = so.query[ , !is.na(so.query@meta.data$da.group)], 
                           condition.group = "da.group", sample.group = NA, balance.samples = T, 
-                          balance.size = min.size, Control.group = "control")
+                          balance.size = min.size, reference.group = "control")
     
     invisible({gc()})
     
@@ -462,7 +466,7 @@ for (i in 1:length(da.res.list)){
   plt.da.list[[names(da.res.list)[i]]] <- da.res.list[[i]]$da.umap +
     labs(title = names(da.res.list)[i],
          caption = paste0("Control: " , paste(da.comp.list[[i]][["control"]], collapse = ", "), 
-                           "\Case: " , paste(da.comp.list[[i]][["case"]], collapse = ", ")))
+                           "\nCase: " , paste(da.comp.list[[i]][["case"]], collapse = ", ")))
 }
 
 # plt.da.list
@@ -1788,6 +1792,24 @@ colnames(deg.all.out) <- c("pair", "diff_abundance_cluster", "feature", "avgExpr
 
 flex.asDT(deg.all.out)
 ```
+
+
+### DA Table
+
+```{r save abundance table 2}
+
+colnames(df.da.summary) <- c("cluster", "logFC", "sd", "se", "ci.width", "n.neigborhoods", "ci.low", "ci.low", "z", "p", "significant", "pair")
+df.da.summary <- df.da.summary %>% dplyr::select(c("pair", "cluster", "logFC", "sd", "se","n.neigborhoods",  "ci.width", "ci.low", "ci.low", "z", "p", "significant"))
+
+round.features <- c("logFC", "sd", "se", "ci.width", "ci.low", "ci.low", "z", "p")
+for (i in 1:length(round.features)){
+  df.da.summary[ ,round.features[i]] <- signif(df.da.summary[ ,round.features[i]], 3)
+}
+
+
+flex.asDT(df.da.summary)
+```
+
 
 Row {.tabset data-height=550}
 -------------------------------------
