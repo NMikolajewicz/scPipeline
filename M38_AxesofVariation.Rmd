@@ -4,6 +4,7 @@ date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
+    self_contained: false
     vertical_layout: fill
     source_code: embed
     theme: flatly
@@ -54,19 +55,20 @@ suppressMessages(suppressWarnings(lapply(packages2load, library, character.only 
 
 # parameter specification
 parameter.list <- list(
-  # input.file = "M01_NM2_R1_test_300720.Rdata",
+  input.file = "M01_NM2_R1_test_300720.Rdata",
   # input.file = "R404_M02_NM2_celsius_renca_rpca_filtered_220321.Rdata",
-  input.file = "R443_M02_NM2_p9_GBM_PR_integrated_SCTrerun_110521.Rdata",
+  # input.file = "p12_cd34pos_only_220621.rds", 
+  # input.file = "R443_M02_NM2_p9_GBM_PR_integrated_SCTrerun_110521.Rdata",
   # input.file = "R304_M27_NM2_M02_BC2_allGBM_tumorStringent_tier1_251120.Rdata",
   # input.file = "branch_p12_meso_020521.rds",
   # input.file = 	"R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
   # input.file = "R416_M02_NM2_p12_meso_integrated_170421.Rdata",
-  cluster.resolution = 0.5,
+  cluster.resolution = 0.8,
   subsample_factor = 1,
-  pca.cum.var.explained = 0.9, 
+  pca.cum.var.explained = 0.8, 
   pca.reduction.name = "pca", 
   subset.data = NA,
-  gsea.n.workers = 6,
+  gsea.n.workers = 12,
   pathway.db = "Bader" #Bader, GO
 
 )
@@ -82,12 +84,10 @@ filter.parameters <- list(
 print.inline <- FALSE # OPTIONAL; TRUE/FALSE
 
 # save PDF
-save.pdf <- update.log <- T
+save.pdf <- update.log <- F
 
 
 ```
-
-
 
 ```{r load data, warning = FALSE}
 
@@ -120,7 +120,7 @@ t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "integration.anchors")
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
                          species =  parameter.list$species, resolution= parameter.list$cluster.resolution, 
-                         subset.data = parameter.list$subset.data, 
+                         subset.data = parameter.list$subset.data, use.integrated = T,
                          subsample = parameter.list$subsample_factor, M00_subgroup.path = "M00_subgroups.csv",
                          terms2drop = t2d, rmv.pattern = "so", keep.default.assay.only = T)
 
@@ -280,6 +280,8 @@ if (gsea.n.workers > 1){
     runGSEA(gene = rownames(df.pca.loading), value = unlist(x), species = parameter.list$species, db = parameter.list$pathway.db)
   })
   
+  gsea.res$plt.gsea <- gsea.res$plt.gsea 
+  
   # stop workers
   parallel::stopCluster(cl)
   
@@ -290,10 +292,11 @@ if (gsea.n.workers > 1){
     runGSEA(gene = rownames(df.pca.loading), value = unlist(x), species = parameter.list$species, db = parameter.list$pathway.db)
   })
   
+  
 }
 
 message("Extracting GSEA summary plots...")
-gsea.plots <- pbapply::pblapply(gsea.res, function(x) x$plt.gsea)
+gsea.plots <- pbapply::pblapply(gsea.res, function(x) x$plt.gsea + theme(axis.text.y = element_text(size=7)))
 names(gsea.plots) <- gsub("_", "", names(gsea.plots))
 
 
