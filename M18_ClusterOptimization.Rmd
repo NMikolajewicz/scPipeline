@@ -52,37 +52,27 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 # M18
 parameter.list <- list(
-  input.file = "R443_M02_NM2_p9_GBM_PR_integrated_SCTrerun_110521.Rdata",
-  cluster.resolution = c(0.1, 0.15, 0.2,0.3,0.35, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, seq(1.2, 3, by = 0.2)),
+  # input.file = "R443_M02_NM2_p9_GBM_PR_integrated_SCTrerun_110521.Rdata",
+  # input.file = "so_immune_GL261_invivo_integrated_210421.rds", 1.8
+  # input.file = "R579_M01_NM2_p15_HAP1_GIN_230821.Rdata",
+  input.file = "R581_M02_NM2_p15_HAP1_GIN_integrated_rpca_230821.Rdata",
+  # input.file = "so_immune_CT2A_invivo_integrated_210421.rds", 1.2
+  # input.file = "R554_M02_NM2_p10_p14_CGR8_integrated_byReplicate_rpca_SCTrerun_110821.Rdata",
+  cluster.resolution = c(0.05, 0.1, 0.2, 0.3,0.35, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1),
   lfc.threshold = 0.5, # log fold change threshold (0.5 recommended)
-  fdr.threshold = 0.01,
+  fdr.threshold = 0.05,
+  group.singletons = F, # Default: T (recommended for clean datasets)
   print.inline = FALSE, # print inline
   subsample_factor = 1, # OPTIONAL; range 0 to 1 (default = 1)
   n.workers =list(  # specify number of workers (for parallelization)
-    clustering = 8, # data clustering
-    deg = 8         # DEG analysis
+    clustering = 4, # data clustering
+    deg = 4         # DEG analysis
   ),
   only.pos = T, # which markers to return
-  save.pdf = T, # save PDF
+  save.pdf = F, # save PDF
   update.log = T
 )
 
-
-# Query input
-# input.file <- "R6_M02_BC2_allGBM_271020.Rdata"
-# input.file <- "R416_M02_NM2_p12_meso_integrated_170421.Rdata"
-# input.file <- "R71_M01_NM2_p10_CGR8_310820.Rdata"
-# input.file <- "R65_M01_NM2_p11_neural_DIV7_270820.Rdata"
-# input.file <- "M01_NM2_R1_test_300720.Rdata"
-# input.file <- "R73_M02_NM2_M02_neuroDif_p41011_010920.Rdata"
-# input.file <- "R34_M27_NM2_0_01ds_p4789_allGBM_120820.Rdata"
-# input.file <- "R189_M01_NM2_p12_Meso_061020.Rdata"
-# input.file <- "R291_M01_NM2_Rambow_Melanoma_221120.Rdata"
-
-# specify cluster resolution
-# cluster.resolution <- c(0.01, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
-# cluster.resolution <- c(0.1, 0.15, 0.2,0.3,0.35, 0.4, 0.5, 0.6)
-# # cluster.resolution <- c(1, 1.5, 2)
 
 ```
 
@@ -92,6 +82,7 @@ message("Updating analysis log...")
 # Module
 df.log <- initiateLog("18, Cluster Optimization")
 df.log <- addLogEntry("Input File", parameter.list$input.file, df.log, "input.file")
+df.log <- addLogEntry("Group singletons when clustering", parameter.list$group.singletons, df.log, "group.singletons")
 df.log <- addLogEntry("Log FC Threshold", parameter.list$lfc.threshold, df.log, "lfc.threshold")
 df.log <- addLogEntry("p value Threshold", parameter.list$fdr.threshold, df.log, "fdr.threshold")
 df.log <- addLogEntry("Positive Markers Only", parameter.list$only.pos, df.log, "only.pos")
@@ -100,6 +91,9 @@ df.log <- addLogEntry("Cluster Resolution", parameter.list$cluster.resolution, d
 df.log <- addLogEntry("Subsample Factor", parameter.list$subsample_factor, df.log, "subsample_factor")
 df.log <- addLogEntry("Figures Printed in Notebook", parameter.list$print.inline, df.log, "print.inline")
 df.log <- addLogEntry("PDF saved", parameter.list$save.pdf, df.log, "save.pdf")
+
+
+
 
 
 ```
@@ -126,7 +120,6 @@ if (grepl(".Rdata|.RData", parameter.list$input.file)){
 
 if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
 
-
 if ("integrated" %in% names(so@assays)){
   terms2drop <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "sct")
 } else {
@@ -150,7 +143,6 @@ invisible({gc()})
 # parameter.list$species <- detectSpecies(so.query)
 
 ```
-
 
 ```{r}
 # determine prior log history
@@ -192,7 +184,9 @@ if (length(so.query@graphs) == 0){
 
 # iterate through each input file
 cluster.membership <- foreach(i = 1:length(parameter.list$cluster.resolution), .packages = c("Seurat"))  %dopar% {
-  so.query <- FindClusters(object = so.query, resolution = parameter.list$cluster.resolution[i], verbose = 0, algorithm = 1, modularity.fxn = 1)
+  so.query <- FindClusters(object = so.query, resolution = parameter.list$cluster.resolution[i], 
+                           group.singletons = parameter.list$group.singletons,
+                           verbose = 0, algorithm = 1, modularity.fxn = 1)
   return(so.query@meta.data[[paste0(assay.pattern, parameter.list$cluster.resolution[i])]])
 }
 
@@ -259,34 +253,74 @@ if (!graph.present) stop("Could not find valid KNN graph")
 
 df.purity <- NULL
 purity.umap.list <- list()
-for (i in 1:length(parameter.list$cluster.resolution)) {
-   current.cluster <- paste0(assay.pattern, parameter.list$cluster.resolution[i])
-  so.query <- neighborPurity(object = so.query, graph = cluster.graph, cluster.field = current.cluster) 
-  
-  purity.umap.list[[current.cluster]] <- FeaturePlot(so.query, "purity") + 
-    theme_miko(legend = T) + 
-    viridis::scale_color_viridis() + 
-    labs(title = "Purity Score", subtitle = paste0("Resolution: ", parameter.list$cluster.resolution[i])) + 
-    labs(x = "UMAP 1", y = "UMAP 2", color = "Purity")
 
-  df.purity <- bind_rows(df.purity, 
-                         data.frame(resolution = as.numeric(parameter.list$cluster.resolution[i]), 
-                                    name = current.cluster,
-                                    cluster = so.query@meta.data[ ,current.cluster],
-                                    purity = so.query@meta.data[ ,"purity"]))
+# downsample data if exceeding 10000 cells
+if (ncol(so.query) > 10000){
+  so.sub <- so.query[ , sample(colnames(so.query), 10000)]
+  df.pc <- propVarPCA(so.sub)
+  so.sub <- FindNeighbors(so.sub, dims = 1:(sum(df.pc$pc.cum_sum < 0.9) + 1), nn.method = "rann")
+}
+for (i in 1:length(parameter.list$cluster.resolution)) {
+  current.cluster <- paste0(assay.pattern, parameter.list$cluster.resolution[i])
+  if (ncol(so.query) > 10000){
+    
+    so.sub <- neighborPurity(object = so.sub, graph = cluster.graph, cluster.field = current.cluster) 
+    
+    suppressMessages({
+      suppressWarnings({
+        purity.umap.list[[current.cluster]] <- FeaturePlot(so.sub, "purity") + 
+          theme_miko(legend = T) + 
+          viridis::scale_color_viridis() + 
+          labs(title = "Purity Score", subtitle = paste0("Resolution: ", parameter.list$cluster.resolution[i])) + 
+          labs(x = "UMAP 1", y = "UMAP 2", color = "Purity")        
+      })
+    })
+    
+    
+    df.purity <- bind_rows(df.purity, 
+                           data.frame(resolution = as.numeric(parameter.list$cluster.resolution[i]), 
+                                      name = current.cluster,
+                                      cluster = so.sub@meta.data[ ,current.cluster],
+                                      purity = so.sub@meta.data[ ,"purity"]))
+    
+  } else {
+    
+    so.query <- neighborPurity(object = so.query, graph = cluster.graph, cluster.field = current.cluster) 
+    
+    purity.umap.list[[current.cluster]] <- FeaturePlot(so.query, "purity") + 
+      theme_miko(legend = T) + 
+      viridis::scale_color_viridis() + 
+      labs(title = "Purity Score", subtitle = paste0("Resolution: ", parameter.list$cluster.resolution[i])) + 
+      labs(x = "UMAP 1", y = "UMAP 2", color = "Purity")
+    
+    df.purity <- bind_rows(df.purity, 
+                           data.frame(resolution = as.numeric(parameter.list$cluster.resolution[i]), 
+                                      name = current.cluster,
+                                      cluster = so.query@meta.data[ ,current.cluster],
+                                      purity = so.query@meta.data[ ,"purity"]))
+    
+  }
+  
 }
   })
 })
 df.purity.sum <- df.purity %>%
   dplyr::group_by(resolution) %>%
   dplyr::summarize(purity.mean = mean(purity, na.rm = T), .groups = 'drop')
-plt.cluster.purity <- df.purity %>%
-  ggplot(aes(x = as.character(resolution), y = purity)) + 
-  geom_violin(fill = "grey") + 
-  geom_point(data = df.purity.sum, aes(x = as.character(resolution), y = purity.mean), size = 3) + 
-  geom_line(data = df.purity.sum, aes(x = as.character(resolution), y = purity.mean, group = 1)) + 
+
+plt.cluster.purity <- df.purity.sum %>%
+  ggplot(aes(x = as.numeric(resolution), y = purity.mean)) + 
+  geom_point(size = 3) + geom_line() + 
+  # geom_point(data = df.silw.sum, aes(x = cluster.resolution, y = sil.mean), size = 3) + 
+  # geom_line(data = df.silw.sum, aes(x = cluster.resolution, y = sil.mean, group = 1)) + 
   theme_miko() + 
-  labs(x = "Resolution", y = "Purity Score", title = "Cluster Purity Scores")
+  labs(x = "Resolution", y = "Purity Score", title = "Purity Score") + 
+  theme(panel.grid.minor = element_line(colour="grey95", size=0.1),
+        panel.grid.major = element_line(colour="grey85", size=0.1),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank()) +
+    scale_x_continuous(minor_breaks = seq(0 , max(df.purity.sum$resolution, na.rm = T), 0.1) , 
+                       breaks = seq(0, max(df.purity.sum$resolution, na.rm = T), 0.2))
 
 if (parameter.list$print.inline) {
   print(plt.cluster.purity)
@@ -483,9 +517,9 @@ plt.clust.spec <- qm.res.sum.sum.all %>%
   geom_path() + 
   theme_miko(legend = T) + 
   xlab("AUC") + 
-  ylab("Proportion of Clusters (>=1 DEG exceeding target AUC)") + 
+  ylab("Proportion of Clusters (>=1 DEG exceeding target DEG-AUC)") + 
   geom_vline(xintercept = 0.5, linetype = "dashed") + 
-  labs(title = "Cluster Marker Specificity", subtitle = "Proportion of clusters with atleast one DEG exceeding target AUC",
+  labs(title = "Cluster Marker Specificity", subtitle = "Proportion of clusters with atleast one DEG exceeding target DEG-AUC",
        color = "Resolution", caption = "DEG: differentially-expressed gene; AUC: area under curve")
 
 
@@ -514,12 +548,27 @@ for (i in 1:length(u.res)){
                            ))
 }
 
+# plt.auc.spec <- df.auc.spec %>%
+#   ggplot(aes(x = res, y = auc)) + 
+#   geom_point(size = 3) + 
+#   geom_line(aes(group = 1)) + 
+#   theme_miko() + 
+#   labs(x = "Resoluton", y = "Area under marker specificity curve", title = "Marker Specificity")
+
 plt.auc.spec <- df.auc.spec %>%
-  ggplot(aes(x = res, y = auc)) + 
-  geom_point(size = 3) + 
-  geom_line(aes(group = 1)) + 
+  ggplot(aes(x = as.numeric(res), y = auc)) + 
+  # geom_violin(fill = "grey") + 
+  geom_point(size = 3) + geom_line() + 
+  # geom_point(data = df.silw.sum, aes(x = cluster.resolution, y = sil.mean), size = 3) + 
+  # geom_line(data = df.silw.sum, aes(x = cluster.resolution, y = sil.mean, group = 1)) + 
   theme_miko() + 
-  labs(x = "Resoluton", y = "Area under marker specificity curve", title = "Marker Specificity")
+  labs(x = "Resolution", y = "Marker Specificity Score", title = "Marker Specificity") + 
+  theme(panel.grid.minor = element_line(colour="grey95", size=0.1),
+        panel.grid.major = element_line(colour="grey85", size=0.1),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank()) +
+    scale_x_continuous(minor_breaks = seq(0 , max(df.auc.spec$res, na.rm = T), 0.1) , 
+                       breaks = seq(0, max(df.auc.spec$res, na.rm = T), 0.2))
 
 if (parameter.list$print.inline){
   print(plt.auc.spec)
@@ -690,6 +739,7 @@ plt.heat.scaled.list <- list()
 for (i in 1:length(all.deg.list)){
   
   u.clust <- getOrderedGroups(so.query, which.group = names(all.deg.list)[i], is.number = T)
+  u.clust <- u.clust[!is.na(u.clust)]
   df.prest <- all.deg.list[[names(all.deg.list)[i]]]
 e.mat <- pivot_wider(df.prest %>% dplyr::select(feature, group, avgExpr), names_from = group, values_from = avgExpr)
 e.mat <- col2rowname(e.mat, "feature"); e.mat <- as.matrix(e.mat[ ,order(as.numeric(colnames(e.mat)))])
@@ -729,7 +779,6 @@ df.e.wide <- data.frame(gene = rownames(e.mat), as.data.frame(e.mat)); colnames(
   
 }
 
-
 ```
 
 
@@ -739,17 +788,32 @@ df.e.wide <- data.frame(gene = rownames(e.mat), as.data.frame(e.mat)); colnames(
 
 sil.plot <- list()
 
-df.umap <- getUMAP(so.query)[["df.umap"]]
+if (exists("so.sub")){
+  df.umap <- getUMAP(so.sub)[["df.umap"]]
+  umap.dist <- dist(x = (df.umap[,c("x", "y")]), method = "euclidean", diag = FALSE, upper = FALSE, p = 2)
+} else {
+  df.umap <- getUMAP(so.query)[["df.umap"]]
+  umap.dist <- dist(x = (df.umap[,c("x", "y")]), method = "euclidean", diag = FALSE, upper = FALSE, p = 2)
+}
 
-umap.dist <- dist(x = (df.umap[,c("x", "y")]), method = "euclidean", diag = FALSE, upper = FALSE, p = 2)
 mean.silw <- c()
 for (i in 1:length(all.deg.list)){
   
   set.name <- names(all.deg.list)[i]
+  
+  sil.plot.success <- F
+  try({
+
+  if (exists("so.sub")){
+  sil <- cluster::silhouette(
+    x = as.numeric(as.character(so.sub@meta.data[,set.name] )),
+    dist = umap.dist)
+  
+  } else {
   sil <- cluster::silhouette(
     x = as.numeric(as.character(so.query@meta.data[,set.name] )),
-    dist = umap.dist
-  )
+    dist = umap.dist)    
+  }
   
   sil.plot[[ set.name]] <- factoextra::fviz_silhouette(sil, print.summary = F) 
   
@@ -759,6 +823,14 @@ for (i in 1:length(all.deg.list)){
   
   
   sil.plot[[set.name]] <- sil.plot[[set.name]] + ggtitle(gtitle)
+  
+  sil.plot.success <- T
+      
+  }, silent = T)
+  
+  if (!sil.plot.success){
+    sil.plot[[set.name]] <- NULL
+  }
   
 }
 
@@ -771,6 +843,8 @@ for (i in 1:length(all.deg.list)){
 df.silw <- NULL
 for (i in 1:length(sil.plot)){
   set.name <- names(sil.plot)[i]
+  
+  if (is.null(set.name)) next
   clust.id <- as.numeric(gsub(assay.pattern, "", set.name))
   df.silw <- bind_rows(df.silw, data.frame(
     cluster.resolution = as.character(clust.id),
@@ -778,18 +852,33 @@ for (i in 1:length(sil.plot)){
   ))
 }
 
+
+if (!is.null(df.silw)){
+
 df.silw.sum <- df.silw %>% 
   dplyr::group_by(cluster.resolution) %>%
   dplyr::summarize(sil.mean = mean(sil.width, na.rm = T), .groups = 'drop')
-plt.silw.dep <- df.silw %>%
-  ggplot(aes(x = cluster.resolution, y = sil.width)) + 
-  geom_violin(fill = "grey") + 
-  geom_point(data = df.silw.sum, aes(x = cluster.resolution, y = sil.mean), size = 3) + 
-  geom_line(data = df.silw.sum, aes(x = cluster.resolution, y = sil.mean, group = 1)) + 
+plt.silw.dep <- df.silw.sum %>%
+  ggplot(aes(x = as.numeric(cluster.resolution), y = sil.mean)) + 
+  # geom_violin(fill = "grey") + 
+  geom_point(size = 3) + geom_line() + 
+  # geom_point(data = df.silw.sum, aes(x = cluster.resolution, y = sil.mean), size = 3) + 
+  # geom_line(data = df.silw.sum, aes(x = cluster.resolution, y = sil.mean, group = 1)) + 
   theme_miko() + 
-  labs(x = "Resolution", y = "Silhouette Width", title = "Silhouette Width")
-
+  labs(x = "Resolution", y = "Silhouette Width", title = "Silhouette Width") + 
+  theme(panel.grid.minor = element_line(colour="grey95", size=0.1),
+        panel.grid.major = element_line(colour="grey85", size=0.1),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank()) +
+    scale_x_continuous(minor_breaks = seq(0 , max(df.silw$cluster.resolution, na.rm = T), 0.1) , 
+                       breaks = seq(0, max(df.silw$cluster.resolution, na.rm = T), 0.2))
+ # , breaks = seq(0, 100, 10)
 if (parameter.list$print.inline) print(plt.silw.dep)
+
+  
+} else {
+  plt.silw.dep <- NULL
+}
 
 ```
 
@@ -854,12 +943,21 @@ df.clust.max <- df.clust.n[ ,c("clust.res", "deg.maxN")]; df.clust.max$type = "m
 df.clust.long <- bind_rows(df.clust.mean, df.clust.min, df.clust.max)
 
 plt.deg.n <- df.clust.long %>%
-  ggplot(aes(res, val, color = type)) + 
+  dplyr::filter(type == "min") %>%
+  ggplot(aes(res, val)) + 
+  # , color = type
   geom_point(size = 3) + 
   geom_line() + 
+  geom_hline(yintercept = 0, linetype = "dashed") + 
   theme_miko(legend = T) + 
   ggthemes::scale_color_ptol() + 
-  labs(title = "Number of Differentially-Expressed Genes (DEG)", x = "Resolution", y = "N DEG/Cluster", color = "Statistic") 
+  labs(title = "Number of Differentially-Expressed Genes (DEG)", x = "Resolution", y = "min(N DEG/Cluster)", color = "Statistic")  +
+  theme(panel.grid.minor = element_line(colour="grey95", size=0.1),
+        panel.grid.major = element_line(colour="grey85", size=0.1),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank()) +
+    scale_x_continuous(minor_breaks = seq(0 , max(df.purity.sum$resolution, na.rm = T), 0.1) , 
+                       breaks = seq(0, max(df.purity.sum$resolution, na.rm = T), 0.2))
                          
 
 plt.clust.n <- df.clust.n %>%
@@ -869,7 +967,13 @@ plt.clust.n <- df.clust.n %>%
   theme_miko() + 
   xlab("Resolution") + 
   ylab("Cluster Number") + 
-  labs(title = "Cluster Resolution vs. Number of Cell Populations")
+  labs(title = "Cluster Resolution vs. Number of Cell Populations")  +
+  theme(panel.grid.minor = element_line(colour="grey95", size=0.1),
+        panel.grid.major = element_line(colour="grey85", size=0.1),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank()) +
+    scale_x_continuous(minor_breaks = seq(0 , max(df.purity.sum$resolution, na.rm = T), 0.1) , 
+                       breaks = seq(0, max(df.purity.sum$resolution, na.rm = T), 0.2))
 
 if (parameter.list$print.inline){
   print(plt.clust.n)
@@ -895,8 +999,8 @@ for (i in 1:length(u.res)){
   geom_path(aes(group = res)) + 
   theme_miko(legend = F) +
     scale_color_manual(values = c("TRUE" = "tomato", "FALSE" = "grey")) + 
-  xlab("target AUC") + 
-  ylab("Proportion of Clusters\n(>=1 DEG exceeding target AUC)") + 
+  xlab("target DEG-AUC") + 
+  ylab("Proportion of Clusters\n(>=1 DEG exceeding target DEG-AUC)") + 
   geom_vline(xintercept = 0.5, linetype = "dashed") + 
   labs(title = "Marker Specificity", 
        color = "Resolution", caption = paste0("red curve: resolution = ", gsub(assay.pattern, "", u.res[i]), "; grey curve: other resolutions" ))
@@ -910,6 +1014,8 @@ for (i in 1:length(query_markers.list)){
   set.name <- names(query_markers.list)[i]
   set.name2 <- gsub(assay.pattern, "", set.name)
   
+  if (!is.null(df.silw)){
+
   avg.sil  <- signif(mean((df.silw %>% dplyr::filter(cluster.resolution == set.name2) )$sil.width, na.rm = T), 3)
   
   # A: silhoutte
@@ -921,6 +1027,10 @@ for (i in 1:length(query_markers.list)){
     labs(x = "Cell Index", y = "Silhouette Width") + 
     labs(title = "Silhoutte Plot", subtitle = NULL) + 
     labs(subtitle = paste0("Resolution = ", set.name2), caption = paste0("Average silhouette width = ", avg.sil))
+      
+  } else {
+    p1 <- NULL
+  }
   
   # B: purity score UMAP
   avg.pur <- signif(mean(purity.umap.list[[set.name]]$data$purity, na.rm = T), 3)
@@ -991,7 +1101,7 @@ Sidebar {.sidebar data-width=400}
 **D|** Resolution-specific purity scores. *Range* = [0,1]\
 **E|** Resolution-specific marker specificity scores. *Range* = [0,0.5]\
 **F|** Resolution-specific number of cell clusters.\
-**G|** Resolution-specific number of differentially-expressed genes per cluster. Minimum, mean, and max values are shown.\
+**G|** Resolution-specific minimum number of differentially-expressed genes per cluster.\
 **H|** Silhouette plot.\
 **I|** Purity scores overlaid on a UMAP. See notes for details. \
 **J|** Marker specificity curve. See notes for details. *Red curve*: specified resolution; *grey curves*: all other resolutions.\
@@ -1070,11 +1180,16 @@ Row {.tabset}
 ### Metrics
 ```{r opt stat, message=FALSE, warning=FALSE, fig.width=25, fig.height=5}
 
-plt.opt.stat <- cowplot::plot_grid( plt.silw.dep + geom_hline(yintercept = c(-1,1), linetype = "dashed"), 
-                                    plt.cluster.purity + geom_hline(yintercept = c(0,1), linetype = "dashed"), 
-                                    plt.auc.spec + geom_hline(yintercept = c(0,0.5), linetype = "dashed"),
-                                    plt.clust.n + labs(title = "Number of Clusters"), 
-                                     plt.deg.n + labs(title = "Number of DEGs"), nrow = 1, labels = c("C", "D", "E", "F", "G"), rel_widths = c(1,1,1,1,1.2))
+# + geom_hline(yintercept = c(-1,1), linetype = "dashed")
+# + geom_hline(yintercept = c(0,1), linetype = "dashed")
+# + geom_hline(yintercept = c(0,0.5), linetype = "dashed")
+
+plt.opt.stat <- cowplot::plot_grid( plt.silw.dep + labs(subtitle = "1 = dense/separated clusters; 0 = overlapping clusters") , 
+                                    plt.cluster.purity + labs(subtitle = "1 = within-neighborhood clusters consistent (pure); 0 = impure"), 
+                                    plt.auc.spec + labs(subtitle = "0.5 = specific DEG in all clusters; 0 = no specific DEGs"),
+                                    plt.clust.n + labs(title = "Number of Clusters", subtitle = ""), 
+                                     plt.deg.n + labs(title = "Minimum Number of DEGs", y = "Minimum N DEGs/cluster", subtitle = ""), nrow = 1, labels = c("C", "D", "E", "F", "G"), rel_widths = c(1,1,1,1,1))
+
 
 
 print(plt.opt.stat)
