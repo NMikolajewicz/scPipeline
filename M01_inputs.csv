@@ -49,3 +49,11 @@ pilot14.Mm,Mm,pilot14_ParallelMappedMM_sci_summary.RData,Run14_pcr_barcodes_2021
 pilot14.Hs_1mm,Hs,pilot14_ParallelMappedHS_1MM_sci_summary.Rdata,Run14_pcr_barcodes_20210730_96used.txt,Run14_rt_barcodes_20210730NewFormat_288used.txt,Raw_Datasets/pilots/,1
 pilot14.Mm_1mm,Mm,pilot14_ParallelMappedMM_1MM_sci_summary.Rdata,Run14_pcr_barcodes_20210730_96used.txt,Run14_rt_barcodes_20210730NewFormat_288used.txt,Raw_Datasets/pilots/,1
 pilot15.Hs,Hs,pilot15_ParallelMapped_sci_summary.RData,Run15_pcr_barcodes_20210820_96used.txt,Run15_rt_barcodes_20210820NewFormat_192used.txt,Raw_Datasets/pilots/,1
+16-O,Mm,16-Ochocka_2021_murine_GBM_immune-mctrl1,,,Raw_Datasets/cell_ranger/,2
+17-O,Mm,17-Ochocka_2021_murine_GBM_immune-mctrl2,,,Raw_Datasets/cell_ranger/,2
+18-O,Mm,18-Ochocka_2021_murine_GBM_immune-fctrl1,,,Raw_Datasets/cell_ranger/,2
+19-O,Mm,19-Ochocka_2021_murine_GBM_immune-fctrl2,,,Raw_Datasets/cell_ranger/,2
+20-O,Mm,20-Ochocka_2021_murine_GBM_immune-mtumor1,,,Raw_Datasets/cell_ranger/,2
+21-O,Mm,21-Ochocka_2021_murine_GBM_immune-mtumor2,,,Raw_Datasets/cell_ranger/,2
+22-O,Mm,22-Ochocka_2021_murine_GBM_immune-ftumor1,,,Raw_Datasets/cell_ranger/,2
+23-O,Mm,23-Ochocka_2021_murine_GBM_immune-ftumor2,,,Raw_Datasets/cell_ranger/,2
