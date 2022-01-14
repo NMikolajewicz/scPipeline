@@ -81,6 +81,7 @@ pilot14.Hs_1mm,PR,"37_, 38_"
 pilot14.Mm_1mm,invivo.gbm,"39_, 40_"
 pilot15.Hs,wt,WT_
 pilot16.Hs,hs_gbm,"1_01_MBT168P, 1_02_MBT289R	, 1_03_Z1-1P, 1_04_Z1-2R, 1_05_Z2-1P, 1_06_Z2-2R, 1_07_Z3-1P, 1_08_Z3-2R, 2_16_Z4-1Pm, 2_18_Z5-1Pm, 2_20_Z6-1Pm"
+pilot16.Hs,hs_gbm_v2,"1_01_MBT168P, 1_02_MBT289R, 1_03_Z1-1P, 1_04_Z1-2R, 1_05_Z2-1P, 1_06_Z2-2R, 1_07_Z3-1P, 1_08_Z3-2R, 2_16_Z4-1Pm, 2_17_Z4-2Rm, 2_18_Z5-1Pm, 2_19_Z5-2Rm, 2_20_Z6-1Pm, 2_21_Z6-2Rm"
 pilot16.Hs,hs_nk,"1_15_iNK, 2_33_PBMC"
 pilot16.Hs,hs_neuron,2_32_NP_KO
 pilot16.Ms,mm_gbm,"1_09_GL261-WT, 1_10_GL261-GpnmbKO, 1_11_GL261-GpnmbKO, 1_12_GL261-GpnmbKO, 1_13_CT2A-Itga5KO, 1_14_CT2A-Itga5KO, 2_22_CT2A-Itga5KO, 2_23_CT2A-Wwtr1KO, 2_24_CT2A-Wwtr1KO, 2_25_CT2A-Wwtr1KO, 2_26_CT2A-WT, 2_27_PBSctrl"
