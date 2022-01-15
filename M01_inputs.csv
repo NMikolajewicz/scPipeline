@@ -58,3 +58,4 @@ pilot15.Hs,Hs,pilot15_ParallelMapped_sci_summary.RData,Run15_pcr_barcodes_202108
 22-O,Mm,22-Ochocka_2021_murine_GBM_immune-ftumor1,,,Raw_Datasets/cell_ranger/,2
 23-O,Mm,23-Ochocka_2021_murine_GBM_immune-ftumor2,,,Raw_Datasets/cell_ranger/,2
 pilot16.Hs,Hs,pilot16_ParallelMapped_MM1_Hs_sci_summary.RData,Run16_pcr_barcodes_20220110_96used.txt,Run16_rt_barcodes_20220110NewFormat_192used.txt,Raw_Datasets/pilots/,1
+pilot16.Mm,Mm,pilot16_ParallelMapped_MM1_Mm_sci_summary.Rdata,Run16_pcr_barcodes_20220110_96used.txt,Run16_rt_barcodes_20220110NewFormat_192used.txt,Raw_Datasets/pilots/,1
