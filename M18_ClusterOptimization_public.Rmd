@@ -1,0 +1,1290 @@
+---
+title: "Cluster Optimization"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    source_code: embed
+    theme: 
+      bootswatch: flatly
+    navbar:
+      - { title: "scMiko", href: "https://nmikolajewicz.github.io/scMiko/" }  
+editor_options: 
+  chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = if (exists("user")){paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", 
+        paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", 
+      paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
+    )
+  })
+---
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+packages2load <- c("scMiko", "Seurat",
+                   "plyr", "dplyr", "tidyr", "reshape2", "RColorBrewer", "ggplot2", "gridExtra", 
+                   "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", 
+                    "zoo",    "future", "cluster", "doParallel", "parallel", "foreach",  "igraph", "presto")
+
+# load packages
+invisible(lapply(packages2load, library, character.only = TRUE))
+
+
+```
+
+
+```{r parameter specification}
+
+# M18
+parameter.list <- list(
+  # input.file = "M01_NM2_R1_test_300720.Rdata",
+  input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/R Packages/scMiko/data/so_tyser2021_220621.rds",
+  # input.file = "zeisel2018_mouse_neural_reference_010220.Rdata",
+  # input.file = "development_mouse_neural_reference_all_060321.Rdata",
+  # input.file = "R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
+  
+  # input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Mesoderm/Papers/Cao 2020 Dataset/so_cao2020.rds",
+  # input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Mesoderm/Papers/Tyser 2021 Dataset/so_tyser2021_220621.rds",
+  # input.file = "cao2019_seurat_object_271021.rds",
+  # input.file = "so_immune_CT2A_invivo_integrated_210421.rds", 1.2
+  # input.file = "R554_M02_NM2_p10_p14_CGR8_integrated_byReplicate_rpca_SCTrerun_110821.Rdata",
+  cluster.resolution = c(0.05, 0.1, 0.2, 0.3, 0.4, 0.5,  0.75,  1, 1.25, 1.5, 1.75, 2, 3),
+  lfc.threshold = 0.5, # log fold change threshold (0.5 recommended)
+  fdr.threshold = 0.05,
+  group.singletons = F, # Default: T (recommended for clean datasets)
+  print.inline = FALSE, # print inline
+  subsample_factor = 1, # OPTIONAL; range 0 to 1 (default = 1)
+  subsample_n = 10000,
+  n.workers =list(  # specify number of workers (for parallelization)
+    clustering = 4, # data clustering
+    deg = 4         # DEG analysis
+  ),
+  only.pos = T, # which markers to return
+  save.pdf = F, # save PDF
+  update.log = T,
+  rprofile.dir = F,
+  developer = F
+)
+
+
+```
+
+
+```{r analysis log}
+
+miko_message("Updating analysis log...")
+# Module
+df.log <- initiateLog("Cluster Optimization")
+df.log <- addLogEntry("Input File", parameter.list$input.file, df.log, "input.file")
+df.log <- addLogEntry("Group singletons when clustering", parameter.list$group.singletons, df.log, "group.singletons")
+df.log <- addLogEntry("Log FC Threshold", parameter.list$lfc.threshold, df.log, "lfc.threshold")
+df.log <- addLogEntry("p value Threshold", parameter.list$fdr.threshold, df.log, "fdr.threshold")
+df.log <- addLogEntry("Positive Markers Only", parameter.list$only.pos, df.log, "only.pos")
+df.log <- addLogEntry("Cluster Resolution", parameter.list$cluster.resolution, df.log, "cluster.resolution")
+df.log <- addLogEntry("Subsample Factor", parameter.list$subsample_factor, df.log, "subsample_factor")
+df.log <- addLogEntry("Subsample N", parameter.list$subsample_n, df.log, "subsample_n")
+df.log <- addLogEntry("Figures Printed in Notebook", parameter.list$print.inline, df.log, "print.inline")
+df.log <- addLogEntry("PDF saved", parameter.list$save.pdf, df.log, "save.pdf")
+
+```
+
+
+```{r load data, warning = FALSE}
+
+# Specify data directories
+if (parameter.list$rprofile.dir){
+  dir.preprocessed <- "Preprocessed_Datasets/"
+  if (!exists("data.path") & !exists("user")) {
+    stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+  }
+  
+}
+
+miko_message("Importing data...")
+if ((!grepl(".Rdata|.RData", parameter.list$input.file)) & !(grepl(".rds", parameter.list$input.file))){
+  parameter.list$input.file <- paste0(parameter.list$input.file, ".Rdata")
+} 
+
+if (parameter.list$rprofile.dir){
+  if (grepl(".Rdata|.RData", parameter.list$input.file)){
+    load(paste(data.path, dir.preprocessed, parameter.list$input.file, sep = ""));
+  } else if (grepl(".rds", parameter.list$input.file)) {
+    so <- readRDS(paste(data.path, dir.preprocessed, parameter.list$input.file, sep = ""))
+  }  
+} else {
+  if (grepl(".Rdata|.RData", parameter.list$input.file)){
+    load(parameter.list$input.file);
+  } else if (grepl(".rds", parameter.list$input.file)) {
+    so <- readRDS(parameter.list$input.file);
+  }
+}
+
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
+
+if ("integrated" %in% names(so@assays)){
+  terms2drop <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "sct")
+} else {
+  terms2drop <- c("ica", "tsne", "nmf", "corr", "gsva", "deg")
+}
+
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                             species = NULL, resolution= NULL, subset = NULL, 
+                             subsample = 1, M00_subgroup.path = "M00_subgroups.csv",
+                             terms2drop = terms2drop, rmv.pattern = "so", 
+                         scale.reprocessed = F, neighbors.reprocessed = T) # scale.reprocessed default = T
+
+# unpack results
+if (exists("so")) try({rm(so)}, silent = T)
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+rm(prep.list)
+invisible({gc()})
+parameter.list$species <- detectSpecies(so.query)
+
+```
+
+
+```{r prior log}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+
+
+```{r cluster helper function}
+
+miko_message("Clustering data...")
+
+# clustering data
+mc.list <- multiCluster(object = so.query, 
+                 resolutions = parameter.list$cluster.resolution, 
+                 assay = NULL, nworkers = parameter.list$n.workers$clustering , 
+                 pca_var = 0.9, 
+                 group_singletons = parameter.list$group.singletons, 
+                 algorithm = 1, 
+                 return_object = F)
+
+plt.umap_by_cluster <- mc.list$plots
+so.query <- mc.list$object
+cr_names <- mc.list$resolution_names
+cluster.name <- mc.list$cluster_names
+assay.pattern <- mc.list$assay_pattern
+rm(mc.list); invisible({gc()})
+
+```
+
+```{r calculate cluster purity}
+
+miko_message("Calculating purity scores...")
+
+
+availableNNgraph <- function(object, verbose = T){
+  
+  suppressMessages({
+    suppressWarnings({
+      graph.present <- F
+      try({
+        cluster.graph <- object@commands[["FindClusters"]]@params[["graph.name"]]
+        cluster.graph <- gsub("_s", "_", cluster.graph)
+        graph.present <- cluster.graph %in% names(object@graphs)
+      }, silent = T)
+      
+      if (!graph.present){
+        try({
+          cluster.graph <- paste0(current.assay, "_nn")
+          graph.present <- cluster.graph %in% names(object@graphs)
+        }, silent = T)  
+      }
+      if (!graph.present) stop("Could not find valid KNN graph")
+      
+    })
+  })
+  
+  miko_message("'", cluster.graph, "' is available for neighborhood purity scoring")
+  
+  return(cluster.graph)
+}
+
+
+
+
+multiPurity <- function(object, resolutions, cluster_graph = availableNNgraph(object), 
+                        n_subsample = 10000, pca_var = 0.9, assay_pattern = NULL, assay = NULL, 
+                        purity_threshold = 0.9){ #p_threshold = 0.05
+
+df.purity <- NULL
+purity.umap.list <- list()
+
+if (is.null(assay_pattern) & is.null(assay)){
+  assay_pattern <- paste0(DefaultAssay(object), "_snn_res.")
+} else if (is.null(assay_pattern) & !is.null(assay)){
+  assay_pattern <- paste0(assay, "_snn_res.")
+}
+cluster_graph_set <- cluster_graph
+
+# downsample data if exceeding 10000 cells
+if (ncol(object) > n_subsample){
+  so.sub <- object[ , sample(colnames(object), n_subsample)]
+  df.pc <- propVarPCA(so.sub)
+  so.sub <- FindNeighbors(so.sub, dims = 1:(sum(df.pc$pc.cum_sum < pca_var) + 1), nn.method = "rann")
+}
+for (i in 1:length(resolutions)) {
+  current.cluster <- paste0(assay_pattern, resolutions[i])
+  if (ncol(object) > n_subsample){
+    
+    so.sub <- neighborPurity(object = so.sub, graph = cluster_graph_set, cluster.field = current.cluster, verbose = F) 
+    
+    suppressMessages({
+      suppressWarnings({
+        purity.umap.list[[current.cluster]] <- FeaturePlot(so.sub, "purity") + 
+          theme_miko(legend = T) + 
+          viridis::scale_color_viridis() + 
+          labs(title = "Purity Score", subtitle = paste0("Resolution: ", resolutions[i])) + 
+          labs(x = "UMAP 1", y = "UMAP 2", color = "Purity")        
+      })
+    })
+    
+    
+    df.purity <- bind_rows(df.purity, 
+                           data.frame(resolution = as.numeric(resolutions[i]), 
+                                      name = current.cluster,
+                                      cell = colnames(so.sub), 
+                                      cluster = so.sub@meta.data[ ,current.cluster],
+                                      purity = so.sub@meta.data[ ,"purity"]))
+    
+  } else {
+    
+    # so.sub <- object; rm(object); invisible({gc()})
+    object <- neighborPurity(object = object, graph = cluster_graph_set, cluster.field = current.cluster, verbose = F) 
+    
+    suppressMessages({
+      suppressWarnings({
+
+    purity.umap.list[[current.cluster]] <- FeaturePlot(object, "purity") + 
+      theme_miko(legend = T) + 
+      viridis::scale_color_viridis() + 
+      labs(title = "Purity Score", subtitle = paste0("Resolution: ", resolutions[i])) + 
+      labs(x = "UMAP 1", y = "UMAP 2", color = "Purity")
+            
+      })
+    })
+    
+    df.purity <- bind_rows(df.purity, 
+                           data.frame(resolution = as.numeric(resolutions[i]), 
+                                      name = current.cluster,
+                                      cell = colnames(object), 
+                                      cluster = object@meta.data[ ,current.cluster],
+                                      purity = object@meta.data[ ,"purity"]))
+    
+  }
+  
+}
+
+df.purity.sum <- df.purity %>%
+  dplyr::group_by(resolution, cluster) %>%
+  dplyr::summarize(purity.mean1 = mean(purity, na.rm = T), 
+                   purity.median1 = median(purity, na.rm = T), 
+                   purity.sd1 = sd(purity, na.rm = T), .groups = 'drop') %>%
+  dplyr::group_by(resolution) %>%
+  dplyr::summarize(purity.mean = mean(purity.mean1, na.rm = T), 
+                   purity.min = min(purity.mean1),
+                   purity.max = max(purity.mean1),
+                   purity.sd = sd(purity.mean1, na.rm = T), .groups = 'drop')
+
+df.purity.sum$z <- (1 - df.purity.sum$purity.mean)/df.purity.sum$purity.sd
+df.purity.sum$z[is.na(df.purity.sum$z)] <- 0
+df.purity.sum$p <- pnorm(q=df.purity.sum$z, lower.tail=FALSE)
+
+plt.cluster.purity <- df.purity.sum %>%
+  ggplot(aes(x = as.numeric(resolution), y = purity.mean)) + 
+   geom_line() + 
+  # scale_color_manual(values = c("TRUE" = "tomato", "FALSE" = "black")) + 
+  geom_point(size = 3) + #, aes(color = p < p_threshold)
+  geom_hline(yintercept = purity_threshold, linetype = "dashed") + 
+  theme_miko(legend = T) + 
+  theme(legend.position = "bottom") + 
+  labs(x = "Resolution", y = "Purity Score", title = "Purity Score") +  #, color = paste0("Impure (p<", p_threshold, ")")
+  theme(panel.grid.minor = element_line(colour="grey95", size=0.1),
+        panel.grid.major = element_line(colour="grey85", size=0.1),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank()) +
+    scale_x_continuous(minor_breaks = seq(0 , max(df.purity.sum$resolution, na.rm = T), 0.1) , 
+                       breaks = seq(0, max(df.purity.sum$resolution, na.rm = T), 0.2))
+
+
+
+return(
+  list(
+    purity_raw = df.purity,
+    purity_summary = df.purity.sum,
+    resolution_plot = plt.cluster.purity,
+    umap_plot = purity.umap.list
+  )
+)
+
+  
+}
+
+
+
+mp.list <- multiPurity(object = so.query, 
+                       resolutions = parameter.list$cluster.resolution, 
+                       cluster_graph = availableNNgraph(so.query), 
+                       n_subsample = 10000, 
+                       pca_var = 0.9, 
+                       assay_pattern = assay.pattern, assay = NULL, 
+                       purity_threshold = 0.9) #, p_threshold = 0.05
+
+
+
+
+df.purity <- mp.list$purity_raw
+df.purity.sum <- mp.list$purity_summary
+plt.cluster.purity <- mp.list$resolution_plot
+purity.umap.list <- mp.list$umap_plot
+rm(mp.list); invisible({gc()})
+
+if (parameter.list$print.inline){
+  print(plt.cluster.purity)
+ 
+}
+
+```
+
+```{r subsample data here, warning = FALSE}
+
+try({
+  if ((parameter.list$subsample_factor < 1) | (parameter.list$subsample_n < ncol(so.query))){
+    so.query <-   downsampleSeurat(object = so.query, subsample.factor = parameter.list$subsample_factor, subsample.n = parameter.list$subsample_n)
+  }
+}, silent = T)
+
+
+```
+
+```{r check gene rep and convert if necessary, warning = FALSE}
+
+current.assay <- DefaultAssay(so.query)
+if (!is.null(gNames.list)){
+  gene.rep <- checkGeneRep(gNames.list, as.vector(rownames(so.query)))
+  if (gene.rep == "ensembl"){
+    so.query <- ens2sym.so(so.query, gNames.list)
+  }
+}
+
+
+```
+
+
+```{r find DEG markers, warning=FALSE}
+
+multiDEG <- function(object, groups, nworkers = 1, fdr_threshold = 0.05, logfc_threshold = 0, only_pos = T, verbose = T ){
+
+# initiate list to store cluster markers
+query_markers.list <- list()
+
+# store current identities
+cur_idents <- Idents(object)
+# so.markers <- so.query
+
+# assay for DEG
+ deg_assay <- c("RNA", "SCT")[which(c("RNA", "SCT") %in% names(object@assays)) ]
+ if (length(deg_assay) == 0){
+   deg_assay <- DefaultAssay(object)
+ } else if (length(deg_assay) > 1){
+   deg_assay <- "SCT"
+ }
+
+ which_missing <- which(!(groups %in% colnames(object@meta.data)))
+ if (length(which_missing) > 0) stop(paste(groups[which_missing], collapse =", "), " groups were not found in object meta data.")
+
+# start cluster
+ miko_message("Running Differential expression analysis...", verbose = verbose)
+if (nworkers > length(groups)) nworkers <- length(groups)
+cl <- parallel::makeCluster(nworkers)
+doParallel::registerDoParallel(cl)
+
+# iterate through each input file
+marker.list <- foreach(i = 1:length(groups), .packages = c("scMiko", "Seurat", "presto", "dplyr"))  %dopar% {
+  
+  Idents(object) <- object@meta.data[[groups[i]]]
+  
+  if (length(unique(Idents(object))) < 2){
+    qm.res <- NULL
+  } else {
+      qm.res <- presto::wilcoxauc(X = object, group_by = groups[i], assay = "data", seurat_assay = deg_assay)
+      qm.res$pct_dif <- qm.res$pct_in - qm.res$pct_out    
+  }
+
+  return(qm.res)
+  
+}
+
+# stop workers
+parallel::stopCluster(cl)
+
+# unpackage results
+query_markers.list <- marker.list
+names(query_markers.list) <- groups
+
+# remove baggage
+rm(marker.list)
+rm(object)
+invisible({gc()})
+
+
+# all.deg.list <- query_markers.list
+miko_message("Applying filters...", verbose = verbose)
+for (i in 1:length(query_markers.list)){
+  
+  set.name <- names(query_markers.list)[i]
+  qm.res <-  query_markers.list[[set.name]]
+
+  
+  if (only_pos){
+    qm.res <- qm.res %>% dplyr::mutate(significant = (logFC > 0 & padj <= fdr_threshold & abs(logFC) > logfc_threshold))
+  } else {
+    qm.res <- qm.res %>% dplyr::mutate(significant = (padj <= fdr_threshold & abs(logFC) > logfc_threshold))
+  }
+  
+  query_markers.list[[set.name]] <- qm.res
+}
+
+return(query_markers.list)
+
+  
+}
+
+# run DEG analysis
+all.deg.list <- multiDEG(object = so.query, groups = cluster.name, 
+                               only_pos = parameter.list$only.pos,
+                               nworkers = parameter.list$n.workers$deg, 
+                               fdr_threshold = parameter.list$fdr.threshold, 
+                               logfc_threshold = parameter.list$lfc.threshold, verbose = T )
+
+query_markers.list <- lapply(all.deg.list, function(x) x %>% dplyr::filter(significant))
+
+```
+
+```{r CDI-based specificity score}
+
+ms.list <- multiSpecificity(object = so.query, 
+                            cluster_names = cluster.name, 
+                            features = NULL, 
+                            deg_prefilter = T, 
+                             cdi_bins = seq(0, 1, by = 0.01), 
+                            min.pct = 0.1, 
+                            n.workers = parameter.list$n.workers$deg, 
+                            return_dotplot = T,  
+                            verbose = T)
+
+
+# ms.list$
+df.auc.spec <- ms.list$specificity_summary
+qm.res.sum.sum.all <- ms.list$specificity_raw
+plt.clust.spec <- ms.list$auc_plot
+plt.auc.spec <- ms.list$resolution_plot
+plt.auc.dot <- ms.list$dot_plot
+
+cdi_result <- ms.list$cdi_results
+
+if (parameter.list$print.inline){
+  print(plt.clust.spec)
+  print(plt.auc.spec)
+}
+
+```
+
+```{r make wide helper function}
+
+
+make.wide <- function(u_clusters, top_markers, n_top_markers, rename_clusters = TRUE){
+  top_markers_wide <- data.frame()
+  
+  top_marker_clusters <- as.vector(top_markers$group)
+  
+  u_clusters <- as.numeric(as.character(u_clusters))
+  u_clusters <- u_clusters[order(u_clusters)]
+  for (i in 1:length(u_clusters)){
+    
+    top_markers_current <- top_markers$feature[top_marker_clusters == u_clusters[i]]
+    n_markers_cur <- length(top_markers_current)
+    
+    if (!(n_markers_cur >= n_top_markers)){
+      top_markers_current <- c(top_markers_current, rep(NaN, n_top_markers-n_markers_cur))
+    }
+    
+    top_markers_wide[seq(1, n_top_markers), c(paste("c", u_clusters[i], sep = ""))] <- as.data.frame(top_markers_current)
+    if (!rename_clusters){
+      colnames(top_markers_wide)[i] <- u_clusters[i]
+    }
+  }
+  
+  return(top_markers_wide)
+}
+
+```
+
+
+```{r get top markers function}
+
+
+
+# function to get top cluster-specific markers
+get.topmarkers <- function(query.markers, n_top_markers = 10, cluster_res_label = "", rename_clusters = TRUE){
+  
+  top_markers <- query.markers %>% 
+    dplyr::group_by(group) %>% 
+    dplyr::arrange(desc(auc)) 
+  
+  top_markers_filter <- top_markers[ , c("group", "feature")]
+  
+  top_marker.tally <- top_markers_filter %>%
+    dplyr::group_by(group) %>%
+    dplyr::tally()
+  max.n <- max(top_marker.tally$n)
+  top_markers_filter$group <- as.numeric(as.character(top_markers_filter$group))
+
+  top_markers$group <- paste("c", as.character(top_markers$group), sep = "")
+  top_markers$pval <- signif( top_markers$pval, 3)
+  top_markers$padj <- signif( top_markers$padj, 3)
+  top_markers$logFC <- signif( top_markers$logFC, 3)
+  
+  top_markers_50 <- query.markers %>% 
+    dplyr::group_by(group) %>% 
+    dplyr::arrange(desc(auc)) %>%
+    dplyr::top_n(n = 50, wt = auc)
+  
+  top_markers_50 <- top_markers_50[ , c("group", "feature")]
+  
+  
+  
+  u_clusters <- as.vector(unique(top_markers_filter$group))
+  u_clusters <- u_clusters[order(u_clusters)]
+  
+  top_markers_wide <- make.wide(u_clusters, 
+                                top_markers = top_markers_filter, 
+                                n_top_markers = max.n, 
+                                rename_clusters = rename_clusters)
+  
+  top_markers_50_wide <- make.wide(u_clusters, top_markers = top_markers_50, n_top_markers = 50, rename_clusters = rename_clusters)
+  
+  top5_markers <- query.markers %>% 
+    dplyr::group_by(group) %>% 
+    dplyr::arrange(desc(auc)) %>%
+    dplyr::top_n(n = 50, wt = auc)
+  
+  
+  # assign outputs to list and return
+  output <- list(top_markers, top_markers_50, top_markers_wide, top_markers_50_wide, top5_markers)
+  names(output) <- c("top_markers_res",
+                     "top_markers_50_res",
+                     "top_markers_wide_res",
+                     "top_markers_50_wide_res",
+                     "top5_markers_res")
+  return(output)
+}
+
+```
+
+
+```{r get top cluster markers, warning = FALSE }
+
+# get top markers
+which.res2rmv <- c()
+top_markers_res.list <- list()         
+top_markers_50_res.list <- list()      
+top_markers_wide_res.list <- list()    
+top_markers_50_wide_res.list <- list() 
+top5_markers_res.list <- list()  
+
+for (i in 1:length(query_markers.list)){
+  if (length( query_markers.list[[i]]) == 0) {
+    which.res2rmv <- c(which.res2rmv, parameter.list$cluster.resolution[i])
+    next
+  }
+  output.markers <- get.topmarkers(query.markers = query_markers.list[[i]], cluster_res_label = parameter.list$cluster.resolution[i])
+  
+  top_markers_res.list[[as.character(parameter.list$cluster.resolution[i])]] <- as.data.frame(output.markers[["top_markers_res"]])     
+  top_markers_50_res.list[[as.character(parameter.list$cluster.resolution[i])]] <- as.data.frame(output.markers[["top_markers_50_res"]])     
+  top_markers_wide_res.list[[as.character(parameter.list$cluster.resolution[i])]] <- as.data.frame(output.markers[["top_markers_wide_res"]])   
+  top_markers_50_wide_res.list[[as.character(parameter.list$cluster.resolution[i])]] <- as.data.frame(output.markers[["top_markers_50_wide_res"]])
+  top5_markers_res.list[[as.character(parameter.list$cluster.resolution[i])]] <- as.data.frame(output.markers[["top5_markers_res"]])
+  # quiet(list2env(output.markers, env = environment()), all = TRUE)  
+}
+
+# omit resolution where no DEGs were observed
+cr_original <- parameter.list$cluster.resolution
+parameter.list$cluster.resolution <-parameter.list$cluster.resolution[!(parameter.list$cluster.resolution  %in% which.res2rmv)]
+
+```
+
+```{r down sample cells function}
+
+
+# downsample data if necessary
+downsample_cells <- function(so.query, clust.name, n.downsample = 500, seed.value = 1023){
+  
+  set.seed(seed.value)
+  
+  cluster_id <- as.vector(so.query@meta.data[[clust.name]])
+  u_clusters <- unique(cluster_id)
+  
+  n_per_cluster <- round(n.downsample / length(u_clusters))
+  
+  cells_to_plot <- c()
+  for (i in 1:length(u_clusters)){
+    
+    cell_to_sample <- Cells(so.query)[cluster_id == u_clusters[i]]
+    if (length(cell_to_sample) < n_per_cluster){
+      cells_to_plot <-  c(cells_to_plot, cell_to_sample)
+    } else {
+      cells_to_plot <-  c(cells_to_plot, sample(Cells(so.query)[cluster_id == u_clusters[i]], n_per_cluster, replace = FALSE))
+    }
+    
+  }
+
+  so.query_small <- subset(so.query, cells = cells_to_plot)
+
+  return(so.query_small)
+}
+```
+
+
+```{r heatmap new}
+
+plt.heat.scaled.list <- list()
+for (i in 1:length(all.deg.list)){
+  
+  u.clust <- getOrderedGroups(so.query, which.group = names(all.deg.list)[i], is.number = T)
+  u.clust <- u.clust[!is.na(u.clust)]
+  df.prest <- all.deg.list[[names(all.deg.list)[i]]]
+e.mat <- pivot_wider(df.prest %>% dplyr::select(feature, group, avgExpr), names_from = group, values_from = avgExpr)
+e.mat <- col2rowname(e.mat, "feature"); e.mat <- as.matrix(e.mat[ ,order(as.numeric(colnames(e.mat)))])
+df.e.wide <- data.frame(gene = rownames(e.mat), as.data.frame(e.mat)); colnames(df.e.wide) <- c("gene", u.clust)
+
+# deg.gene <- query_markers.list[[names(all.deg.list)[i]]]$feature
+
+  var.features <- so.query@assays[[DefaultAssay(so.query)]]@var.features
+  
+  # scaled expression plots
+  df.s4plt <- as.matrix(df.e.wide %>% dplyr::select(-c("gene")))
+  df.s4plt <- df.s4plt[rownames(df.s4plt) %in% unique(var.features), ]
+  
+  # df.s4plt <- (apply(df.s4plt, 2, function(x) (x-mean(x))/sd(x)))
+  df.s4plt <- t(apply(df.s4plt, 1, function(x) (x-mean(x, na.rm = T))/sd(x, na.rm = T)))
+  
+  scale.lim <- 2 
+  df.s4plt[df.s4plt > scale.lim] <- scale.lim
+  df.s4plt[df.s4plt < (-1*scale.lim)] <- (-1*scale.lim)
+  
+  my.breaks <- seq((-1*scale.lim), scale.lim, by = 0.01)
+  # my.col <- colorRampPalette(c(scales::muted("blue"), "white",scales::muted("red")))(length(my.breaks))
+  
+  df.s4plt <- df.s4plt[!(apply(df.s4plt, 1, function(x) all(is.na(x)))), ]
+  
+  plt.heat.scaled <- pheatmap::pheatmap(df.s4plt,
+                                        breaks = my.breaks,
+                                        color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdBu")))(length(my.breaks)),
+                                        show_rownames = F,
+                                        main = "Scaled Expression\nx=cluster, y=gene, z=scaled expression", silent = T)
+  
+  plt.heat.scaled <- ggplotify::as.ggplot(plt.heat.scaled)
+  
+  rm(df.s4plt);
+  
+  plt.heat.scaled.list[[ names(all.deg.list)[i]]] <- plt.heat.scaled
+  
+}
+
+```
+
+
+
+
+```{r silhouette analysis}
+
+if (exists("so.sub")){
+  msil_list <- multiSilhouette(object = so.sub, groups = cluster.name, assay_pattern = assay.pattern, verbose = T)
+} else {
+  msil_list <- multiSilhouette(object = so.query, groups = cluster.name, assay_pattern = assay.pattern, verbose = T)
+}
+
+sil.plot <- msil_list$silhouette_plots
+plt.silw.dep <- msil_list$resolution_plot
+df.silw <- msil_list$silhouette_raw
+df.silw.sum <- msil_list$silhouette_summary
+rm(msil_list); invisible({gc()})
+
+if (parameter.list$print.inline){
+  print(sil.plot)
+  print(plt.silw.dep)
+}
+
+```
+
+
+```{r res vs n clust curve}
+
+# get resolutions
+clust.names <- names(query_markers.list)
+current.assay <- DefaultAssay(so.query)
+clust.res <- as.numeric(gsub(assay.pattern, "",clust.names))
+
+# get cluster number
+clust.n <- purrr::map_dbl(query_markers.list, function(x) length(unique(x[["group"]])))
+
+# get number of degs per cluster
+n.deg <- purrr::map(query_markers.list, function(x){
+  if (nrow(x) > 0){
+    df.sum <- x %>%
+      dplyr::group_by(get("group")) %>%
+      dplyr::summarize(
+        sig.deg = sum(padj < 0.05), .groups = 'drop'
+      )
+  } else {
+    NULL
+  }
+  
+})
+
+# compute deg statistics
+n.deg.summary <- purrr::map(n.deg, function(x){
+  if (!is.null(x)){
+    df.sum <- data.frame(
+      min.n = min(x$sig.deg, na.rm = T),
+      max.n = max(x$sig.deg, na.rm = T),
+      mean.n =mean(x$sig.deg, na.rm = T),
+      sd.n = sd(x$sig.deg, na.rm = T),
+      median.n = median(x$sig.deg, na.rm = T),
+      n.clust = length(x$sig.deg)
+    )
+  } else {
+    df.sum <- data.frame(
+      min.n = NA,
+      max.n = NA,
+      mean.n = NA,
+      sd.n = NA,
+      median.n = NA,
+      n.clust = NA
+    )
+  }
+})
+
+df.clust.n <- data.frame(clust.res = clust.res, 
+                         n.clust = clust.n,
+                         deg.meanN = purrr::map_dbl(n.deg.summary, function(x) x$mean.n),
+                         deg.medianN = purrr::map_dbl(n.deg.summary, function(x) x$median.n),
+                         deg.minN = purrr::map_dbl(n.deg.summary, function(x) x$min.n),
+                         deg.maxN = purrr::map_dbl(n.deg.summary, function(x) x$max.n))
+
+df.clust.mean <- df.clust.n[ ,c("clust.res", "deg.meanN")]; df.clust.mean$type = "mean"; colnames(df.clust.mean) <- c("res", "val", "type")
+df.clust.min <- df.clust.n[ ,c("clust.res", "deg.minN")]; df.clust.min$type = "min"; colnames(df.clust.min) <- c("res", "val", "type")
+df.clust.max <- df.clust.n[ ,c("clust.res", "deg.maxN")]; df.clust.max$type = "max"; colnames(df.clust.max) <- c("res", "val", "type")
+
+df.clust.long <- bind_rows(df.clust.mean, df.clust.min, df.clust.max)
+
+plt.deg.n <- df.clust.long %>%
+  dplyr::filter(type == "min") %>%
+  ggplot(aes(res, val)) + 
+  # , color = type
+  geom_point(size = 3) + 
+  geom_line() + 
+  geom_hline(yintercept = 0, linetype = "dashed") + 
+  theme_miko(legend = T) + 
+  ggthemes::scale_color_ptol() + 
+  labs(title = "Number of Differentially-Expressed Genes (DEG)", x = "Resolution", y = "min(N DEG/Cluster)", color = "Statistic")  +
+  theme(panel.grid.minor = element_line(colour="grey95", size=0.1),
+        panel.grid.major = element_line(colour="grey85", size=0.1),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank()) +
+    scale_x_continuous(minor_breaks = seq(0 , max(df.purity.sum$resolution, na.rm = T), 0.1) , 
+                       breaks = seq(0, max(df.purity.sum$resolution, na.rm = T), 0.2))
+                         
+
+plt.clust.n <- df.clust.n %>%
+  ggplot(aes(clust.res, n.clust)) + 
+  geom_line() + 
+  geom_point(size = 3) + 
+  theme_miko() + 
+  xlab("Resolution") + 
+  ylab("Cluster Number") + 
+  labs(title = "Cluster Resolution vs. Number of Cell Populations")  +
+  theme(panel.grid.minor = element_line(colour="grey95", size=0.1),
+        panel.grid.major = element_line(colour="grey85", size=0.1),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank()) +
+    scale_x_continuous(minor_breaks = seq(0 , max(df.purity.sum$resolution, na.rm = T), 0.1) , 
+                       breaks = seq(0, max(df.purity.sum$resolution, na.rm = T), 0.2))
+
+if (parameter.list$print.inline){
+  print(plt.clust.n)
+  print(plt.deg.n)
+}
+```
+
+
+```{r resolution-specific performance metrics, fig.width=15, fig.height=5}
+
+marker.spec.list <- list()
+u.res <- unique(qm.res.sum.sum.all$resolution)
+for (i in 1:length(u.res)){
+  
+  qm.res.sum.sum.cur <- qm.res.sum.sum.all
+  qm.res.sum.sum.cur$is.res <- qm.res.sum.sum.cur$resolution %in% u.res[i]
+  qm.res.sum.sum.cur <- qm.res.sum.sum.cur %>% dplyr::arrange(is.res)
+  u.res2 <- unique(as.character(qm.res.sum.sum.cur$resolution))
+  qm.res.sum.sum.cur$res <- factor(qm.res.sum.sum.cur$resolution, levels = u.res2)
+  marker.spec.list[[u.res[i]]] <- qm.res.sum.sum.cur %>% 
+    dplyr::arrange(is.res) %>%
+  ggplot(aes(x = bin, y = pdeg, color = is.res)) + 
+  geom_path(aes(group = res)) + 
+  theme_miko(legend = F) +
+    scale_color_manual(values = c("TRUE" = "tomato", "FALSE" = "grey")) + 
+  xlab("target DEG-AUC") + 
+  ylab("Proportion of Clusters\n(>=1 DEG exceeding target DEG-AUC)") + 
+  geom_vline(xintercept = 0.5, linetype = "dashed") + 
+  labs(title = "Marker Specificity", 
+       color = "Resolution", caption = paste0("red curve: resolution = ", gsub(assay.pattern, "", u.res[i]), "; grey curve: other resolutions" ))
+
+}
+
+res.specific.list <- list()
+for (i in 1:length(query_markers.list)){
+  
+  set.name <- names(query_markers.list)[i]
+  set.name2 <- gsub(assay.pattern, "", set.name)
+  
+  if (!is.null(df.silw)){
+    
+    avg.sil  <- signif(mean((df.silw %>% dplyr::filter(cluster.resolution == set.name2) )$sil.width, na.rm = T), 3)
+    
+    if (!is.nan(avg.sil)){
+      # A: silhoutte
+      p1 <- sil.plot[[set.name]] + 
+        theme_set(theme_get() + theme(text = element_text(family = 'Open Sans'))) +
+        theme_miko(legend = T) +
+        theme(axis.text.x=element_blank(),
+              axis.ticks.x=element_blank()) + 
+        labs(x = "Cell Index", y = "Silhouette Width") + 
+        labs(title = "Silhoutte Plot", subtitle = NULL) + 
+        labs(subtitle = paste0("Resolution = ", set.name2), caption = paste0("Average silhouette width = ", avg.sil))
+    } else {
+      p1 <- NULL
+    }
+  } else {
+    p1 <- NULL
+  }
+  
+  # B: purity score UMAP
+  avg.pur <- signif(mean(purity.umap.list[[set.name]]$data$purity, na.rm = T), 3)
+  p2 <- purity.umap.list[[set.name]] + labs(subtitle = paste0("Resolution = ", set.name2), 
+                                            caption = paste0("Average purity score = ", avg.pur))  
+  
+  # C: marker specificity score
+  p3 <- marker.spec.list[[set.name2]] + labs(subtitle = paste0("Resolution = ", set.name2))
+  
+  res.specific.list[[set.name]] <- cowplot::plot_grid(p1, p2, p3, nrow = 1, align = "h", axis = "tb", labels = c("H", "I", "J"))
+  
+  if (parameter.list$print.inline){
+    print(res.specific.list[["SCT_snn_res.0.05"]])
+  }
+  
+}
+
+```
+
+```{r central log}
+
+# update central log
+
+if (parameter.list$developer){
+  run.id <- NULL
+  if (!exists("user")) user <- "guest"
+  
+  clog.update.success <- F
+  if (parameter.list$update.log){
+    try({
+      run.id <-  updateCentralLog(Module = "M18", input.data = parameter.list$input.file, input.subset = NA, pdf.flag = parameter.list$save.pdf)
+      clog.update.success <-  T
+    }, silent = F) 
+  }
+  
+  if (is.null(run.id))  {
+    warning("Central log update was unsuccessful :(\n")
+    # run.id <- paste("M18_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+    run.id <- paste("M18_", user, "_", gsub(":| ", "", paste0(format(Sys.time(), '%d_%m_%X'))), sep = "", collapse = "")
+  }
+  
+} else {
+  run.id <- paste("output_", gsub(":| ", "", paste0(format(Sys.time(), '%X'))), sep = "", collapse = "")
+}
+
+```
+
+
+```{r output directories}
+
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+
+# create output directories
+if (parameter.list$save.pdf) {
+dir.create(output.path)
+dir.create(paste0(output.path, "Tables/"))
+dir.create(paste0(output.path, "PDF/"))
+}
+
+```
+
+
+
+Results
+===================================== 
+
+Sidebar {.sidebar data-width=400}
+-------------------------------------
+
+**Description**: Cells are clustered using unsupervised Louvain community detection over a range of candidate resolutions. At each resolution, i) cluster-level UMAP and heatmap representations are generated, ii) resolution-specific performance metrics are derived, and iii) cluster-specific differential expression analysis is performed. 
+
+**Figure Legends**:\
+**A|** Resolution-specific UMAP representation of cell clusters.\
+**B|** Resolution-specific heatmap of top variable genes. Mean expression values are scaled row-wise.\
+**C|** Resolution-specific silhouette widths. *Range* = [-1,1]\
+**D|** Resolution-specific purity scores. *Range* = [0,1]\
+**E|** Resolution-specific marker specificity scores. *Range* = [0,1]\
+**F|** Resolution-specific number of cell clusters.\
+**G|** Resolution-specific minimum number of differentially-expressed genes per cluster.\
+**H|** Silhouette plot.\
+**I|** Purity scores overlaid on a UMAP. See notes for details. \
+**J|** Marker specificity curve. See notes for details. *Red curve*: specified resolution; *grey curves*: all other resolutions.\
+
+**Notes**:\
+**1. Purity Score**: For a given cell *i*, the purity score is defined as the proportion of cells within cell *i*'s K-nearest neighborhood (KNN) that belong to the most represented cluster within that KNN. The purity score ranges between 0 to 1. Neighborhoods in which cells belong to many different clusters are considered "*impure*" (low purity score) whereas neighborhoods in which cells belong to a single cluster are "*pure*" (high purity score). The purity score, together with the silhouette width, provides a measure of cluster consistency and may be used in guiding selection of the optimal clustering resolution.\
+**2. Marker Specificity**: The marker specificity score is a measure of how well differentially-expressed genes (DEG) can discriminate (i.e., classify) clusters at a given resolution. To derive the specificity score, nCDI estimates are used to construct a *marker specificity curve* (Panel J). The x axis represents nCDI values ranging from 0 to 1. The y axis represents the proportion of clusters that have at least 1 DEG exceeding the target nCDI (on the x axis). The area under the marker specificity curve represents the *marker specificity score* and can range from 0 (no clusters have a specific DEG) to 1 (each cluster has a specific DEG). The marker specificity score can be compared across different clustering resolutions to determine at which resolution clusters have specific DEGs.\
+
+**Definitions**:\
+**res**: Clustering resolution\
+**UMAP**: Uniform manifold approximation and projection\
+**nCDI**: Normalized co-dependency index\
+
+**Sample Overview**:\
+Cells, n: `r ncol(so.query)`\
+Genes, n: `r nrow(so.query)`\
+Variable genes, n: `r length(VariableFeatures(so.query))`\
+
+UMI/cell, median: `r round(median(so.query@meta.data[["nCount_RNA"]]))`\
+genes/cell, median: `r round(median(so.query@meta.data[["nFeature_RNA"]]))`\
+Species: `r parameter.list$species`
+
+
+Row {.tabset}
+-------------------------------------
+
+```{r plt.umap_by_all_clusters, message=FALSE, warning=FALSE, fig.width=12, fig.height=5}
+
+
+plt.clust.ov <- list()
+for (i in 1:length(plt.umap_by_cluster)){
+  set.name <- names(plt.umap_by_cluster)[i]
+  plt.clust.ov[[set.name]] <- cowplot::plot_grid(plt.umap_by_cluster[[set.name]], plt.heat.scaled.list[[set.name]], labels = "AUTO")
+}
+
+
+out <- lapply(seq_along(plt.clust.ov), function(i) {
+  
+  
+  set.name <- gsub(assay.pattern, "", names(plt.clust.ov)[i])
+  set.name2 <- names(plt.clust.ov)[i]
+  
+  a1 <- knitr::knit_expand(text = sprintf("\n### %s\n", paste("res = ", set.name, sep = ""))) # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE, fig.width=12, fig.height=5}", 
+                                          paste("clust_umap", i, sep = ""))) # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\nprint(plt.clust.ov[['%s']])",set.name2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+```{r pdf plt.umap_by_all_clusters }
+
+try({
+  for (i in 1:length(plt.clust.ov)){
+    set.name <- gsub(assay.pattern, "", names(plt.clust.ov)[i])
+    suffix = "resolution.pdf"
+    plot.name <- paste0("M18_umap_", gsub(".", "_", set.name, fixed = T), suffix)
+    savePDF(file.name = paste0(output.path, "PDF/", plot.name), plot.handle =  plt.clust.ov[[i]], 
+            fig.width = 12, fig.height = 5, save.flag = parameter.list$save.pdf)
+  }
+}, silent = T)
+
+
+```
+
+
+
+Row {.tabset}
+-------------------------------------
+
+### Metrics
+```{r opt stat, message=FALSE, warning=FALSE, fig.width=25, fig.height=5}
+
+sil.success <- F
+try({
+  plt.silw.dep + labs(subtitle = "1 = dense/separated clusters; 0 = overlapping clusters") 
+  sil.success <- T
+}, silent = T)
+if (!sil.success) plt.silw.dep <- NULL
+
+plt.opt.stat <- cowplot::plot_grid( plt.silw.dep + geom_hline(yintercept = 0.6, linetype = "dashed") , 
+                                    plt.cluster.purity + labs(subtitle = "1 = within-neighborhood clusters consistent (pure); 0 = impure"), 
+                                    plt.auc.spec + labs(subtitle = "1 = specific DEG in all clusters; 0 = no specific DEGs"),
+                                    plt.clust.n + labs(title = "Number of Clusters", subtitle = ""), 
+                                     plt.deg.n + labs(title = "Minimum Number of DEGs", y = "Minimum N DEGs/cluster", subtitle = ""), nrow = 1, labels = c("C", "D", "E", "F", "G"), rel_widths = c(1,1,1,1,1))
+
+print(plt.opt.stat)
+
+try({
+savePDF(file.name = paste0(output.path, "PDF/", "M18_optimization_metrics.pdf"), 
+        plot.handle =  plt.opt.stat, 
+         fig.width=25, fig.height=5, save.flag = parameter.list$save.pdf)
+}, silent = T)
+
+```
+
+
+```{r plt.Silhouette, message=FALSE, warning=FALSE, fig.width=15, fig.height=5}
+
+out <- lapply(seq_along(res.specific.list), function(i) {
+  
+  res.val <- gsub(assay.pattern, "", names(res.specific.list)[i])
+  a1 <- knitr::knit_expand(text = sprintf("\n### %s\n", paste("res = ", res.val, sep = ""))) # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE, fig.width=15, fig.height=5}", 
+                                          paste("sil.plt", i, sep = ""))) # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\nprint(res.specific.list[[ names(res.specific.list)[%d]]])",i)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+```{r pdf plt.Silhouette }
+
+try({
+  for (i in 1:length(res.specific.list)){
+    res.val <- gsub(assay.pattern, "", names(res.specific.list)[i])
+    plot.name <- paste0("M18_performance_metrics_", gsub(".", "_",res.val, fixed = T), "resolution.pdf")
+    savePDF(file.name = paste0(output.path, "PDF/", plot.name), plot.handle =  res.specific.list[[i]], 
+            fig.width = 15, fig.height = 5, save.flag = parameter.list$save.pdf)
+  }
+}, silent = T)
+
+```
+
+
+DEG Table
+===================================== 
+
+
+Sidebar {.sidebar}
+-------------------------------------
+
+**Description**: Differentially-expressed genes (DEG) across different cluster resolutions. Differential expression performed using wilcoxon and co-dependency tests.
+
+**Definitions**:\
+**feature**: Gene symbol\
+**cluster**: Cluster name\
+**logFC**: Log fold-change between gene expression within vs. outside of cluster.\
+**auc**: Area under receiver operator curve; measures a gene's ability to discriminate specified cluster. AUC values range 0 to 1, where 0.5 represents classification performance equal to random chance, and 1 represents perfect cluster classification.\
+**p_wilcox**: Nominal p value, wilcoxon test.\
+**fdr_wilcox**: Benjamini-hochberg adjusted p-value (i.e. FDR), wilcoxon test.\
+**cdi**: Codependency index\
+**ncdi**: Normalized CDI\
+**p_cdi**: Nominal p value, codependency test.\
+**fdr_cdi**: Benjamini-hochberg adjusted p-value (i.e. FDR), codependency test.\
+**pct_in**: Percentage of cells within cluster with non-zero gene expression.\
+**pct_out**: Percentage of cells outside cluster with non-zero gene expression.\
+**pct_dif**: Difference between pct_in and pct_out.\
+**sensitivity**: Proportion of within-cluster cells that express gene (true positive rate).\
+**specificity**: Proportion of outside-cluster cells that do not express gene (true negative rate).\
+**PPV**: Positive predictive value\
+**NPV**: Negative predictive value\
+**denominator**: Denominator used to normalized CDI. Dependent on cluster size.\ 
+**avgExpr**: Average cluster-level gene expression.\
+
+
+Row {.tabset}
+-------------------------------------
+
+
+```{r detailed table output v2,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+for (i in 1:length(top_markers_res.list)){
+  # df.deg <- top_markers_res.list[[i]]
+  
+  df.deg.cur <- top_markers_res.list[[i]]
+  
+  df.deg.cur$pct_in <- df.deg.cur$pct_in
+  
+  df.deg.cur$sensitivity <- df.deg.cur$pct_in/((100-df.deg.cur$pct_in) + (df.deg.cur$pct_in))
+  df.deg.cur$specificity <- (100-df.deg.cur$pct_out)/((100-df.deg.cur$pct_out) + (df.deg.cur$pct_out))
+  df.deg.cur$PPV <-  df.deg.cur$pct_in/( df.deg.cur$pct_in + (df.deg.cur$pct_out))
+  df.deg.cur$NPV <- (100-df.deg.cur$pct_out)/((100-df.deg.cur$pct_out) + (100-df.deg.cur$pct_in))
+  
+  set.stem <- paste0(assay.pattern, names(top_markers_res.list)[i], "_")
+  cdi_result.cur <- cdi_result %>% dplyr::filter(grepl(set.stem, feature.x))
+  cdi_result.cur$cluster <- paste0("c", stringr::str_remove(cdi_result.cur$feature.x, set.stem))
+  colnames(cdi_result.cur) <- c("id", "feature", "cdi", "ncdi", "denominator", "p.cdi", "fdr.cdi", "group")
+  df.deg <- merge(df.deg.cur, cdi_result.cur, all.x = T)
+  
+  field2signif <- c("avgExpr", "logFC", "auc", "pval", "padj", "pct_in", "pct_out", "pct_dif", "cdi", "ncdi", "denominator", "p.cdi", "fdr.cdi", "sensitivity", "specificity", "PPV", "NPV")
+  field2signif <- field2signif[field2signif %in% colnames(df.deg)]
+  df.deg[ ,field2signif] <- signif(df.deg[ ,field2signif], 3)
+  
+  df.deg <- df.deg %>% dplyr::select(c("feature", "group", "logFC", "auc", "pval", "padj", "cdi", "ncdi",  "p.cdi", "fdr.cdi", "pct_in", "pct_out", "pct_dif", "sensitivity", "specificity", "PPV", "NPV", "denominator","avgExpr"))
+  colnames(df.deg) <- c("feature", "cluster",  "logFC", "auc", "p_wilcox", "fdr_wilcox", "cdi", "ncdi","p_cdi", "fdr_cdi", "pct_in", "pct_out", "pct_dif", "sensitivity", "specificity", "PPV", "NPV", "denominator", "avgExpr")
+  top_markers_res.list[[i]] <- df.deg
+}
+
+
+out_heat <- lapply(seq_along(top_markers_res.list), function(i) {
+  s1 <- paste("top_markers_res.list[[", i, "]]", sep = "")
+  table.name <- paste("res=", names(top_markers_res.list)[i], "")
+  s4 <- paste("datatable(", s1, ", 
+    filter = 'top',
+    extensions = 'Buttons',
+    options = list(pageLength = 50,
+    dom = 'Bfrtip', 
+    buttons = c('copy', 'csv', 'pdf')))", sep = "")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", table.name))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("detailed_tab_v2", i, sep = "")))               # start r chunk
+  a3 <- knitr::knit_expand(text = sprintf("\n %s",s4)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+
+
+```
+
+`r paste(knitr::knit(text = paste(out_heat, collapse = '\n')))`
+
+```{r csv cm2}
+
+for (i in 1:length(top_markers_res.list)){
+  table.name <- paste0("markerStatistics_", gsub(".", "_", names(top_markers_res.list)[i], fixed = T), "resolution.csv")
+  
+  if (parameter.list$save.pdf){
+    write.csv(top_markers_res.list[[i]], file = paste0(output.path, "Tables/", table.name), 
+    row.names = F)     
+  }
+
+}
+
+```
+
+```{r save analysis log and Rdata results, message=FALSE, warning=FALSE}
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log[nrow(df.log)+1, 1] <- as.character("Run Time (s)")
+df.log[nrow(df.log), 2] <- as.character("elapsed.time")
+df.log[nrow(df.log), 3] <- as.character(elapsed.time)
+
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+
+if (parameter.list$developer){
+  df.log <- addLogEntry("User", user, df.log, "user")
+  df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
+}
+
+
+df.log_Module_18 <- df.log
+
+
+
+```
+
+```{r ph10,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out1 <- lapply(seq_along(module.logs), function(i) {
+  
+  module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
+  
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (Module %s)", paste(module.n)))
+  a2 <- knitr::knit_expand(text = "\n=====================================")
+  a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
+  a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
+  a5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+Log (Module 18)
+===================================== 
+
+```{r table.log_current, message=FALSE, warning=FALSE}
+
+knitr::kable(df.log_Module_18)
+
+```
+
+```{r save analysis log as csv}
+
+try({
+  if (parameter.list$developer){
+  write.csv(df.log_Module_18, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+    row.names = F)  
+  }
+}, silent = T)
+
+```
+
+
+
+System Info
+=====================================
+
+```{r}
+
+pander::pander(sessionInfo())
+
+```

@@ -1,0 +1,1284 @@
+---
+title: "Cell Annotation"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    source_code: embed
+    self_contained: true
+    theme: 
+      bootswatch: flatly
+    navbar:
+      - { title: "scMiko", href: "https://nmikolajewicz.github.io/scMiko/" }  
+editor_options: 
+  chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = if (exists("user")){paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", 
+        paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", 
+      paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
+    )
+  })
+---
+
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+packages2load <- c("Seurat", "GSVA", "scMiko", "presto",
+                   "plyr", "dplyr", "tidyr", "reshape2", "preprocessCore", "stringr", "RColorBrewer", "ggplot2", "gridExtra", "GGally", "splines",
+                   "DT", "flexdashboard", "ggpmisc", "ggExtra", "grid", "ggrepel", "future", "gridGraphics", "ggwordcloud", "scales",
+                   "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "tm", "homologene", "parallel", "doParallel", "foreach", "quantreg")
+
+# load packages
+invisible(lapply(packages2load, library, character.only = TRUE, quietly = TRUE))
+
+```
+
+
+
+
+```{r analysis specifications}
+
+parameter.list <- list(
+  # input.file = "R646_M02_NM2_p14_Meso_FZDonlg_1000g_integrated_rpca_280921.Rdata",
+  # input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Mesoderm/Papers/Cao 2020 Dataset/so_cao2020.rds",
+  input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Mesoderm/Papers/Tyser 2021 Dataset/so_tyser2021_220621.rds",
+  # input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Mesoderm/Papers/Pijuan-Sala 2019 Dataset/so_pijuan-sala2019.rds",
+  # input.file = "R6_M02_BC2_allGBM_271020.Rdata",
+  # which.references = c( "PijuanSala2019"),
+  external.markers = NULL,
+  internal.markers = "Cell_Catalog",
+  marker.filter = "Manno|Tyser", # filter marker sets using `grepl` pattern matching. E.g., Manno2021 for all La Manno 2021 atlas-derived markers. 
+  coherence.threshold = 0.8,
+  p.threshold = 0.05,
+  frequent.filter.threshold = 0.75,
+  filter.frequent.fliers = F,
+  
+  min.representation = 0.5, # if fraction of gene present in seurat data is less than in gene set, gene set is omitted form conisderation
+
+  cluster.resolution = 0.6, # OPTIONAL; range 0 to inf (default = 1)
+  fdr.correction = F, 
+  clean.clusters = F,
+  max.cells = 20000,
+  subsample_factor = 1, # OPTIONAL; range 0 to 1 (default = 1)
+  min.geneset.size = 3, # recommended: 3 (for TF classification, set to 1)
+  max.geneset.size = 200,
+  pathway.db = "Bader", # options: Bader, GO
+  n.workers = parallel::detectCores(),
+  save.pdf = F,
+  show.top.n.gene.panels = 5,
+  max.gene.panels.allowed = 75,
+  print.inline = FALSE ,
+  update.log = F,
+  rprofile.dir = F,
+  developer = F
+)
+
+
+```
+
+```{r load data, warning = FALSE}
+
+# Specify data directories
+
+
+if (parameter.list$rprofile.dir){
+  
+  dir.preprocessed <- "Preprocessed_Datasets/"
+  dir.reference <- "Reference_Datasets/"
+  
+  if (!exists("data.path") & !exists("user")) {
+    stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+  }
+  
+}
+
+
+if (!("input.file" %in% names(parameter.list))) stop("input.file is not specified")
+
+# load query dataset
+miko_message("Importing data...")
+if ((!grepl(".Rdata|.RData", parameter.list$input.file)) & !(grepl(".rds", parameter.list$input.file))){
+  parameter.list$input.file <- paste0(parameter.list$input.file, ".Rdata")
+} 
+
+if (parameter.list$rprofile.dir){
+  if (grepl(".Rdata|.RData", parameter.list$input.file)){
+    load(paste(data.path, dir.preprocessed, parameter.list$input.file, sep = ""));
+  } else if (grepl(".rds", parameter.list$input.file)) {
+    so <- readRDS(paste(data.path, dir.preprocessed, parameter.list$input.file, sep = ""))
+  }  
+} else {
+  if (grepl(".Rdata|.RData", parameter.list$input.file)){
+    load(parameter.list$input.file);
+  } else if (grepl(".rds", parameter.list$input.file)) {
+    so <- readRDS(parameter.list$input.file);
+  }
+}
+
+
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
+
+t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "integration.anchors")
+
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                         species = NULL, resolution= parameter.list$cluster.resolution, subset.data = NULL, 
+                         subsample = parameter.list$subsample_factor, 
+                         terms2drop = t2d, rmv.pattern = "so", keep.default.assay.only = T)
+
+# unpack results
+if (exists("so")) try({rm(so)}, silent = T)
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+rm(prep.list);
+invisible({gc()})
+
+# clean clusters
+if (parameter.list$clean.clusters) so.query <- cleanCluster(so.query, return.plots = F)
+parameter.list$species <- detectSpecies(so.query)
+
+df.tally.orig <- as.data.frame(table(so.query@meta.data[ ,"seurat_clusters"]))
+if (parameter.list$max.cells < ncol(so.query)){
+  
+  so.query <- downsampleSeurat(object = so.query,
+                               subsample.n = parameter.list$max.cells,  sample.group = "seurat_clusters", min.group.size = 300)
+}
+
+df.tally.sampled <- as.data.frame(table(so.query@meta.data[ ,"seurat_clusters"]))
+
+```
+
+
+```{r analysis log}
+
+if (parameter.list$developer){
+  parameter.list$update.log = T
+}
+
+if ("p.threshold" %in% names(parameter.list)){
+  if ((is.null(parameter.list$p.threshold)) | (!is.numeric(parameter.list$p.threshold))){
+    parameter.list$p.threshold <- 0.05
+  }
+} else {
+  parameter.list$p.threshold <- 0.05
+}
+
+if ("coherence.threshold" %in% names(parameter.list)){
+  if ((is.null(parameter.list$coherence.threshold)) | (!is.numeric(parameter.list$coherence.threshold))){
+    parameter.list$coherence.threshold <- 0.8
+  }
+} else {
+  parameter.list$coherence.threshold <- 0.8
+}
+
+miko_message("Updating analysis log...")
+
+# Initiate and fill analysis Log
+df.log <- initiateLog("Cell Annotation")
+df.log <- addLogEntry("Query File (.Rdata)", parameter.list$input.file, df.log, "input.file")
+df.log <- addLogEntry("Default Assay", current.assay, df.log, "current.assay")
+df.log <- addLogEntry("Cluster Resolution", parameter.list$cluster.resolution, df.log, "cluster.resolution")
+df.log <- addLogEntry("Subsample Factor", parameter.list$subsample_factor, df.log, "subsample_factor")
+df.log <- addLogEntry("Max Cells", parameter.list$max.cells, df.log, "max.cells")
+df.log <- addLogEntry("FDR correction", parameter.list$fdr.correction, df.log, "fdr.correction")
+df.log <- addLogEntry("Species", parameter.list$species, df.log, "species")
+df.log <- addLogEntry("Clusters cleaned", parameter.list$clean.clusters, df.log, "clean.clusters")
+df.log <- addLogEntry("Minimum gene set size", parameter.list$min.geneset.size, df.log, "min.geneset.size")
+df.log <- addLogEntry("Maximum gene set size", parameter.list$max.geneset.size, df.log, "max.geneset.size")
+# df.log <- addLogEntry("Reference gene sets", paste(parameter.list$which.references, collapse = ", "), df.log, "which.references")
+df.log <- addLogEntry("Gene set enrichment database", parameter.list$pathway.db, df.log, "pathway.db")
+df.log <- addLogEntry("PDF saved", parameter.list$save.pdf, df.log, "save.pdf")
+if (parameter.list$developer) df.log <- addLogEntry("Update log", parameter.list$update.log, df.log, "update.log")
+
+if ("n.workers" %in% names(parameter.list)){
+  df.log <- addLogEntry("n workers", parameter.list$n.workers, df.log, "n.workers")  
+} else {
+  parameter.list$n.workers <- 1
+  df.log <- addLogEntry("n workers", parameter.list$n.workers, df.log, "n.workers") 
+}
+
+```
+
+
+```{r get prior history log}
+
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+
+```{r cluster results, warning = FALSE}
+
+plt.umap_by_cluster <-cluster.UMAP(so.query) + 
+  labs(title = "UMAP", subtitle = "Stratified by Clusters") +
+  xlab("UMAP 1") + ylab("UMAP 2") + theme_miko(legend = T)
+
+# plot umap by barcodes
+if ("Barcode" %in% colnames(so.query@meta.data)){
+  plt.umap_by_barcode <- DimPlot(so.query, reduction = "umap", group.by = "Barcode")  + 
+  labs(title = "UMAP", subtitle = "Stratified by Barcodes") + 
+  xlab("UMAP 1") + ylab("UMAP 2") + theme_miko(legend = T) 
+} else {
+  plt.umap_by_barcode <- NULL
+}
+
+
+if (parameter.list$print.inline){
+  print(plt.umap_by_cluster)
+  print(plt.umap_by_barcode)
+}
+
+```
+
+```{r cluster composition by barcode, warning = FALSE}
+
+# get barcode labels and clusters
+cluster_membership <- as.vector(so.query@meta.data[["seurat_clusters"]])
+
+if ("Barcode" %in% colnames(so.query@meta.data)) {
+  barcode_labels <- as.vector(so.query@meta.data[["Barcode"]])
+} else {
+  barcode_labels <- NULL
+}
+
+df.bar_codes <- data.frame(cluster_membership, barcode_labels)
+
+# tally up cluster compositions
+df.all_barcodes <- df.bar_codes %>% 
+  dplyr::group_by(cluster_membership, barcode_labels) %>%
+  tally() %>% 
+  dplyr::mutate(freq = n / sum(n)) 
+
+u_barcodes <- unique(df.all_barcodes$barcode_labels)
+
+if (length(u_barcodes) > 1) {
+  
+  # convert long to wide (cell type table)
+  df_for_wide_barcodes <- df.all_barcodes
+  colnames(df_for_wide_barcodes)[colnames(df_for_wide_barcodes) == "barcode_labels"] <- "predicted_labels"
+  df.all_barcodes_wide <- long2wide(df_for_wide_barcodes)
+  
+  # plot cluster compositio by barcode
+  df.cluster_annotations_barcodes <- df.all_barcodes
+  colnames(df.cluster_annotations_barcodes)[colnames(df.cluster_annotations_barcodes) == "barcode_labels"] <- "predicted_labels"
+  
+  plt.cluster_composition_barcodes <- plot.cluster_composition_alt(df.cluster_annotations_barcodes, 
+                                                                   other_threshold = 0)
+  if (length(u_barcodes) < 13){
+    plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes + ggthemes::scale_fill_ptol("Barcode") 
+  }
+  plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes  + 
+    theme_miko(legend = T) + 
+    labs(title = "Cluster Composition", subtitle = "Stratified by Barcodes")
+} else {
+  df_for_wide_barcodes <- data.frame()
+  df.all_barcodes_wide <- data.frame()
+  df.cluster_annotations_barcodes <- data.frame()
+  plt.cluster_composition_barcodes <- c()
+  
+}
+
+```
+
+```{r prep all signatures}
+
+miko_message("Preparing gene sets...")
+
+# get cell-type markers
+signatures.symbol <- list()
+if (!is.null(parameter.list$external.markers)){
+  if (class(parameter.list$external.markers) == "list"){
+      signatures.symbol <- c(signatures.symbol, parameter.list$external.markers)
+  }
+}
+if (!is.null(parameter.list$internal.markers)){
+  data(geneSets)
+  
+  which.match <- parameter.list$internal.markers[parameter.list$internal.markers %in% names(geneSets)]
+  
+  for (i in 1:length(which.match)){
+    signatures.symbol <- c(signatures.symbol, wideDF2namedList(geneSets[[which.match[i]]]))
+  }
+}
+
+
+# filter markers
+if (!is.null(parameter.list$marker.filter)){
+  if (length(parameter.list$marker.filter) > 1){
+    parameter.list$marker.filter <- paste(parameter.list$marker.filter, collapse = "|")
+  }
+ signatures.symbol <- signatures.symbol[grepl( parameter.list$marker.filter, names(signatures.symbol))] 
+}
+
+if (length(signatures.symbol) == 0) stop("No cell-type markers have been specified.")
+
+# ensure proper species representation
+if (parameter.list$species == "Hs"){
+  signatures.symbol <- lapply(signatures.symbol, toupper)
+} else if (parameter.list$species == "Mm"){
+  signatures.symbol <- lapply(signatures.symbol, firstup)
+}
+gene.list <- signatures.symbol
+
+
+df.gs.statistics <- bind_rows(pbapply::pblapply(names(gene.list), function(x){
+  
+  gene_set_name <- x[[1]]
+  gene_set_genes <- gene.list[[gene_set_name]]
+  n_genes <- length(gene_set_genes)
+  n_available <- sum(gene_set_genes %in% rownames(so.query))
+  
+  return(data.frame(
+    set = gene_set_name,
+    n.genes = n_genes,
+    n.available = n_available,
+    fraction.available = signif(n_available/ n_genes, 3),
+    included.in.analysis = signif(n_available/ n_genes, 3) > parameter.list$min.representation
+  ))
+}))
+
+# filter out gene sets that are not well represented in current data
+gene.list <- gene.list[names(gene.list) %in% df.gs.statistics$set[df.gs.statistics$included.in.analysis]]
+
+```
+
+
+
+```{r cluster differentials}
+
+
+miko_message("Getting expression matrices...")
+
+# calculate differentials
+u.clust <- getOrderedGroups(so.query, which.group = "seurat_clusters", is.number = T)
+df.prest <- presto::wilcoxauc(X = so.query, 
+                              group_by = "seurat_clusters", assay = "data", seurat_assay = DefaultAssay(so.query))
+
+e.mat <- pivot_wider(df.prest %>% dplyr::select(feature, group, avgExpr), names_from = group, values_from = avgExpr)
+e.mat <- col2rowname(e.mat, "feature"); e.mat <- as.matrix(e.mat[ ,order(as.numeric(colnames(e.mat)))])
+df.e.wide <- data.frame(gene = rownames(e.mat), as.data.frame(e.mat)); colnames(df.e.wide) <- c("gene", u.clust)
+
+```
+
+
+```{r expression heatmap, include = FALSE, fig.width = 12, fig.height = 5}
+
+
+plt.heat.scaled <- NULL
+try({
+  # get var features
+  var.features <- so.query@assays[[DefaultAssay(so.query)]]@var.features
+  
+  # scaled expression plots
+  df.s4plt <- as.matrix(df.e.wide %>% dplyr::select(-c("gene")))
+  df.s4plt <- df.s4plt[rownames(df.s4plt) %in% var.features, ]
+  
+  df.s4plt <- t(apply(df.s4plt, 1, function(x) (x-mean(x))/sd(x)))
+  
+  scale.lim <- 3 
+  df.s4plt[df.s4plt > scale.lim] <- scale.lim
+  df.s4plt[df.s4plt < (-1*scale.lim)] <- (-1*scale.lim)
+  
+  my.breaks <- seq((-1*scale.lim), scale.lim, by = 0.01)
+
+  df.s4plt <- df.s4plt[!(apply(df.s4plt, 1, function(x) all(is.na(x)))), ]
+  
+  # plt.heat.scaled <- pheatmap::pheatmap(df.s4plt,
+  #                                       breaks = my.breaks,
+  #                                       color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdBu")))(length(my.breaks)),
+  #                                       show_rownames = F,
+  #                                       main = "Scaled Expression\nx=cluster, y=gene, z=scaled expression", silent = T)
+    # plt.heat.scaled <- ggplotify::as.ggplot(plt.heat.scaled)
+  
+      plt.heat.scaled <-  heatmaply::heatmaply(x = df.s4plt,
+                                                     main = "Variable Feature Expression",
+                                                     key.title = "Average\nScaled\nExpression", 
+                                                     xlab = "Clusters", 
+                                                     ylab = "Variable Features",
+                                                     scale_fill_gradient_fun = scale_fill_miko()) 
+      
+      if (parameter.list$print.inline){
+        plt.heat.scaled
+      }
+
+  rm(df.s4plt); 
+  
+}, silent = T)
+
+```
+
+```{r score calculation}
+
+maxgs <- max(unlist(lapply(gene.list, length)))
+if (maxgs > 200) maxgs <- 200
+stepsize <- round(maxgs / 15)
+if (stepsize < 1) stepsize <- 1
+if (stepsize > 20) stepsize <- 10
+
+# Step 1: Null gene set-size adjusted model
+miko_message("Step 1: Null model estimation...")
+ns.res <- nullScore(object = so.query, assay = DefaultAssay(so.query), n.replicate = 10, nbin = 24, 
+                    min.gs.size = 2, max.gs.size = maxgs, step.size = stepsize, 
+                    nworkers = parameter.list$n.workers, verbose = T, subsample.n = 5000)
+
+# Step 2: Miko scores
+miko_message("Step 2: Miko score calculation...")
+so.query <- mikoScore(object = so.query, geneset = gene.list, nbin = 24, 
+                            nullscore = ns.res, assay = DefaultAssay(so.query), nworkers = parameter.list$n.workers)
+
+# Step 3: Significance assignment
+miko_message("Step 3: Identfying significant enrichments...")
+score.result <- sigScore(object = so.query,  geneset = gene.list, reduction = "umap")
+
+variance.raw.plot <- ns.res$variance.raw.plot
+variance.mean.plot <- ns.res$variance.mean.plot
+plt.null.model <- ns.res$mean.plot
+plt.corrected.plot <- ns.res$corrected.plot
+plt.score.comp <- score.result$score_plot
+
+if (parameter.list$print.inline){
+  variance.raw.plot
+  variance.mean.plot
+  plt.null.model
+  plt.corrected.plot
+  
+  plt.score.comp
+}
+
+if (!parameter.list$fdr.correction){
+  plt.score.comp[["data"]][["fdr"]] <- plt.score.comp[["data"]][["p"]]
+  plt.score.comp <- plt.score.comp + labs(fill = "p<0.05")
+  plt.score.comp[["labels"]][["subtitle"]] <- paste0(100*signif(sum(plt.score.comp[["data"]][["p"]] < 0.05) / length(plt.score.comp[["data"]][["p"]]), 3), "% Significance Rate (p < 0.05)")
+  
+  
+}
+
+plot.null.enrichment <- cowplot::plot_grid(
+  variance.mean.plot +  labs(y = "Variance (Raw Enrichment Score)", title = "Null Variance Model", subtitle = ""),
+  plt.null.model + labs(title = "Null Model with 95% CI", y = "Raw Enrichment Score"),
+  plt.score.comp + theme(legend.position = "bottom"),
+  nrow = 1, 
+  align = "h",
+  axis = "tb",
+  labels = "AUTO"
+)
+
+if (parameter.list$print.inline){
+  plot.null.enrichment
+}
+
+```
+
+```{r coherence scoring}
+
+raw.mat <- so.query@misc[["raw_score"]]
+colnames(raw.mat) <- gsub("raw_", "", colnames(raw.mat))
+
+# cohererence scoring
+df.cscore <- coherentFraction(object = so.query, score.matrix =raw.mat, nworkers = parameter.list$n.workers,method = "pearson",
+                            genelist = gene.list, assay = DefaultAssay(so.query), slot = "data", subsample.cluster.n = 500)
+
+
+# consolidate results
+df.score <- score.result$cluster_stats
+df.score$gs <- df.score$name
+df.score$cluster <- df.score$cluster
+df.merge <- merge(df.cscore, df.score, by = c("gs", "cluster"))
+
+# fdr coorection
+if (!parameter.list$fdr.correction){
+  df.merge$fdr <- df.merge$p
+  sig.label <- paste0("Enriched & Coherent\n(p<", parameter.list$p.threshold ,")")
+} else {
+  sig.label <- paste0("Enriched & Coherent\n(FDR<", parameter.list$p.threshold ,")")
+}
+
+# flag significant hits
+df.merge$sig <- df.merge$coherence_fraction >= parameter.list$coherence.threshold & 
+  df.merge$miko_score > 0 & 
+  df.merge$fdr < parameter.list$p.threshold
+
+# visualize
+plt.score.vs.coh <- df.merge %>%
+  ggplot(aes(x = (miko_score), y = coherence_fraction, label = gs, fill = sig)) + 
+  geom_point(pch = 21, color = "white", size = 2) + 
+  theme_miko(legend = T) + 
+  geom_hline(yintercept = 0) + 
+  geom_vline(xintercept = 0) + 
+  scale_fill_manual(values = c("TRUE" = "tomato", "FALSE" = "grey")) + 
+  labs(x = "Signature Score", y = "Coherence Fraction", fill = sig.label, 
+       title = "Coherent Enrichments", 
+       subtitle = paste0(100*signif(sum( df.merge$sig, na.rm = T) / nrow(df.merge), 3), "% Significance Rate"))
+
+
+if (parameter.list$print.inline){
+  plt.score.vs.coh
+}
+
+```
+
+```{r consolidate scores}
+
+# df.merge
+vst.merge.final <- data.frame(cluster = df.merge$cluster, 
+                              cell.type = df.merge$gs, 
+                              # ref.set = NA,
+                              n.genes = NA,
+                              miko_score = df.merge$miko_score,
+                              p = df.merge$p,
+                              fdr = df.merge$fdr,
+                              coherence_fraction = df.merge$coherence_fraction,
+                              r_mean = df.merge$r_mean
+)
+
+if (!parameter.list$fdr.correction){
+  vst.merge.final$fdr <- vst.merge.final$p
+}
+
+vst.merge.final$cluster <- paste0("c", vst.merge.final$cluster)
+
+
+```
+
+```{r flag frequent fliers}
+
+
+ugrp <- unique(vst.merge.final$cluster)
+vst.merge.final.sig <- vst.merge.final %>% dplyr::filter(fdr < parameter.list$p.threshold)
+df.tally.ff <- as.data.frame(table(vst.merge.final.sig$cell.type))
+df.tally.ff$Freq2 <- df.tally.ff$Freq/length(ugrp)
+
+ff.thresh <- parameter.list$frequent.filter.threshold
+plt.ff <- df.tally.ff %>%
+  ggplot(aes(x = Freq2)) + 
+  geom_histogram() + 
+  geom_vline(xintercept = ff.thresh, linetype = "dashed", color = "tomato") + 
+  labs(title = "Frequent Flier Distribution", subtitle = paste0(signif(100*sum(df.tally.ff$Freq2 > ff.thresh)/nrow(df.tally.ff), 3), "% enriched genesets are frequent fliers (significant > ", 100*ff.thresh, "% of clusters)"),
+       x = "Proportion of significant clusters", y = "Number of gene sets") + 
+  theme_miko()
+
+if (parameter.list$print.inline){
+  plt.ff
+}
+
+which.ff <- as.character(df.tally.ff$Var1[df.tally.ff$Freq2 >= ff.thresh])
+vst.merge.final$frequent_flier = (vst.merge.final$cell.type  %in% which.ff)
+
+```
+
+```{r wordclouds, fig.width = 10, fig.height =5, include = FALSE, warning = FALSE, message = FALSE}
+
+miko_message("Generating annotation wordclouds...")
+
+if (parameter.list$filter.frequent.fliers){
+  ff <- vst.merge.final$frequent_flier
+} else {
+  ff <- rep(F, length(vst.merge.final$frequent_flier)) 
+}
+
+   plt.ww.list <- annotationCloud(object = so.query, 
+                                object.group = "seurat_clusters", 
+                                score = vst.merge.final$miko_score,
+                                score.group = gsub("c", "",vst.merge.final$cluster),
+                                score.cell.type = vst.merge.final$cell.type,
+                                score.p = vst.merge.final$p,
+                                score.fdr = vst.merge.final$fdr,
+                                score.coherence.fraction = vst.merge.final$coherence_fraction,
+                                score.frequent.flier = ff, # 
+                                fdr.correction = parameter.list$fdr.correction, 
+                                p.threshold = parameter.list$p.threshold, 
+                                coherence.threshold = parameter.list$coherence.threshold, 
+                                show.n.terms = 15, 
+                                verbose = T)
+   
+   
+   if (parameter.list$print.inline){
+     plt.ww.list
+   }
+ 
+```
+
+
+```{r plot signature gene expressions, message=FALSE, warning=FALSE, fig.width = 20, fig.height = 10}
+
+miko_message("Generating dotplots...")
+
+# wrangle genesets into workable format
+vst.merge.lenient <- vst.merge.final %>% dplyr::filter(fdr < parameter.list$p.threshold)
+all.signatures.list <- list()
+
+    cur.signature.list <- signatures.symbol
+    signature.df <- NULL
+    
+    for (j in 1:length(cur.signature.list)){
+      if (length(cur.signature.list[[j]])>0){
+        cur.signature.name <- names(cur.signature.list)[j]
+        cur.signature.df <- as.data.frame(unlist(cur.signature.list[[cur.signature.name]]))
+        cur.signature.df$signature <- cur.signature.name
+        cur.signature.df <- cur.signature.df[ ,c(2,1)]
+        colnames(cur.signature.df) <- c("signature", "genes")
+        signature.df <- bind_rows(signature.df,cur.signature.df )
+        vst.merge.lenient$n.genes[vst.merge.lenient$cell.type %in% cur.signature.name] <-   nrow(cur.signature.df) 
+        vst.merge.final$n.genes[vst.merge.final$cell.type %in% cur.signature.name] <-   nrow(cur.signature.df)   
+        
+      }
+    }
+    
+    all.signatures.list <- signature.df
+
+# recover reference set annotations #
+plt.signature.subset <- TRUE # (flag specifying whether to plot all or just subset)
+
+# select top genesets to visualize
+if (parameter.list$filter.frequent.fliers){
+  df.sig2plt.cluster <- unique((vst.merge.final %>% 
+                                dplyr::filter(!frequent_flier) %>%
+                                dplyr::filter(fdr < parameter.list$p.threshold,  
+                                              miko_score > 0, 
+                                              coherence_fraction > parameter.list$coherence.threshold,  
+                                              !frequent_flier) %>% 
+                                dplyr::group_by(cluster) %>% 
+                                dplyr::top_n(parameter.list$show.top.n.gene.panels, miko_score)))
+  
+  df.sig2plt <- unique((vst.merge.final %>% dplyr::filter(fdr < parameter.list$p.threshold, coherence_fraction > parameter.list$coherence.threshold,  !frequent_flier) %>%
+                        dplyr::arrange(-miko_score)))
+} else {
+  df.sig2plt.cluster <- unique((vst.merge.final %>% 
+                                dplyr::filter(fdr < parameter.list$p.threshold,  
+                                              miko_score > 0, 
+                                              coherence_fraction >  parameter.list$coherence.threshold) %>% 
+                                dplyr::group_by(cluster) %>% 
+                                dplyr::top_n(parameter.list$show.top.n.gene.panels, miko_score)))
+  
+  df.sig2plt <- unique((vst.merge.final %>% dplyr::filter(fdr < parameter.list$p.threshold, coherence_fraction > parameter.list$coherence.threshold) %>%
+                        dplyr::arrange(-miko_score)))
+}
+
+if (nrow(df.sig2plt) > parameter.list$max.gene.panels.allowed) df.sig2plt <- df.sig2plt[1:parameter.list$max.gene.panels.allowed, ]
+df.sig2plt <- unique(bind_rows(df.sig2plt, df.sig2plt.cluster))
+
+signatures.symbol2 <- signatures.symbol
+names(signatures.symbol2) <- make.names(names(signatures.symbol2))
+
+gene.dot.list <-  signatures.symbol2[unique(df.sig2plt$cell.type)]
+
+gene.dot.list <- gene.dot.list[order(names(gene.dot.list))]
+dot.hg <- runHG(gene.list = gene.dot.list, 
+                gene.universe = rownames(so.query), 
+                species = parameter.list$species, 
+                pathway.db = parameter.list$pathway.db)
+
+dot.hg.sum <- summarizeHG(dot.hg, show.n = 15)
+
+
+#logical indicating whether to generate gene expression dot plots (computationally intensive)
+show.gene.exp <- T 
+
+# generate plots
+plt.expression.all.dotplots <- list()
+
+
+# signature.dot.list.all <- gene.dot.list
+signature.dot.list.all <- all.signatures.list
+signature.dot.list.all$signature <- make.names(signature.dot.list.all$signature)
+u.sig <- unique(signature.dot.list.all$signature)
+u.sig <- u.sig[u.sig %in% names(gene.dot.list)]
+if (show.gene.exp){
+  
+  for (i in 1:length(u.sig)){
+    
+    cur.signature.list.name <- u.sig[i]
+    plt.expression.dotplot <- list()
+    signature.df <- signature.dot.list.all %>% dplyr::filter(signature %in% u.sig[i])
+    u.signatures <- as.vector(unique(signature.df$signature))
+    cur.signature.df <- signature.df
+      cur.signature.genes <- unique(as.vector(cur.signature.df$genes))
+      
+      n.genes <- length(cur.signature.genes)
+      
+      if (n.genes < 11) xlab.size <- 15
+      if (n.genes > 10) xlab.size <- 12
+      if (n.genes > 40) xlab.size <- 10
+      if (n.genes > 50) xlab.size <- 9
+      if (n.genes > 60) xlab.size <- 8
+      if (n.genes > 70) xlab.size <- 7
+      if (n.genes > 80) xlab.size <- 6
+      
+      dat <- score.result$cell_stats
+      
+      
+      mad.threshold <- 10
+      pumap <- score.result$cell_stats %>% 
+        dplyr::filter(name == u.sig[i]) %>%
+        # ggplot(aes(x=  reduction.x, y = reduction.y, 
+        #            color = snip(value.rs, verbose = F,
+        #                         lower.cutoff = median(dat$value.rs, na.rm = T) - mad.threshold*mad(dat$value.rs, na.rm = T), 
+        #                         upper.cutoff = median(dat$value.rs, na.rm = T) + mad.threshold*mad(dat$value.rs, na.rm = T)))) + 
+        ggplot(aes(x=  reduction.x, y = reduction.y, 
+                   color = snip(value, verbose = F,
+                                lower.cutoff = median(dat$value, na.rm = T) - mad.threshold*mad(dat$value, na.rm = T), 
+                                upper.cutoff = median(dat$value, na.rm = T) + mad.threshold*mad(dat$value, na.rm = T))))+ 
+        scale_color_gradient2(high = scales::muted("red"), low = scales::muted("blue")) +
+        theme_void()+ 
+        labs(x=  "UMAP1", y = "UMAP2", color = "score", title = u.sig[i])+ 
+        geom_point()
+      
+      n.av <- sum(cur.signature.genes %in% rownames(so.query))
+      p1 <- DotPlot(so.query, features = cur.signature.genes, 
+                    dot.scale = 8, cols="RdBu", scale = T) +
+        theme_miko(legend =T)  +
+        theme(legend.position = "bottom") + 
+        RotatedAxis() + 
+        ylab("Cell Cluster") + 
+        scale_color_gradient2(high = scales::muted("red"), low = scales::muted("blue")) +
+        labs(title =  u.sig[i], subtitle = paste0("Dotplot (", n.av , "/", length(cur.signature.genes), " Genes)")) +
+        theme(axis.text.x=element_text(size=xlab.size, angle = 75)) 
+      
+      vst.merge.cloud.cur <- vst.merge.final %>% dplyr::filter(cell.type == u.sig[i])
+      vst.merge.cloud.cur$cluster2 <- (gsub("c", "", vst.merge.cloud.cur$cluster))
+      vst.merge.cloud.cur$cluster <- factor(vst.merge.cloud.cur$cluster, 
+                                            levels = paste0("c",  unique(vst.merge.cloud.cur$cluster2)[order(as.numeric(unique(vst.merge.cloud.cur$cluster2)))]))
+      
+      if (parameter.list$fdr.correction){
+        sig.label <- paste0("Enriched (FDR < ", parameter.list$p.threshold,")")
+      } else {
+        sig.label <- paste0("Enriched (p < ", parameter.list$p.threshold,")")
+      }
+      
+      p2 <- vst.merge.cloud.cur %>% ggplot(aes(x = cluster, y = miko_score, 
+                                               fill = (fdr < parameter.list$p.threshold) & (miko_score > 0))) + 
+        scale_fill_manual(values = c("TRUE" = "tomato", "FALSE" = "grey")) + 
+        geom_bar(stat = "identity") + coord_flip() + 
+        labs(title = "", subtitle = "Miko Score", y = "Miko Score", 
+             x = "Cell Cluster", fill = sig.label) + theme_miko() + theme(legend.position = "bottom") 
+      
+      p2_v2 <- vst.merge.cloud.cur %>% 
+        ggplot(aes(x = cluster, y = coherence_fraction)) +  
+        geom_bar(stat = "identity") + coord_flip() + 
+        geom_hline(yintercept = parameter.list$coherence.threshold, linetype = "dashed") + 
+        labs(title = "", subtitle = "Coherence Score", y = "Coherence Score", x = "Cell Cluster", 
+             fill = "Coherence (FDR < 5%)") + theme_miko() + theme(legend.position = "bottom") 
+      
+      p3 <- dot.hg.sum$plots[[u.sig[i]]] + 
+        labs(title = "", subtitle = "Gene Set Enrichment") + 
+        theme(legend.position = "bottom")
+      # dot.hg.sum$plots$
+      
+      if (is.null(p3)){
+        plt.expression.dotplot[[ u.sig[i]]] <- cowplot::plot_grid(pumap, p1, p2, 
+                                                                  nrow =1,
+                                                                  align = "h", 
+                                                                  axis = "tb", 
+                                                                  rel_widths = c(2, 2,1), 
+                                                                  labels = "AUTO")
+      } else {
+        plt.expression.dotplot[[ u.sig[i]]] <- cowplot::plot_grid(pumap, p1, p2,p2_v2, p3,  
+                                                                  nrow =1,
+                                                                  align = "h", 
+                                                                  axis = "tb", 
+                                                                  rel_widths = c(2, 2,0.75,0.75, 1.25), 
+                                                                  labels = "AUTO")
+      }
+      
+      
+      
+      
+      
+      if ((parameter.list$print.inline) & (i < 21)) 
+        print( plt.expression.dotplot[[ u.sig[i]]])
+    # }
+    
+    plt.expression.all.dotplots[[cur.signature.list.name]] <- plt.expression.dotplot
+  }
+}
+
+plt.expression.dotplot <- plt.expression.all.dotplots
+plt.expression.all.dotplots <- list(plt.expression.dotplot)
+
+```
+
+```{r central log}
+
+# update central log
+
+run.id <- NULL
+
+if (parameter.list$developer){
+  if (!exists("user")) user <- "guest"
+  
+  clog.update.success <- F
+  if (parameter.list$update.log){
+    try({
+      run.id <-  updateCentralLog(Module = "M05", input.data = parameter.list$input.file, input.subset = NA, pdf.flag = parameter.list$save.pdf)
+      clog.update.success <-  T
+    }, silent = F)
+  }
+  
+} else {
+  run.id <- paste("output_", gsub(":| ", "", paste0(format(Sys.time(), '%X'))), sep = "", collapse = "")
+}
+
+if (is.null(run.id))  {
+  warning("Central log update was unsuccessful :(\n")
+  run.id <- paste("M05_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+}
+
+```
+
+```{r setup output directories}
+
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+
+# create output directories
+if (parameter.list$save.pdf){
+  dir.create(output.path)
+  dir.create(paste0(output.path, "Tables/"))
+  dir.create(paste0(output.path, "PDF/"))
+}
+
+
+```
+
+Overview
+===================================== 
+
+Sidebar {.sidebar}
+-------------------------------------
+
+**Uniform manifold approximation and projection** (UMAP) used to dimensionally reduce and visualize data while maintaining global transcriptomic structure. 
+
+**Sample Overview**\
+Cells, n: `r ncol(so.query)`\
+Genes, n: `r nrow(so.query)`\
+Variable genes, n: `r try({length(VariableFeatures(so.query))}, silent = T)`\
+
+UMI/cell, median: `r try({round(median(so.query@meta.data[["nCount_RNA"]]))}, silent = T)`\
+genes/cell, median: `r try({round(median(so.query@meta.data[["nFeature_RNA"]]))}, silent = T)`\
+
+Clusters, n: `r try({ulength(so.query$seurat_clusters)}, silent = T)`\
+Resolution: `r try({parameter.list$cluster.resolution}, silent = T)`\
+Species: `r try({parameter.list$species}, silent = T)`
+
+Row {.tabset}
+-------------------------------------
+
+### Cluster UMAP
+
+```{r plt.umap_by_c, fig.width = 7, fig.height = 6}
+
+plt.umap_by_cluster <- plt.umap_by_cluster + 
+  labs(title = "UMAP", subtitle = paste0(ulength(so.query@meta.data$seurat_clusters), " clusters | ", ncol(so.query), " cells")) + 
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+  theme_miko(legend = T)
+print(plt.umap_by_cluster)
+savePDF(file.name = paste0(output.path, "PDF/", "M05_umap_cluster.pdf"), plot.handle = plt.umap_by_cluster, 
+        fig.width = 7, fig.height = 5, save.flag = parameter.list$save.pdf)
+```
+
+
+```{r plt.umap_by_b}
+
+
+try({
+ savePDF(file.name = paste0(output.path, "PDF/", "M09_umap_barcode.pdf"), plot.handle = plt.umap_by_barcode, 
+        fig.width = 7, fig.height = 5, save.flag = parameter.list$general.save.pdf)
+}, silent =T)
+
+if (("Barcode") %in% colnames(so.query@meta.data)){
+  if (ulength(so.query@meta.data$Barcode) > 1){
+    do.bc <- T
+  } else {
+    do.bc <- F
+  }
+}
+
+a1 <- knitr::knit_expand(text = sprintf("### %s\n", "Barcodes"))  # tab header
+a2 <- knitr::knit_expand(text = sprintf("\n```{r %s}", 
+                                        paste("plt.umap_by_b", 1, sep = "")))
+a3 <- knitr::knit_expand(text = sprintf("\n %s", "print(plt.umap_by_barcode)"))
+a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+a1.chunk <- paste(a1, a2, a3, a4, collapse = '\n') 
+
+```
+
+`r if (do.bc){paste(knitr::knit(text = paste(a1.chunk, collapse = '\n')))}`
+
+
+```{r plt.cluster_composition_barcodes, fig.width=13, fig.height=4}
+
+do.bc2 <- !is.null(plt.cluster_composition_barcodes)
+
+if (do.bc2){
+  try({
+    savePDF(file.name = paste0(output.path, "PDF/", "M05_cluster_composition_barplot.pdf"), plot.handle = plt.cluster_composition_barcodes, 
+            fig.width = 13, fig.height = 4, save.flag = parameter.list$save.pdf)  
+  }, silent = T)
+}
+
+a1 <- knitr::knit_expand(text = sprintf("### %s\n", "Sample Representation"))  # tab header
+a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=13, fig.height=4}", 
+                                        paste("plt.bar_by_sample", 1, sep = "")))
+a3 <- knitr::knit_expand(text = sprintf("\n %s", "print(plt.cluster_composition_barcodes)"))
+a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+a2.chunk <- paste(a1, a2, a3, a4, collapse = '\n') 
+
+
+```
+
+`r if (do.bc2){paste(knitr::knit(text = paste(a2.chunk, collapse = '\n')))}`
+
+
+
+```{r df.all_barcodes_wide}
+## Sample Representation (table)
+do.bc3 <- nrow(df.all_barcodes_wide) > 0
+a1 <- knitr::knit_expand(text = sprintf("### %s\n", "Sample Representation (table)"))  # tab header
+a3.chunk <- paste(a1, collapse = '\n') 
+
+```
+`r if (do.bc3){paste(knitr::knit(text = paste(a3.chunk, collapse = '\n')))}`
+
+```{r}
+
+if (do.bc3){
+  datatable(df.all_barcodes_wide, filter="top", extensions = 'Buttons',
+            options = list(pageLength = 50, 
+                           autoWidth = TRUE,
+                           dom = 'Bfrtip',
+                           buttons = c('copy', 'csv', 'pdf')))
+}
+
+```
+
+
+### Expression Heatmap
+
+```{r exp mat}
+plt.heat.scaled
+```
+
+```{r pdf heat}
+
+try({
+  savePDF(file.name = paste0(output.path, "PDF/", "M05_expression_heatmap.pdf"), 
+          plot.handle = (plt.heat.scaled), 
+          fig.width = 8, fig.height = 5, save.flag = parameter.list$save.pdf)
+}, silent = T)
+
+```
+
+
+Annotation Scores
+===================================== 
+
+
+Sidebar {.sidebar data-width=400}
+-------------------------------------
+
+**Cell Annotation**: Marker-based cell type annotation using Miko scoring pipeline.\
+
+**Description**:The Miko scoring pipeline is a marker-based cell-type annotation method that accounts for variations in gene set sizes, while simultaneously offering a hypothesis-testing framework capable of rejecting non-significantly enriched gene sets. For a given single cell dataset, query and size-matched random gene sets are scored, and the difference between query and random module scores is scaled using the size-adjusted standard deviation estimate obtained from a gene set-size dependent null model to yield the Miko score. Scaling by the size-adjusted standard deviation estimate corrects for size-dependencies and results in a test statistic from which a p-value can be derived.
+
+We use two additional post-scoring filters to fine tune which gene sets are enriched. The first is a **coherence filter** in which a positive correlation between component gene expression and the Miko score is enforced for a minimum fraction of component genes. The second is a **frequent flier filter**, which flags gene sets that exceed a minimum significance rate and represent gene sets that enrich across most cell clusters.
+
+On the *left*, the UMAP highlights which cluster of interest. 
+
+On the *right*, the word cloud illustrates the top enriched cell-type annotations, using the specified filters. 
+
+
+Row {.tabset data-height=550}
+-------------------------------------
+
+```{r Clouds}
+
+out <- NULL
+
+try({
+  
+  out <- lapply(seq_along(plt.ww.list), function(i) {
+    
+    a1 <- knitr::knit_expand(text = sprintf("### %s\n", names(plt.ww.list)[i])) # tab header
+    a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=10, fig.height=5}", paste(i, "detailed_tab"))) 
+    a3 <- knitr::knit_expand(text = sprintf("\nprint(plt.ww.list[[%d]])", i)) 
+    a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+    
+    paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+    
+  })
+  
+}, silent = T)
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+Row {.tabset data-height=500}
+-------------------------------------
+
+### Scores (top annotations)
+
+```{r lenient filter tab,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+
+# vst.merge.lenient[ ,c("miko_score", "fdr", "coh.fdr", "coh.fraction")] <- signif(vst.merge.lenient[ ,c("miko_score", "fdr", "coh.fdr", "coh.fraction")], 3)
+
+vst.merge.lenient[ ,c("miko_score", "p", "fdr", "coherence_fraction", "r_mean")] <- signif(vst.merge.lenient[ ,c("miko_score", "p", "fdr", "coherence_fraction", "r_mean")], 3)
+# 
+try({vst.merge.lenient <- vst.merge.lenient %>% dplyr::select(-c("gen"))}, silent = T)
+try({vst.merge.lenient <- vst.merge.lenient %>% dplyr::select(-c("ref.set"))}, silent = T)
+try({vst.merge.lenient <- vst.merge.lenient %>% dplyr::select(-c("n.genes"))}, silent = T)
+datatable(vst.merge.lenient, 
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip', 
+                         buttons = c('copy', 'csv', 'pdf')))
+
+if (parameter.list$save.pdf){
+  write.csv(vst.merge.lenient, file = paste0(output.path, "Tables/", "annotation_scores_significant.csv"), 
+            row.names = F) 
+}
+
+
+```
+
+
+### Scores (all annotations)
+
+```{r no filter tab,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+vst.merge.final[ ,c("miko_score", "p", "fdr", "coherence_fraction", "r_mean")] <- signif(vst.merge.final[ ,c("miko_score", "p", "fdr", "coherence_fraction", "r_mean")], 3)
+
+try({vst.merge.final <- vst.merge.final %>% dplyr::select(-c("gen"))}, silent = T)
+try({vst.merge.final <- vst.merge.final %>% dplyr::select(-c("ref.set"))}, silent = T)
+try({vst.merge.final <- vst.merge.final %>% dplyr::select(-c("n.genes"))}, silent = T)
+datatable(vst.merge.final, 
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip', 
+                         buttons = c('copy', 'csv', 'pdf')))
+
+if (parameter.list$save.pdf){
+  write.csv(vst.merge.final, file = paste0(output.path, "Tables/", "annotation_scores_all.csv"), 
+            row.names = F) 
+}
+
+
+```
+
+
+### Null Enrichment Model
+
+```{r Null enrichment model, fig.width=12, fig.height=4.5, warning = F, message=F}
+### Null enrichment models
+print(plot.null.enrichment)
+savePDF(file.name = paste0(output.path, "PDF/", "M05_null_enrichment_model.pdf"), plot.handle = plot.null.enrichment,
+        fig.width = 12, fig.height = 4.5, save.flag = parameter.list$save.pdf)
+
+```
+
+
+```{r pdf Clouds,include = FALSE}
+
+for (i in 1:length(plt.ww.list)){
+  cur.plot.name <- names(plt.ww.list)[i]
+  plot.name <- paste0("M05_wordcloud_", cur.plot.name ,".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name),
+          plot.handle = plt.ww.list[[cur.plot.name]],
+          fig.width = 15, fig.height = 5, save.flag = parameter.list$save.pdf)
+}
+
+```
+
+
+
+Gene set Expression
+===================================== 
+
+
+Sidebar {.sidebar}
+-------------------------------------
+
+**Gene set expression**: Visualize top cell-type-specific gene sets based on miko_score scoring. 
+
+**A**| UMAP overlaid miko scores.\
+**B**| Dotplot visualizing gene expression across different cell clusters.\
+**C**| Cluster-level gene set miko scores\
+**D**| Cluster-level gene set coherence scores.\
+**E**| Gene set enrichment using hypergeometric over-representation analysis. 
+
+Row {.tabset}
+-------------------------------------
+
+```{r expr dotplot, fig.width=30, fig.height=10}
+
+# plt.expression.all.dotplots$all$Manno2021_ACMB
+out2 <- lapply(seq_along(plt.expression.all.dotplots[[1]]), function(j) {
+  s1 <- paste("plt.expression.all.dotplots[[", 1, "]][[",j ,"]][[1]]", sep = "")
+  
+  b1 <- knitr::knit_expand(text = sprintf("\n### %s\n", names(plt.expression.all.dotplots[[1]])[j])) # tab header
+  b2 <- knitr::knit_expand(text = sprintf("\n```{r %s, fig.width=30, fig.height=10, message=FALSE, warning=FALSE}", 
+                                          paste("expression.dot", 1, j, sep = ""))) 
+  b3 <- knitr::knit_expand(text = sprintf("\n%s",s1)) 
+  b4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(b1, b2, b3, b4, collapse = '\n')
+  
+})
+
+```
+
+`r paste(knitr::knit(text = paste(out2, collapse = '\n')))`
+
+```{r pdf dotplots,include = FALSE}
+
+for (i in 1:length(plt.expression.dotplot)){
+  plot.name <- paste0("M05_dotplot_", names(plt.expression.dotplot)[i] ,".pdf")
+  savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+          plot.handle =  plt.expression.dotplot[[i]], 
+          fig.width = 20, fig.height = 10, save.flag = parameter.list$save.pdf)
+}
+
+```
+
+Geneset Tables
+===================================== 
+
+Sidebar {.sidebar}
+-------------------------------------
+
+**Gene sets**: Gene sets used in the current analysis are provided in tables. 
+
+Row {.tabset}
+-------------------------------------
+
+### Summary
+```{r}
+
+datatable(df.gs.statistics, 
+          filter = 'top',
+          extensions = 'Buttons',
+          options = list(pageLength = 50,
+                         dom = 'Bfrtip', 
+                         buttons = c('copy', 'csv', 'pdf')))
+
+if (parameter.list$save.pdf){
+  write.csv(df.gs.statistics, file = paste0(output.path, "Tables/", "geneset_summary.csv"), 
+            row.names = F) 
+}
+```
+### Cell-type markers
+```{r res4, echo = FALSE, eval = TRUE, message=TRUE, warning=FALSE}
+
+
+gene.list.wide <- namedList2wideDF(gene.list)
+
+flex.asDT(gene.list.wide)
+```
+
+
+
+
+```{r save genelists}
+
+  if (parameter.list$save.pdf){
+    table.name <- paste0("genelist.csv")
+    write.csv(gene.list.wide, file = paste0(output.path, "Tables/",table.name), 
+              row.names = F) 
+  }
+```
+
+
+
+```{r save analysis log and Rdata results}
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log <- addLogEntry("Run Time (s)", (elapsed.time), df.log, "elapsed.time")
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+
+if (parameter.list$developer){
+  df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
+}
+
+df.log_Module_5 <- df.log
+
+
+```
+
+
+
+
+```{r ph10,  echo = FALSE, eval = TRUE}
+
+out1 <- lapply(seq_along(module.logs), function(i) {
+  
+  module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
+  
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (Module %s)", paste(module.n)))
+  a2 <- knitr::knit_expand(text = "\n=====================================")
+  a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
+  a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
+  a5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+Log (Module 5)
+===================================== 
+
+```{r table.log_current}
+
+knitr::kable(df.log_Module_5)
+
+```
+
+
+```{r save analysis log}
+
+if (parameter.list$developer){
+  try({
+    write.csv(df.log_Module_5, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+              row.names = F)  
+  }, silent = T)
+}
+
+```
+
+System Info
+=====================================
+
+```{r}
+
+pander::pander(sessionInfo())
+
+```
