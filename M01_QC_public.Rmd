@@ -49,43 +49,40 @@ invisible(lapply(packages2load, library, character.only = TRUE, quietly = T))
 parameter.list <- list(
   
   # input parameters
-  input.object = "C:/Users/Owner/Dropbox/PDF Projects - JM/R Packages/scMiko/data/so_tyser2021_220621.rds",    # seurat object
-  # input.object = NULL,           
-  input.cell_ranger = NULL, #"C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Raw_Datasets/cell_ranger/15-Neftel_2019/",                            # gene count matrix
-  input.matrix = NULL, #"C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Raw_Datasets/Expression_matrix/EMT6_invivo_CTLscreen_240320/overall_Matrix_240320.txt", # as csv file - first column has genes, rows are cell names
-  # input.genes = NULL,
-  # input.format = "cell_ranger",                   # options: matrix, cell_ranger
-
+  input.object = NULL,       
+  input.cell_ranger = NULL, 
+  input.matrix = "C:/Users/Owner/Dropbox/PDF Projects - JM/R Packages/scMiko/data/cao2019_count_matrix.rds",
   
   # output parameters
-  save.flag = F,              
+  save.flag = T,              
   output.object.directory = "Preprocessed_Datasets/",
-  output.object.file = "p16_mm_gbm_150122.Rdata",
+  output.object.file = "demo_cao2019_10000cell.Rdata",
 
   # analysis parameters
   subsample.n = NA, 
   cluster.resolution = 1,
-  gene.upperlimit = 9000, #9000
-  gene.lowerlimit = 200,  #200
-  mt.upperlimit = 10,   #60
+  gene.upperlimit = 9000, 
+  gene.lowerlimit = 200,  
+  mt.upperlimit = 10,  
   unmatched.rate.filter.flag = T,
-  vars2regress = c("percent.mt"), # optional: "dataset" (for linear batchcorrection)
+  vars2regress = c("percent.mt"), 
   correct.artifact = T,
-  feature.select.method = "hvg", # options: hvg (recommended), deviance
-  scale.method = "sct", # option: sct (recommended), null_residuals
-  pca.method = "pca", #option: pca (recommended), glmpca
-  pca.component.select.method = "cum_var", #options" cum_var, elbow
-  pca.var.threshold = 0.9, # [0,1], ignored if pca.component.select.method = elbow
+  feature.select.method = "hvg",             # options: hvg (recommended), deviance
+  scale.method = "sct",                      # option: sct (recommended), null_residuals
+  pca.method = "pca",                        # option: pca (recommended), glmpca
+  pca.component.select.method = "cum_var",   # options" cum_var, elbow
+  pca.var.threshold = 0.9,
   conserve.memory = F,
   
   # specify species
   species.filter.flag = F,                             
   species.include = "Mm",
 
+  # miscillaneous parameters
   nworkers = 1,
   save.pdf = F,
   print.inline = F,
-  developer = T
+  developer = F
 )
 
 
@@ -93,7 +90,6 @@ parameter.list <- list(
 
 
 ```{r developer input}
-
 
 # developer specific input formats
 do.dev <- parameter.list$developer
@@ -109,7 +105,6 @@ if ("which.strata" %in% names(parameter.list)){
 } else {
   which.strata <- NA
 }
-
   
   if (!exists("data.path") & !exists("user")) {
     stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
@@ -324,7 +319,6 @@ df.log <- addLogEntry("PCA component selection method",
 
 ```
 
-
 ```{r c6 - load_data}
 
 # Run import function
@@ -336,7 +330,6 @@ idx.seq <- c(1, 1+length(input_data), 1+(2*length(input_data)))
 
 # assertions
 stopifnot(length(dir) == length(input_data))
-# stopifnot(length(all_input_organisms) == length(input_data))
 
 for (i in 1:length(input_data)){
   if (input.type[i] == 0){
@@ -405,13 +398,6 @@ gNames.list <- df.gname$gene
 names(gNames.list) <- df.gname$ensembl
 so@misc[["g2e"]] <- gNames.list
 }, silent = T)
-
-
-# table(so@meta.data[["Barcode"]])
-# 
-# 
-# flex.asDT(data.frame(table(so@meta.data[["Barcode"]])))
-
 
 ```
 
@@ -682,11 +668,15 @@ if ("mt.upperlimit" %in% names(parameter.list)){
   }
 }
 
+try({
+  if (ulength(so$Barcode) == 1){
+    plt.mito_by_bc <- plt.mito_by_bc + theme_miko(color.palette = "flatly2")
+  }
+})
+
 if (parameter.list$print.inline){
   print(plt.mito_by_bc)
 }
-
-
 
 ```
 
@@ -720,13 +710,16 @@ if (length(unique(so@meta.data[["subset_group"]]))> 1){
   mT_aov <- c()
 }
 
-violin.list <- QC.violinPlot(so, plt.log.flag = T, cols = alpha('#2C3E50', alpha = 0.5))
-plt.QC_violin <- violin.list[[1]]
-plt.violin_by_subgroup <- violin.list[[2]]
+plt.QC_violin <- tryCatch({
+  violin.list <- QC.violinPlot(so, plt.log.flag = T, cols = alpha('#2C3E50', alpha = 0.5))
+  cowplot::plot_grid(violin.list[[1]])
+}, error = function(e){
+  violin.list <- QC.violinPlot(so, plt.log.flag = T)
+  return(cowplot::plot_grid(violin.list[[1]]))
+})
 
 if (parameter.list$print.inline){
   print(plt.QC_violin) 
-  print(plt.violin_by_subgroup)
 }
 
 
@@ -835,7 +828,7 @@ if (length(cov) > 0){
 
 
 so <- tryCatch({
-  scNormScale(object = so, 
+ scNormScale(object = so, 
               method = normalization_method_ps, 
               vars2regress = parameter.list$vars2regress,
               n.workers = parameter.list$nworkers,  
@@ -886,20 +879,17 @@ if (is.null(so)) stop("Failed to normalized data. Troubleshooting required.")
 nassay <- DefaultAssay(so)
 if (nassay == "RNA"){
  normalization_method_ps = "NFS"
- parameter.list$scale.method <- "sct"
+ parameter.list$scale.method <- "nfs"
 } else if (nassay == "SCT"){
   normalization_method_ps = "SCT"
-  parameter.list$scale.method <- "nfs"
+  parameter.list$scale.method <- "sct"
 }
-
-
 
 # plot variable genes
 var.gene.orig <- so@assays[[nassay]]@var.features
 plt.variable_genes <- variableGenes.Plot(so, gNames.list, parameter.list$set_names, 
                                          cols = c('#2C3E50', '#F39C12'))
 
-# plt.handle <- VariableFeaturePlot(so, cols = c('#18BC9C','#2C3E50'))
 plt.variable_genes <- plt.variable_genes + 
   labs(title = "Variably-Expressed Genes") + 
   theme_miko(legend = T) + 
@@ -931,14 +921,28 @@ plt.genes_per_cell <- ggplot(df_nFeat_m, aes(x = value, fill = variable)) +
   geom_density(alpha = 0.3) + scale_x_log10()+   xlab("genes/cell") + 
   theme_miko(fill.palette = "flatly", legend= T)
 
-plt.pre_post_1 <- FeatureScatter(so, feature1 = "nCount_RNA", feature2 = paste0("nCount_", nassay)) + 
+
+plt.pre_post_norm <- tryCatch({
+  plt.pre_post_1 <- FeatureScatter(so, feature1 = "nCount_RNA", feature2 = paste0("nCount_", nassay)) + 
   xlab("UMI/cell (raw)") + ylab("UMI/cell (normalized)") + 
   theme_miko(color.palette = "flatly2", legend= T)
-plt.pre_post_2 <- FeatureScatter(so, feature1 = "nFeature_RNA", feature2 = paste0("nFeature_", nassay)) + 
+  
+  plt.pre_post_2 <- FeatureScatter(so, feature1 = "nFeature_RNA", feature2 = paste0("nFeature_", nassay)) + 
   xlab("Genes/cell (raw)") + ylab("Genes/cell (normalized)") + 
   theme_miko(color.palette = "flatly2", legend= T)
+  
+  CombinePlots(plots = list(plt.pre_post_1, plt.pre_post_2), ncol = 2, legend = 'none')
+  
+}, error = function(e){
+  plt.pre_post_1 <- FeatureScatter(so, feature1 = "nCount_RNA", feature2 = paste0("nCount_", nassay)) + 
+  xlab("UMI/cell (raw)") + ylab("UMI/cell (normalized)")  + 
+  theme_miko(legend= T)
+  plt.pre_post_2 <- FeatureScatter(so, feature1 = "nFeature_RNA", feature2 = paste0("nFeature_", nassay)) + 
+  xlab("Genes/cell (raw)") + ylab("Genes/cell (normalized)")  + 
+  theme_miko(legend= T)
 
-plt.pre_post_norm <- CombinePlots(plots = list(plt.pre_post_1, plt.pre_post_2), ncol = 2, legend = 'none')
+  return(CombinePlots(plots = list(plt.pre_post_1, plt.pre_post_2), ncol = 2, legend = 'none'))
+}, silent = T)
 
 if (parameter.list$print.inline){
   print(plt.UMI_per_cell)
@@ -1046,7 +1050,7 @@ if (parameter.list$scale.method == "null_residuals"){
 
 ```
 
-```{r identify artefact genes, include = FALSE}
+```{r identify artifact genes, include = FALSE}
 
 u.bc <- unique(so@meta.data$Barcode)
 
@@ -1621,10 +1625,13 @@ df.log <- addLogEntry("Output Saved", as.character(parameter.list$save.flag), df
 # save results to Preprocessed_Datasets/
 output.object.file <- paste0(data.path, parameter.list$output.object.directory , parameter.list$output.object.file)
 
-df.log_Module_1 <- df.log
-if ((parameter.list$save.flag == TRUE) ){
+try({
   df.log <- addLogEntry("Output Results (.Rdata)", as.character(parameter.list$output.object.file), df.log, "output.object.file")
   df.log <- addLogEntry("Output Directory", as.character(parameter.list$output.object.directory), df.log, "output.object.directory")
+}, silent = T)
+
+df.log_Module_1 <- df.log
+if ((parameter.list$save.flag == TRUE) ){
   
   save(so, gNames.list, df.log_Module_1, file = output.object.file)
 }
@@ -1976,7 +1983,7 @@ if (!is.null(df.var.meta)){
 }
 ```
 
-Log
+Log (M01)
 ===================================== 
 
 ```{r}

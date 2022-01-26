@@ -50,33 +50,22 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 ```{r parameter specification}
 
-# M18
 parameter.list <- list(
-  # input.file = "M01_NM2_R1_test_300720.Rdata",
-  input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/R Packages/scMiko/data/so_tyser2021_220621.rds",
-  # input.file = "zeisel2018_mouse_neural_reference_010220.Rdata",
-  # input.file = "development_mouse_neural_reference_all_060321.Rdata",
-  # input.file = "R65_M01_NM2_p11_neural_DIV7_270820.Rdata",
-  
-  # input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Mesoderm/Papers/Cao 2020 Dataset/so_cao2020.rds",
-  # input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Mesoderm/Papers/Tyser 2021 Dataset/so_tyser2021_220621.rds",
-  # input.file = "cao2019_seurat_object_271021.rds",
-  # input.file = "so_immune_CT2A_invivo_integrated_210421.rds", 1.2
-  # input.file = "R554_M02_NM2_p10_p14_CGR8_integrated_byReplicate_rpca_SCTrerun_110821.Rdata",
-  cluster.resolution = c(0.05, 0.1, 0.2, 0.3, 0.4, 0.5,  0.75,  1, 1.25, 1.5, 1.75, 2, 3),
-  lfc.threshold = 0.5, # log fold change threshold (0.5 recommended)
+  input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Preprocessed_Datasets/output_33016PM_demo_ps_10000cell.Rdata",
+  cluster.resolution = c(0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3),
+  lfc.threshold = 0.5,            
   fdr.threshold = 0.05,
-  group.singletons = F, # Default: T (recommended for clean datasets)
-  print.inline = FALSE, # print inline
-  subsample_factor = 1, # OPTIONAL; range 0 to 1 (default = 1)
+  group.singletons = F,                
+  print.inline = FALSE, 
+  subsample_factor = 1,
   subsample_n = 10000,
-  n.workers =list(  # specify number of workers (for parallelization)
-    clustering = 4, # data clustering
-    deg = 4         # DEG analysis
+  n.workers =list(  
+    clustering = 4, 
+    deg = 4       
   ),
-  only.pos = T, # which markers to return
-  save.pdf = F, # save PDF
-  update.log = T,
+  only.pos = T, 
+  save.pdf = F, 
+  update.log = F,
   rprofile.dir = F,
   developer = F
 )
@@ -144,10 +133,11 @@ if ("integrated" %in% names(so@assays)){
 
 # prep seurat object
 prep.list <- prepSeurat2(so, e2s = gNames.list, 
-                             species = NULL, resolution= NULL, subset = NULL, 
-                             subsample = 1, M00_subgroup.path = "M00_subgroups.csv",
-                             terms2drop = terms2drop, rmv.pattern = "so", 
-                         scale.reprocessed = F, neighbors.reprocessed = T) # scale.reprocessed default = T
+                         species = NULL, resolution= NULL, subset = NULL, 
+                         subsample = 1, 
+                         terms2drop = terms2drop, rmv.pattern = "so", 
+                         scale.reprocessed = F, 
+                         neighbors.reprocessed = T) 
 
 # unpack results
 if (exists("so")) try({rm(so)}, silent = T)
@@ -171,8 +161,6 @@ module.logs <- cur.env[grep("^df.log_Module",cur.env)]
 
 
 ```{r cluster helper function}
-
-miko_message("Clustering data...")
 
 # clustering data
 mc.list <- multiCluster(object = so.query, 
@@ -224,12 +212,9 @@ availableNNgraph <- function(object, verbose = T){
   return(cluster.graph)
 }
 
-
-
-
 multiPurity <- function(object, resolutions, cluster_graph = availableNNgraph(object), 
                         n_subsample = 10000, pca_var = 0.9, assay_pattern = NULL, assay = NULL, 
-                        purity_threshold = 0.9){ #p_threshold = 0.05
+                        purity_threshold = 0.9){ 
 
 df.purity <- NULL
 purity.umap.list <- list()
@@ -344,8 +329,6 @@ return(
   
 }
 
-
-
 mp.list <- multiPurity(object = so.query, 
                        resolutions = parameter.list$cluster.resolution, 
                        cluster_graph = availableNNgraph(so.query), 
@@ -353,9 +336,6 @@ mp.list <- multiPurity(object = so.query,
                        pca_var = 0.9, 
                        assay_pattern = assay.pattern, assay = NULL, 
                        purity_threshold = 0.9) #, p_threshold = 0.05
-
-
-
 
 df.purity <- mp.list$purity_raw
 df.purity.sum <- mp.list$purity_summary
@@ -924,15 +904,15 @@ if (parameter.list$developer){
   clog.update.success <- F
   if (parameter.list$update.log){
     try({
-      run.id <-  updateCentralLog(Module = "M18", input.data = parameter.list$input.file, input.subset = NA, pdf.flag = parameter.list$save.pdf)
+      run.id <-  updateCentralLog(Module = "M03", input.data = parameter.list$input.file, input.subset = NA, pdf.flag = parameter.list$save.pdf)
       clog.update.success <-  T
     }, silent = F) 
   }
   
   if (is.null(run.id))  {
     warning("Central log update was unsuccessful :(\n")
-    # run.id <- paste("M18_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
-    run.id <- paste("M18_", user, "_", gsub(":| ", "", paste0(format(Sys.time(), '%d_%m_%X'))), sep = "", collapse = "")
+    # run.id <- paste("M03_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+    run.id <- paste("M03_", user, "_", gsub(":| ", "", paste0(format(Sys.time(), '%d_%m_%X'))), sep = "", collapse = "")
   }
   
 } else {
@@ -1037,7 +1017,7 @@ try({
   for (i in 1:length(plt.clust.ov)){
     set.name <- gsub(assay.pattern, "", names(plt.clust.ov)[i])
     suffix = "resolution.pdf"
-    plot.name <- paste0("M18_umap_", gsub(".", "_", set.name, fixed = T), suffix)
+    plot.name <- paste0("M03_umap_", gsub(".", "_", set.name, fixed = T), suffix)
     savePDF(file.name = paste0(output.path, "PDF/", plot.name), plot.handle =  plt.clust.ov[[i]], 
             fig.width = 12, fig.height = 5, save.flag = parameter.list$save.pdf)
   }
@@ -1070,7 +1050,7 @@ plt.opt.stat <- cowplot::plot_grid( plt.silw.dep + geom_hline(yintercept = 0.6, 
 print(plt.opt.stat)
 
 try({
-savePDF(file.name = paste0(output.path, "PDF/", "M18_optimization_metrics.pdf"), 
+savePDF(file.name = paste0(output.path, "PDF/", "M03_optimization_metrics.pdf"), 
         plot.handle =  plt.opt.stat, 
          fig.width=25, fig.height=5, save.flag = parameter.list$save.pdf)
 }, silent = T)
@@ -1101,7 +1081,7 @@ out <- lapply(seq_along(res.specific.list), function(i) {
 try({
   for (i in 1:length(res.specific.list)){
     res.val <- gsub(assay.pattern, "", names(res.specific.list)[i])
-    plot.name <- paste0("M18_performance_metrics_", gsub(".", "_",res.val, fixed = T), "resolution.pdf")
+    plot.name <- paste0("M03_performance_metrics_", gsub(".", "_",res.val, fixed = T), "resolution.pdf")
     savePDF(file.name = paste0(output.path, "PDF/", plot.name), plot.handle =  res.specific.list[[i]], 
             fig.width = 15, fig.height = 5, save.flag = parameter.list$save.pdf)
   }
@@ -1231,7 +1211,7 @@ if (parameter.list$developer){
 }
 
 
-df.log_Module_18 <- df.log
+log_Module_3 <- df.log
 
 
 
@@ -1243,12 +1223,11 @@ out1 <- lapply(seq_along(module.logs), function(i) {
   
   module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
   
-  a1 <- knitr::knit_expand(text = sprintf("\nLog (Module %s)", paste(module.n)))
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (M%s)", paste(module.n)))
   a2 <- knitr::knit_expand(text = "\n=====================================")
   a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
   a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
   a5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
-  
   paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
   
 })
@@ -1258,12 +1237,12 @@ out1 <- lapply(seq_along(module.logs), function(i) {
 
 `r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
 
-Log (Module 18)
+Log (M3)
 ===================================== 
 
 ```{r table.log_current, message=FALSE, warning=FALSE}
 
-knitr::kable(df.log_Module_18)
+knitr::kable(log_Module_3)
 
 ```
 
@@ -1271,7 +1250,7 @@ knitr::kable(df.log_Module_18)
 
 try({
   if (parameter.list$developer){
-  write.csv(df.log_Module_18, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+  write.csv(log_Module_3, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
     row.names = F)  
   }
 }, silent = T)

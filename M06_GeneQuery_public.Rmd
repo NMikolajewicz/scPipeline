@@ -59,89 +59,6 @@ invisible(lapply(packages2load, library, character.only = T, quietly = T))
 
 ```
 
-```{r parameter definitions}
-
-
-#   #   0: Manual input; vector of genes (e.g., which.gene.set = c("cd70", "cd34"))
-#   #   1: M09_type1_queries.csv; gene.sets.type1 
-#   #   2: M09_type2_queries.csv; gene.sets.type2; .csv file
-#   #   3: cluster DEG
-#   #   4: top N cluster markers
-#   #   5: M09_type5_queries.csv; GO/Reactome genesets
-#   #   6: scMiko internal geneset
-
-# ------------------------------------------------------------------------------
-# Parameter Description #######################################################
-# ------------------------------------------------------------------------------
-# input.file 
-#     Seurat object path (i.e., file location)
-# ------------------------------------------------------------------------------
-# feature.format 
-#     format of features provided by user. One of:
-#                  0: user-provided genes. 
-#                  1: features are stored in spreadsheet. 
-#                  2: discovery setting. 
-# ------------------------------------------------------------------------------
-# features 
-#     features used for analysis. 
-#     If feature.format = 1, 'features' must be vector of features present in seurat object (e.g., c("PRRX1", "TCF4")). 
-#     If feature.format = 2, 'features' must be name of column spreadsheet containing features (e.g., "HALLMARK_genes"). 
-#     If feature.format = 3, 'features' argument is ignored.
-# ------------------------------------------------------------------------------
-# features.csv.path
-#     Path to spreadsheet containing features. Required if using feature.format = 1. For intended use, features in spreadsheet must be organized in columns that can be referenced by the column header using the 'features' argument.
-# ------------------------------------------------------------------------------
-# discovery.method 
-#     Differential expression algorithm used in discovery mode (feature.format = 2). One of:
-#                    "Wilcoxon": Identifies DEGs using Wilcoxon Rank Sum test
-#                    "CDI": Identifies DEGs using co-dependency test.
-#                    "Gini": Identifies group-specific features using gini inequality index. 
-# ------------------------------------------------------------------------------
-# discovery.pct.min 
-#     Features that are expressed below this value are omitted from differential expression analysis.  Range between [0,1], 0.1 is recommended. Required only if feature.format = 2. 
-# ------------------------------------------------------------------------------
-# discovery.group.by 
-#     Name of object meta data field to group cells by when performing differential expression. E.g., "seurat_clusters". Required only if feature.format = 2. 
-# ------------------------------------------------------------------------------
-# as.module 
-#     TRUE/FALSE (logical), specify whether features should be aggregated into single meta-program. 
-# ------------------------------------------------------------------------------
-# general.cluster.resolution 
-#     Value of the resolution parameter, use a value above (below) 1.0 if you want to obtain a larger (smaller) number of communities.
-# ------------------------------------------------------------------------------
-# general.subsample.factor 
-#     Value between [0,1] specifying fraction of cells to subsample. Use 1 for no subsampling. 
-# ------------------------------------------------------------------------------
-# general.clean.clusters 
-#     TRUE/FALSE (logical), omit cells exceeding 3 median absolute deviations from cluster center in UMAP coordinate space. 
-# ------------------------------------------------------------------------------
-# general.save.pdf 
-#     TRUE/FALSE (logical), save analysis figures as PDFs. 
-# ------------------------------------------------------------------------------
-# general.print.inline 
-#     TRUE/FALSE (logical), print figures directly in R notebook. 
-# ------------------------------------------------------------------------------
-# general.barcode.recode 
-#     Named list where names are new labels, and entires are old labels. If is provided for old labels, treated as wild card. e.g. list(in.vitro = c("invitro), in.vivo = NA). See scMiko::recordBarcode(...) for details. 
-# ------------------------------------------------------------------------------
-# cor.method
-#     feature association method. One of:
-#                    "pearson": Pearson correlation 
-#                    "spearman": Spearman correlation 
-#                    "rho_p": Proportionality constant
-#                    "cdi": co-dependency index
-# ------------------------------------------------------------------------------
-# cor.top.n 
-#     Number of top associated features to show. 70 is recommended. 
-# ------------------------------------------------------------------------------
-# cor.which.data
-#     slot to use for feature association analysis. "data" is recommended. 
-# ------------------------------------------------------------------------------
-# cor.min.expr 
-#     Features that are expressed below this value are omitted from feature association analysis. Range between [0,1], 0.025-0.1 is recommended.
-# ------------------------------------------------------------------------------
-
-```
 
 ```{r parameter specification}
 
@@ -149,6 +66,8 @@ invisible(lapply(packages2load, library, character.only = T, quietly = T))
 
 
 # PARAMETER SPECIFICATION ######################################################
+
+
 
 parameter.list <- list(
   # input.file =  "M01_NM2_R1_test_300720.Rdata",
@@ -183,6 +102,7 @@ parameter.list <- list(
 
   # General parameters #########################################################
   expression.do.hex = F,             # Logical. Specify whether to generate hex UMAPs (schex package)
+  n.workers = parallel::detectCores(),
   developer = F
   
 )
@@ -521,7 +441,8 @@ if (parameter.list$feature.format == 2){
     markers_of_interest <- unique(as.character(deg.gene.top$feature))
   } else if (toupper(parameter.list$discovery.method) == "CDI"){
     exprGene <- getExpressedGenes(object = so.query, min.pct = parameter.list$discovery.pct.min, group = grouping_var)
-    deg.gene <- findCDIMarkers(object = so.query, features.x = grouping_var, features.y = exprGene, ncell.subset = 5000, verbose = T)   
+    deg.gene <- findCDIMarkers(object = so.query, features.x = grouping_var, features.y = exprGene, ncell.subset = 5000,
+                               n.workers = parameter.list$n.workers, verbose = T)   
     deg.gene.top <- deg.gene %>%
       dplyr::group_by(feature.x) %>%
       dplyr::top_n(top.n.deg, ncdi)
@@ -977,7 +898,8 @@ if (compute.cor) {
                          error = function(e){
                            return(getExpressedGenes(object = so.query, min.pct = parameter.list$cor.min.expr, group = NA))
                          })
-    cdi.df.all <- findCDIMarkers(object = so.query, features.x = available_markers, features.y = exprGene, verbose = T)
+    cdi.df.all <- findCDIMarkers(object = so.query, features.x = available_markers, 
+                                 features.y = exprGene, n.workers = parameter.list$n.workers, verbose = T)
     cdi.df<- cdi.df.all %>% dplyr::select(c("feature.x", "feature.y", "ncdi"))
     query.cor.mat <- pivot_wider(data = cdi.df, names_from = "feature.x", values_from = "ncdi")
     query.cor.mat <- col2rowname(query.cor.mat, "feature.y")
@@ -1812,7 +1734,7 @@ if (parameter.list$developer){
   df.log <- addLogEntry("User", user, df.log, "user")
   df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
 }
-df.log_Module_9 <- df.log
+df.log_Module_6 <- df.log
 
 ```
 
@@ -1822,18 +1744,18 @@ out1 <- flex.multiTabLogs(module.logs)
 
 `r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
 
-Log (Module 9)
+Log (M6)
 ===================================== 
 
 ```{r table.log_current}
-knitr::kable(df.log_Module_9)
+knitr::kable(df.log_Module_6)
 ```
 
 ```{r save analysis log as csv}
 
 try({
   if (parameter.list$developer){
-  write.csv(df.log_Module_9, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+  write.csv(df.log_Module_6, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
             row.names = F)  
   }
 }, silent = T)

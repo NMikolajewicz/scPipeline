@@ -54,34 +54,27 @@ invisible(lapply(packages2load, library, character.only = TRUE, quietly = TRUE))
 ```{r analysis specifications}
 
 parameter.list <- list(
-  # input.file = "R646_M02_NM2_p14_Meso_FZDonlg_1000g_integrated_rpca_280921.Rdata",
-  # input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Mesoderm/Papers/Cao 2020 Dataset/so_cao2020.rds",
-  input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Mesoderm/Papers/Tyser 2021 Dataset/so_tyser2021_220621.rds",
-  # input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Mesoderm/Papers/Pijuan-Sala 2019 Dataset/so_pijuan-sala2019.rds",
-  # input.file = "R6_M02_BC2_allGBM_271020.Rdata",
-  # which.references = c( "PijuanSala2019"),
+  input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Preprocessed_Datasets/output_33016PM_demo_ps_10000cell.Rdata",
   external.markers = NULL,
   internal.markers = "Cell_Catalog",
-  marker.filter = "Manno|Tyser", # filter marker sets using `grepl` pattern matching. E.g., Manno2021 for all La Manno 2021 atlas-derived markers. 
+  marker.filter = "Cao2019|Cao2020|Zeisel2018|Tyser2021|Manno2021", # filter markers using `grepl` pattern matching. E.g., "Manno2021" for all La Manno 2021 markers. (Cao2019, Cao2020, Manno2021, Zeisel2018, TabulaMuris, TabulaSapiens, Tyser2021, PijuanSala2019)
   coherence.threshold = 0.8,
   p.threshold = 0.05,
   frequent.filter.threshold = 0.75,
-  filter.frequent.fliers = F,
-  
-  min.representation = 0.5, # if fraction of gene present in seurat data is less than in gene set, gene set is omitted form conisderation
-
-  cluster.resolution = 0.6, # OPTIONAL; range 0 to inf (default = 1)
+  filter.frequent.fliers = T,
+  min.representation = 0.5,
+  cluster.resolution = 0.5, 
   fdr.correction = F, 
   clean.clusters = F,
   max.cells = 20000,
-  subsample_factor = 1, # OPTIONAL; range 0 to 1 (default = 1)
-  min.geneset.size = 3, # recommended: 3 (for TF classification, set to 1)
+  subsample_factor = 1, 
+  min.geneset.size = 3, 
   max.geneset.size = 200,
   pathway.db = "Bader", # options: Bader, GO
   n.workers = parallel::detectCores(),
   save.pdf = F,
   show.top.n.gene.panels = 5,
-  max.gene.panels.allowed = 75,
+  max.gene.panels.allowed = 70,
   print.inline = FALSE ,
   update.log = F,
   rprofile.dir = F,
@@ -94,8 +87,6 @@ parameter.list <- list(
 ```{r load data, warning = FALSE}
 
 # Specify data directories
-
-
 if (parameter.list$rprofile.dir){
   
   dir.preprocessed <- "Preprocessed_Datasets/"
@@ -586,8 +577,6 @@ vst.merge.final$frequent_flier = (vst.merge.final$cell.type  %in% which.ff)
 
 ```{r wordclouds, fig.width = 10, fig.height =5, include = FALSE, warning = FALSE, message = FALSE}
 
-miko_message("Generating annotation wordclouds...")
-
 if (parameter.list$filter.frequent.fliers){
   ff <- vst.merge.final$frequent_flier
 } else {
@@ -621,10 +610,13 @@ if (parameter.list$filter.frequent.fliers){
 
 miko_message("Generating dotplots...")
 
-# wrangle genesets into workable format
-vst.merge.lenient <- vst.merge.final %>% dplyr::filter(fdr < parameter.list$p.threshold)
-all.signatures.list <- list()
-
+suppressMessages({
+  suppressWarnings({
+    
+    # wrangle genesets into workable format
+    vst.merge.lenient <- vst.merge.final %>% dplyr::filter(fdr < parameter.list$p.threshold)
+    all.signatures.list <- list()
+    
     cur.signature.list <- signatures.symbol
     signature.df <- NULL
     
@@ -643,175 +635,179 @@ all.signatures.list <- list()
     }
     
     all.signatures.list <- signature.df
-
-# recover reference set annotations #
-plt.signature.subset <- TRUE # (flag specifying whether to plot all or just subset)
-
-# select top genesets to visualize
-if (parameter.list$filter.frequent.fliers){
-  df.sig2plt.cluster <- unique((vst.merge.final %>% 
-                                dplyr::filter(!frequent_flier) %>%
-                                dplyr::filter(fdr < parameter.list$p.threshold,  
-                                              miko_score > 0, 
-                                              coherence_fraction > parameter.list$coherence.threshold,  
-                                              !frequent_flier) %>% 
-                                dplyr::group_by(cluster) %>% 
-                                dplyr::top_n(parameter.list$show.top.n.gene.panels, miko_score)))
-  
-  df.sig2plt <- unique((vst.merge.final %>% dplyr::filter(fdr < parameter.list$p.threshold, coherence_fraction > parameter.list$coherence.threshold,  !frequent_flier) %>%
-                        dplyr::arrange(-miko_score)))
-} else {
-  df.sig2plt.cluster <- unique((vst.merge.final %>% 
-                                dplyr::filter(fdr < parameter.list$p.threshold,  
-                                              miko_score > 0, 
-                                              coherence_fraction >  parameter.list$coherence.threshold) %>% 
-                                dplyr::group_by(cluster) %>% 
-                                dplyr::top_n(parameter.list$show.top.n.gene.panels, miko_score)))
-  
-  df.sig2plt <- unique((vst.merge.final %>% dplyr::filter(fdr < parameter.list$p.threshold, coherence_fraction > parameter.list$coherence.threshold) %>%
-                        dplyr::arrange(-miko_score)))
-}
-
-if (nrow(df.sig2plt) > parameter.list$max.gene.panels.allowed) df.sig2plt <- df.sig2plt[1:parameter.list$max.gene.panels.allowed, ]
-df.sig2plt <- unique(bind_rows(df.sig2plt, df.sig2plt.cluster))
-
-signatures.symbol2 <- signatures.symbol
-names(signatures.symbol2) <- make.names(names(signatures.symbol2))
-
-gene.dot.list <-  signatures.symbol2[unique(df.sig2plt$cell.type)]
-
-gene.dot.list <- gene.dot.list[order(names(gene.dot.list))]
-dot.hg <- runHG(gene.list = gene.dot.list, 
-                gene.universe = rownames(so.query), 
-                species = parameter.list$species, 
-                pathway.db = parameter.list$pathway.db)
-
-dot.hg.sum <- summarizeHG(dot.hg, show.n = 15)
-
-
-#logical indicating whether to generate gene expression dot plots (computationally intensive)
-show.gene.exp <- T 
-
-# generate plots
-plt.expression.all.dotplots <- list()
-
-
-# signature.dot.list.all <- gene.dot.list
-signature.dot.list.all <- all.signatures.list
-signature.dot.list.all$signature <- make.names(signature.dot.list.all$signature)
-u.sig <- unique(signature.dot.list.all$signature)
-u.sig <- u.sig[u.sig %in% names(gene.dot.list)]
-if (show.gene.exp){
-  
-  for (i in 1:length(u.sig)){
     
-    cur.signature.list.name <- u.sig[i]
-    plt.expression.dotplot <- list()
-    signature.df <- signature.dot.list.all %>% dplyr::filter(signature %in% u.sig[i])
-    u.signatures <- as.vector(unique(signature.df$signature))
-    cur.signature.df <- signature.df
-      cur.signature.genes <- unique(as.vector(cur.signature.df$genes))
-      
-      n.genes <- length(cur.signature.genes)
-      
-      if (n.genes < 11) xlab.size <- 15
-      if (n.genes > 10) xlab.size <- 12
-      if (n.genes > 40) xlab.size <- 10
-      if (n.genes > 50) xlab.size <- 9
-      if (n.genes > 60) xlab.size <- 8
-      if (n.genes > 70) xlab.size <- 7
-      if (n.genes > 80) xlab.size <- 6
-      
-      dat <- score.result$cell_stats
-      
-      
-      mad.threshold <- 10
-      pumap <- score.result$cell_stats %>% 
-        dplyr::filter(name == u.sig[i]) %>%
-        # ggplot(aes(x=  reduction.x, y = reduction.y, 
-        #            color = snip(value.rs, verbose = F,
-        #                         lower.cutoff = median(dat$value.rs, na.rm = T) - mad.threshold*mad(dat$value.rs, na.rm = T), 
-        #                         upper.cutoff = median(dat$value.rs, na.rm = T) + mad.threshold*mad(dat$value.rs, na.rm = T)))) + 
-        ggplot(aes(x=  reduction.x, y = reduction.y, 
-                   color = snip(value, verbose = F,
-                                lower.cutoff = median(dat$value, na.rm = T) - mad.threshold*mad(dat$value, na.rm = T), 
-                                upper.cutoff = median(dat$value, na.rm = T) + mad.threshold*mad(dat$value, na.rm = T))))+ 
-        scale_color_gradient2(high = scales::muted("red"), low = scales::muted("blue")) +
-        theme_void()+ 
-        labs(x=  "UMAP1", y = "UMAP2", color = "score", title = u.sig[i])+ 
-        geom_point()
-      
-      n.av <- sum(cur.signature.genes %in% rownames(so.query))
-      p1 <- DotPlot(so.query, features = cur.signature.genes, 
-                    dot.scale = 8, cols="RdBu", scale = T) +
-        theme_miko(legend =T)  +
-        theme(legend.position = "bottom") + 
-        RotatedAxis() + 
-        ylab("Cell Cluster") + 
-        scale_color_gradient2(high = scales::muted("red"), low = scales::muted("blue")) +
-        labs(title =  u.sig[i], subtitle = paste0("Dotplot (", n.av , "/", length(cur.signature.genes), " Genes)")) +
-        theme(axis.text.x=element_text(size=xlab.size, angle = 75)) 
-      
-      vst.merge.cloud.cur <- vst.merge.final %>% dplyr::filter(cell.type == u.sig[i])
-      vst.merge.cloud.cur$cluster2 <- (gsub("c", "", vst.merge.cloud.cur$cluster))
-      vst.merge.cloud.cur$cluster <- factor(vst.merge.cloud.cur$cluster, 
-                                            levels = paste0("c",  unique(vst.merge.cloud.cur$cluster2)[order(as.numeric(unique(vst.merge.cloud.cur$cluster2)))]))
-      
-      if (parameter.list$fdr.correction){
-        sig.label <- paste0("Enriched (FDR < ", parameter.list$p.threshold,")")
-      } else {
-        sig.label <- paste0("Enriched (p < ", parameter.list$p.threshold,")")
-      }
-      
-      p2 <- vst.merge.cloud.cur %>% ggplot(aes(x = cluster, y = miko_score, 
-                                               fill = (fdr < parameter.list$p.threshold) & (miko_score > 0))) + 
-        scale_fill_manual(values = c("TRUE" = "tomato", "FALSE" = "grey")) + 
-        geom_bar(stat = "identity") + coord_flip() + 
-        labs(title = "", subtitle = "Miko Score", y = "Miko Score", 
-             x = "Cell Cluster", fill = sig.label) + theme_miko() + theme(legend.position = "bottom") 
-      
-      p2_v2 <- vst.merge.cloud.cur %>% 
-        ggplot(aes(x = cluster, y = coherence_fraction)) +  
-        geom_bar(stat = "identity") + coord_flip() + 
-        geom_hline(yintercept = parameter.list$coherence.threshold, linetype = "dashed") + 
-        labs(title = "", subtitle = "Coherence Score", y = "Coherence Score", x = "Cell Cluster", 
-             fill = "Coherence (FDR < 5%)") + theme_miko() + theme(legend.position = "bottom") 
-      
-      p3 <- dot.hg.sum$plots[[u.sig[i]]] + 
-        labs(title = "", subtitle = "Gene Set Enrichment") + 
-        theme(legend.position = "bottom")
-      # dot.hg.sum$plots$
-      
-      if (is.null(p3)){
-        plt.expression.dotplot[[ u.sig[i]]] <- cowplot::plot_grid(pumap, p1, p2, 
-                                                                  nrow =1,
-                                                                  align = "h", 
-                                                                  axis = "tb", 
-                                                                  rel_widths = c(2, 2,1), 
-                                                                  labels = "AUTO")
-      } else {
-        plt.expression.dotplot[[ u.sig[i]]] <- cowplot::plot_grid(pumap, p1, p2,p2_v2, p3,  
-                                                                  nrow =1,
-                                                                  align = "h", 
-                                                                  axis = "tb", 
-                                                                  rel_widths = c(2, 2,0.75,0.75, 1.25), 
-                                                                  labels = "AUTO")
-      }
-      
-      
-      
-      
-      
-      if ((parameter.list$print.inline) & (i < 21)) 
-        print( plt.expression.dotplot[[ u.sig[i]]])
-    # }
+    # recover reference set annotations #
+    plt.signature.subset <- TRUE # (flag specifying whether to plot all or just subset)
     
-    plt.expression.all.dotplots[[cur.signature.list.name]] <- plt.expression.dotplot
-  }
-}
-
-plt.expression.dotplot <- plt.expression.all.dotplots
-plt.expression.all.dotplots <- list(plt.expression.dotplot)
+    # select top genesets to visualize
+    if (parameter.list$filter.frequent.fliers){
+      df.sig2plt.cluster <- unique((vst.merge.final %>% 
+                                      dplyr::filter(!frequent_flier) %>%
+                                      dplyr::filter(fdr < parameter.list$p.threshold,  
+                                                    miko_score > 0, 
+                                                    coherence_fraction > parameter.list$coherence.threshold,  
+                                                    !frequent_flier) %>% 
+                                      dplyr::group_by(cluster) %>% 
+                                      dplyr::top_n(parameter.list$show.top.n.gene.panels, miko_score)))
+      
+      df.sig2plt <- unique((vst.merge.final %>% dplyr::filter(fdr < parameter.list$p.threshold, coherence_fraction > parameter.list$coherence.threshold,  !frequent_flier) %>%
+                              dplyr::arrange(-miko_score)))
+    } else {
+      df.sig2plt.cluster <- unique((vst.merge.final %>% 
+                                      dplyr::filter(fdr < parameter.list$p.threshold,  
+                                                    miko_score > 0, 
+                                                    coherence_fraction >  parameter.list$coherence.threshold) %>% 
+                                      dplyr::group_by(cluster) %>% 
+                                      dplyr::top_n(parameter.list$show.top.n.gene.panels, miko_score)))
+      
+      df.sig2plt <- unique((vst.merge.final %>% dplyr::filter(fdr < parameter.list$p.threshold, coherence_fraction > parameter.list$coherence.threshold) %>%
+                              dplyr::arrange(-miko_score)))
+    }
+    
+    if (nrow(df.sig2plt) > parameter.list$max.gene.panels.allowed) df.sig2plt <- df.sig2plt[1:parameter.list$max.gene.panels.allowed, ]
+    df.sig2plt <- unique(bind_rows(df.sig2plt, df.sig2plt.cluster))
+    
+    signatures.symbol2 <- signatures.symbol
+    names(signatures.symbol2) <- make.names(names(signatures.symbol2))
+    
+    gene.dot.list <-  signatures.symbol2[unique(df.sig2plt$cell.type)]
+    
+    gene.dot.list <- gene.dot.list[order(names(gene.dot.list))]
+    dot.hg <- runHG(gene.list = gene.dot.list, 
+                    gene.universe = rownames(so.query), 
+                    species = parameter.list$species, 
+                    pathway.db = parameter.list$pathway.db)
+    
+    dot.hg.sum <- summarizeHG(dot.hg, show.n = 15)
+    
+    
+    #logical indicating whether to generate gene expression dot plots (computationally intensive)
+    show.gene.exp <- T 
+    
+    # generate plots
+    plt.expression.all.dotplots <- list()
+    
+    
+    # signature.dot.list.all <- gene.dot.list
+    signature.dot.list.all <- all.signatures.list
+    signature.dot.list.all$signature <- make.names(signature.dot.list.all$signature)
+    u.sig <- unique(signature.dot.list.all$signature)
+    u.sig <- u.sig[u.sig %in% names(gene.dot.list)]
+    if (show.gene.exp){
+      
+      for (i in 1:length(u.sig)){
+        
+        cur.signature.list.name <- u.sig[i]
+        plt.expression.dotplot <- list()
+        signature.df <- signature.dot.list.all %>% dplyr::filter(signature %in% u.sig[i])
+        u.signatures <- as.vector(unique(signature.df$signature))
+        cur.signature.df <- signature.df
+        cur.signature.genes <- unique(as.vector(cur.signature.df$genes))
+        
+        n.genes <- length(cur.signature.genes)
+        
+        if (n.genes < 11) xlab.size <- 15
+        if (n.genes > 10) xlab.size <- 12
+        if (n.genes > 40) xlab.size <- 10
+        if (n.genes > 50) xlab.size <- 9
+        if (n.genes > 60) xlab.size <- 8
+        if (n.genes > 70) xlab.size <- 7
+        if (n.genes > 80) xlab.size <- 6
+        
+        dat <- score.result$cell_stats
+        
+        
+        mad.threshold <- 5
+        pumap <- score.result$cell_stats %>% 
+          dplyr::filter(name == u.sig[i]) %>%
+          # ggplot(aes(x=  reduction.x, y = reduction.y, 
+          #            color = snip(value.rs, verbose = F,
+          #                         lower.cutoff = median(dat$value.rs, na.rm = T) - mad.threshold*mad(dat$value.rs, na.rm = T), 
+          #                         upper.cutoff = median(dat$value.rs, na.rm = T) + mad.threshold*mad(dat$value.rs, na.rm = T)))) + 
+          ggplot(aes(x=  reduction.x, y = reduction.y, 
+                     color = snip(value, verbose = F,
+                                  lower.cutoff = median(dat$value, na.rm = T) - mad.threshold*mad(dat$value, na.rm = T), 
+                                  upper.cutoff = median(dat$value, na.rm = T) + mad.threshold*mad(dat$value, na.rm = T))))+ 
+          scale_color_gradient2(high = scales::muted("red"), low = scales::muted("blue")) +
+          theme_void()+ 
+          labs(x=  "UMAP1", y = "UMAP2", color = "score", title = u.sig[i])+ 
+          geom_point()
+        
+        n.av <- sum(cur.signature.genes %in% rownames(so.query))
+        p1 <- DotPlot(so.query, features = cur.signature.genes, 
+                      dot.scale = 8, cols="RdBu", scale = T) +
+          theme_miko(legend =T)  +
+          theme(legend.position = "bottom") + 
+          RotatedAxis() + 
+          ylab("Cell Cluster") + 
+          scale_color_gradient2(high = scales::muted("red"), low = scales::muted("blue")) +
+          labs(title =  u.sig[i], subtitle = paste0("Dotplot (", n.av , "/", length(cur.signature.genes), " Genes)")) +
+          theme(axis.text.x=element_text(size=xlab.size, angle = 75)) 
+        
+        vst.merge.cloud.cur <- vst.merge.final %>% dplyr::filter(cell.type == u.sig[i])
+        vst.merge.cloud.cur$cluster2 <- (gsub("c", "", vst.merge.cloud.cur$cluster))
+        vst.merge.cloud.cur$cluster <- factor(vst.merge.cloud.cur$cluster, 
+                                              levels = paste0("c",  unique(vst.merge.cloud.cur$cluster2)[order(as.numeric(unique(vst.merge.cloud.cur$cluster2)))]))
+        
+        if (parameter.list$fdr.correction){
+          sig.label <- paste0("Enriched (FDR < ", parameter.list$p.threshold,")")
+        } else {
+          sig.label <- paste0("Enriched (p < ", parameter.list$p.threshold,")")
+        }
+        
+        p2 <- vst.merge.cloud.cur %>% ggplot(aes(x = cluster, y = miko_score, 
+                                                 fill = (fdr < parameter.list$p.threshold) & (miko_score > 0))) + 
+          scale_fill_manual(values = c("TRUE" = "tomato", "FALSE" = "grey")) + 
+          geom_bar(stat = "identity") + coord_flip() + 
+          labs(title = "", subtitle = "Miko Score", y = "Miko Score", 
+               x = "Cell Cluster", fill = sig.label) + theme_miko() + theme(legend.position = "bottom") 
+        
+        p2_v2 <- vst.merge.cloud.cur %>% 
+          ggplot(aes(x = cluster, y = coherence_fraction)) +  
+          geom_bar(stat = "identity") + coord_flip() + 
+          geom_hline(yintercept = parameter.list$coherence.threshold, linetype = "dashed") + 
+          labs(title = "", subtitle = "Coherence Score", y = "Coherence Score", x = "Cell Cluster", 
+               fill = "Coherence (FDR < 5%)") + theme_miko() + theme(legend.position = "bottom") 
+        
+        p3 <- dot.hg.sum$plots[[u.sig[i]]] + 
+          labs(title = "", subtitle = "Gene Set Enrichment") + 
+          theme(legend.position = "bottom")
+        # dot.hg.sum$plots$
+        
+        if (is.null(p3)){
+          plt.expression.dotplot[[ u.sig[i]]] <- cowplot::plot_grid(pumap, p1, p2, 
+                                                                    nrow =1,
+                                                                    align = "h", 
+                                                                    axis = "tb", 
+                                                                    rel_widths = c(2, 2,1), 
+                                                                    labels = "AUTO")
+        } else {
+          plt.expression.dotplot[[ u.sig[i]]] <- cowplot::plot_grid(pumap, p1, p2,p2_v2, p3,  
+                                                                    nrow =1,
+                                                                    align = "h", 
+                                                                    axis = "tb", 
+                                                                    rel_widths = c(2, 2,0.75,0.75, 1.25), 
+                                                                    labels = "AUTO")
+        }
+        
+        
+        
+        
+        
+        if ((parameter.list$print.inline) & (i < 21)) 
+          print( plt.expression.dotplot[[ u.sig[i]]])
+        # }
+        
+        plt.expression.all.dotplots[[cur.signature.list.name]] <- plt.expression.dotplot
+      }
+    }
+    
+    plt.expression.dotplot <- plt.expression.all.dotplots
+    plt.expression.all.dotplots <- list(plt.expression.dotplot)
+    
+    
+  })
+})
 
 ```
 
@@ -827,7 +823,7 @@ if (parameter.list$developer){
   clog.update.success <- F
   if (parameter.list$update.log){
     try({
-      run.id <-  updateCentralLog(Module = "M05", input.data = parameter.list$input.file, input.subset = NA, pdf.flag = parameter.list$save.pdf)
+      run.id <-  updateCentralLog(Module = "M04", input.data = parameter.list$input.file, input.subset = NA, pdf.flag = parameter.list$save.pdf)
       clog.update.success <-  T
     }, silent = F)
   }
@@ -838,7 +834,7 @@ if (parameter.list$developer){
 
 if (is.null(run.id))  {
   warning("Central log update was unsuccessful :(\n")
-  run.id <- paste("M05_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+  run.id <- paste("M04_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
 }
 
 ```
@@ -891,7 +887,7 @@ plt.umap_by_cluster <- plt.umap_by_cluster +
   xlab("UMAP 1") + ylab("UMAP 2") + 
   theme_miko(legend = T)
 print(plt.umap_by_cluster)
-savePDF(file.name = paste0(output.path, "PDF/", "M05_umap_cluster.pdf"), plot.handle = plt.umap_by_cluster, 
+savePDF(file.name = paste0(output.path, "PDF/", "M04_umap_cluster.pdf"), plot.handle = plt.umap_by_cluster, 
         fig.width = 7, fig.height = 5, save.flag = parameter.list$save.pdf)
 ```
 
@@ -930,7 +926,7 @@ do.bc2 <- !is.null(plt.cluster_composition_barcodes)
 
 if (do.bc2){
   try({
-    savePDF(file.name = paste0(output.path, "PDF/", "M05_cluster_composition_barplot.pdf"), plot.handle = plt.cluster_composition_barcodes, 
+    savePDF(file.name = paste0(output.path, "PDF/", "M04_cluster_composition_barplot.pdf"), plot.handle = plt.cluster_composition_barcodes, 
             fig.width = 13, fig.height = 4, save.flag = parameter.list$save.pdf)  
   }, silent = T)
 }
@@ -980,7 +976,7 @@ plt.heat.scaled
 ```{r pdf heat}
 
 try({
-  savePDF(file.name = paste0(output.path, "PDF/", "M05_expression_heatmap.pdf"), 
+  savePDF(file.name = paste0(output.path, "PDF/", "M04_expression_heatmap.pdf"), 
           plot.handle = (plt.heat.scaled), 
           fig.width = 8, fig.height = 5, save.flag = parameter.list$save.pdf)
 }, silent = T)
@@ -1094,7 +1090,7 @@ if (parameter.list$save.pdf){
 ```{r Null enrichment model, fig.width=12, fig.height=4.5, warning = F, message=F}
 ### Null enrichment models
 print(plot.null.enrichment)
-savePDF(file.name = paste0(output.path, "PDF/", "M05_null_enrichment_model.pdf"), plot.handle = plot.null.enrichment,
+savePDF(file.name = paste0(output.path, "PDF/", "M04_null_enrichment_model.pdf"), plot.handle = plot.null.enrichment,
         fig.width = 12, fig.height = 4.5, save.flag = parameter.list$save.pdf)
 
 ```
@@ -1104,7 +1100,7 @@ savePDF(file.name = paste0(output.path, "PDF/", "M05_null_enrichment_model.pdf")
 
 for (i in 1:length(plt.ww.list)){
   cur.plot.name <- names(plt.ww.list)[i]
-  plot.name <- paste0("M05_wordcloud_", cur.plot.name ,".pdf")
+  plot.name <- paste0("M04_wordcloud_", cur.plot.name ,".pdf")
   savePDF(file.name = paste0(output.path, "PDF/", plot.name),
           plot.handle = plt.ww.list[[cur.plot.name]],
           fig.width = 15, fig.height = 5, save.flag = parameter.list$save.pdf)
@@ -1155,7 +1151,7 @@ out2 <- lapply(seq_along(plt.expression.all.dotplots[[1]]), function(j) {
 ```{r pdf dotplots,include = FALSE}
 
 for (i in 1:length(plt.expression.dotplot)){
-  plot.name <- paste0("M05_dotplot_", names(plt.expression.dotplot)[i] ,".pdf")
+  plot.name <- paste0("M04_dotplot_", names(plt.expression.dotplot)[i] ,".pdf")
   savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
           plot.handle =  plt.expression.dotplot[[i]], 
           fig.width = 20, fig.height = 10, save.flag = parameter.list$save.pdf)
@@ -1225,7 +1221,7 @@ if (parameter.list$developer){
 df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
 }
 
-df.log_Module_5 <- df.log
+df.log_Module_4 <- df.log
 
 
 ```
@@ -1239,7 +1235,7 @@ out1 <- lapply(seq_along(module.logs), function(i) {
   
   module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
   
-  a1 <- knitr::knit_expand(text = sprintf("\nLog (Module %s)", paste(module.n)))
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (M%s)", paste(module.n)))
   a2 <- knitr::knit_expand(text = "\n=====================================")
   a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
   a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
@@ -1253,12 +1249,12 @@ out1 <- lapply(seq_along(module.logs), function(i) {
 
 `r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
 
-Log (Module 5)
+Log (M4)
 ===================================== 
 
 ```{r table.log_current}
 
-knitr::kable(df.log_Module_5)
+knitr::kable(df.log_Module_4)
 
 ```
 
@@ -1267,7 +1263,7 @@ knitr::kable(df.log_Module_5)
 
 if (parameter.list$developer){
   try({
-    write.csv(df.log_Module_5, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+    write.csv(df.log_Module_4, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
               row.names = F)  
   }, silent = T)
 }

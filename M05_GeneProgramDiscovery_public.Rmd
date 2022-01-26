@@ -1,0 +1,1267 @@
+---
+title: "Gene Program Discovery"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    self_contained: true
+    source_code: embed
+    theme: 
+      bootswatch: flatly
+    navbar:
+      - { title: "scMiko", href: "https://nmikolajewicz.github.io/scMiko/" }     
+editor_options: 
+  chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = if (exists("user")){paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", 
+        paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", 
+      paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
+    )
+  })
+---
+
+
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
+
+# initiate timer
+start.time <- proc.time()
+
+# List of packages to load
+packages2load <- c("Seurat", "scMiko", "DT", "scales", "STRINGdb","dplyr", "NNLM", "BiocGenerics", "IRanges", "AnnotationDbi",
+                   "tidyr", "RColorBrewer", "ggplot2", "heatmaply", "htmltools",
+                   "flexdashboard", "future", "BiocParallel",
+                   "parallel", "doParallel", "foreach", "iterators")
+
+# load packages
+suppressMessages(suppressWarnings(lapply(packages2load, library, character.only = TRUE, quietly = T)))
+
+```
+
+
+
+```{r analysis specifications}
+
+
+# parameter specification
+parameter.list <- list(
+  input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Preprocessed_Datasets/output_34818PM_demo_cao2019_10000cell.Rdata",
+  cluster.resolution = 0.3, #0.5
+  subsample_factor = 1,
+  subsample_n = NA,
+  subset.data = NA,
+  batch.feature = NA, 
+  feature.selection.method = c("deviance"), #options: expr, hvg, deviance 
+  max.features = 2000, 
+  min.pct = 0.5, 
+  data.type = "pearson", #options: pearson (SCTransform), deviance
+  purity.optimization.step.size = 0.05,
+  filter.parameters =  list(
+    include = NULL,
+    omit = NULL
+  ), 
+  
+  general.weight.by.var = F,
+  general.pca.cum.sum = 0.9,
+  general.umap.knn = 10,
+  general.cluster.purity = 0.8,
+  general.scale.free.topology = T,
+  general.ica = T,
+  general.nmf = T,
+  general.nmf.k = c(5, 10, 15),
+  general.robust.pca = F,
+  
+  # misc parameters
+  n.workers = 4,
+  print.inline = F,
+  save.pdf = F,
+  update.log = F,
+  rprofile.dir = F,
+  developer = F
+)
+
+
+```
+
+
+
+```{r load data, warning = FALSE}
+
+set.seed(1023)
+
+# Specify data directories
+if (parameter.list$rprofile.dir){
+  
+  dir.preprocessed <- "Preprocessed_Datasets/"
+  
+  if (!exists("data.path") & !exists("user")) {
+    stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+  }
+}
+
+miko_message("Importing data...")
+if ((!grepl(".Rdata|.RData", parameter.list$input.file)) & !(grepl(".rds", parameter.list$input.file))){
+  parameter.list$input.file <- paste0(parameter.list$input.file, ".Rdata")
+} 
+
+if (parameter.list$rprofile.dir){
+  if (grepl(".Rdata|.RData", parameter.list$input.file)){
+    load(paste(data.path, dir.preprocessed, parameter.list$input.file, sep = ""));
+  } else if (grepl(".rds", parameter.list$input.file)) {
+    so <- readRDS(paste(data.path, dir.preprocessed, parameter.list$input.file, sep = ""))
+  }  
+} else {
+  if (grepl(".Rdata|.RData", parameter.list$input.file)){
+    load(parameter.list$input.file);
+  } else if (grepl(".rds", parameter.list$input.file)) {
+    so <- readRDS(parameter.list$input.file);
+  }
+}
+
+
+if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
+
+t2d <- c("ica", "tsne", "nmf", "corr", "gsva", "deg", "integration.anchors")
+
+if ("subsample_n" %in% names(parameter.list)){
+  if ((!is.na(parameter.list$subsample_n)) & (!is.null(parameter.list$subsample_n))){
+    if (ncol(so) > parameter.list$subsample_n){
+      parameter.list$subsample_factor <- parameter.list$subsample_n/ncol(so)
+    }
+  }
+}
+
+
+# prep seurat object
+prep.list <- prepSeurat2(so, e2s = gNames.list, 
+                         species =  parameter.list$species, 
+                         resolution= parameter.list$cluster.resolution, 
+                         subset.data = parameter.list$subset.data, 
+                         subsample = parameter.list$subsample_factor, 
+                         terms2drop = t2d, 
+                         rmv.pattern = "so", keep.default.assay.only = F)
+
+# unpack results
+if (exists("so")) try({rm(so)}, silent = T)
+so.query <- prep.list$so
+current.assay <- prep.list$assay
+n.cells <- prep.list$n.cell
+rm(prep.list);
+invisible({gc()})
+
+parameter.list$species <- detectSpecies(so.query)
+
+```
+
+```{r filter clusters}
+
+if ("filter.parameters" %in% names(parameter.list)){
+  so.query <- clusterFilter(so.query, include = parameter.list$filter.parameters$include, omit = parameter.list$filter.parameters$omit)
+  so.query@meta.data[["seurat_clusters"]] <- factor(as.numeric(as.character(so.query@meta.data[["seurat_clusters"]])))
+  Idents(object = so.query) <- 'seurat_clusters'
+}
+
+
+```
+
+```{r analysis log, include = FALSE, }
+
+miko_message("Updating analysis log...")
+
+# Initiate and fill analysis Log
+df.log <- initiateLog("Module Detection")
+df.log <- addLogEntry("PDF saved", parameter.list$save.pdf, df.log, "save.pdf")
+df.log <- addLogEntry("Update Central Log", parameter.list$update.log, df.log, "update.log")
+df.log <- addLogEntry("Print Inline", parameter.list$print.inline, df.log, "print.inline")
+
+df.log <- addLogEntry("Input file", parameter.list$input.file, df.log, "input.file")
+df.log <- addLogEntry("Cluster resolution", parameter.list$cluster.resolution, df.log, "cluster.resolution")
+df.log <- addLogEntry("Subsample factor", parameter.list$subsample_factor, df.log, "subsample_factor")
+df.log <- addLogEntry("Subsample N (max)", parameter.list$subsample_n, df.log, "subsample_n")
+df.log <- addLogEntry("data subset", parameter.list$subset.data, df.log, "subset.data")
+df.log <- addLogEntry("species", parameter.list$species, df.log, "species")
+df.log <- addLogEntry("Batch feature", parameter.list$batch.feature, df.log, "batch.feature")
+df.log <- addLogEntry("Data type", parameter.list$data.type, df.log, "data.type")
+
+
+df.log <- addLogEntry("Feature selection method", paste(parameter.list$feature.selection.method, collapse = ", "), df.log, "feature.selection.method")
+df.log <- addLogEntry("Max number of features", parameter.list$max.features,  df.log, "max.features")
+df.log <- addLogEntry("Minimum expr. fraction (only if feature.selection.method = expr)", parameter.list$min.pct, df.log, "min.pct")
+df.log <- addLogEntry("Step size in cluster purity search", parameter.list$purity.optimization.step.size, df.log, "purity.optimization.step.size")
+# df.log <- addLogEntry("Pathway database for enrichment analysis", parameter.list$pathway.db, df.log, "pathway.db")
+
+df.log <- addLogEntry("General| robust PCA", parameter.list$general.robust.pca, df.log, "general.robust.pca")
+df.log <- addLogEntry("General| weigh PCA by variance", parameter.list$general.weight.by.var, df.log, "general.weight.by.var")
+df.log <- addLogEntry("General| Variance explained by PCA", parameter.list$general.pca.cum.sum, df.log, "general.pca.cum.sum")
+df.log <- addLogEntry("General| KNN", parameter.list$general.umap.knn, df.log, "general.umap.knn")
+df.log <- addLogEntry("General| Target modular purity", parameter.list$general.cluster.purity, df.log, "general.cluster.purity")
+df.log <- addLogEntry("General| Scale-free topology enforced", parameter.list$general.scale.free.topology, df.log, "general.scale.free.topology")
+
+```
+
+```{r get past module logs, include = FALSE}
+# determine prior log history
+cur.env <- objects()
+module.logs <- cur.env[grep("^df.log_Module",cur.env)]
+
+```
+
+```{r recode barcodes, warning = FALSE}
+
+if (exists("barcode.list") && (length(barcode.list) > 0)){
+  
+  df.meta <- so.query@meta.data
+  
+  # relabel barcodes
+  bc.list <-barcode.list
+  df.meta$bc <- NA
+  for (i in 1:length(bc.list)){
+    pattern <- bc.list[[i]]
+    pattern.replace <- names(bc.list)[i]
+    df.meta$bc[grepl(pattern, df.meta$Barcode)] <- pattern.replace
+  }
+  so.query@meta.data <- df.meta
+  
+} else {
+  u.bc <- unique(so.query@meta.data[["Barcode"]])
+  bc.list <- list()
+  for (i in 1:length(u.bc)){
+    bc.list[[i]] <- u.bc[i]
+  }
+  names(bc.list) <- u.bc
+  so.query@meta.data[["bc"]] <- so.query@meta.data[["Barcode"]]
+}
+
+```
+
+```{r Network analysis - 1 - feature selection, warning = FALSE}
+
+if ("batch.feature" %in% names(parameter.list)){
+  batch_feature <- parameter.list$batch.feature
+} else {
+  batch_feature <- NULL
+}
+
+
+if ("expr" %in% parameter.list$feature.selection.method){
+  which.rep.common.expr <- findNetworkFeatures(object = so.query, method = "expr", 
+                                           n_features =  parameter.list$max.features, 
+                                           min_pct = parameter.list$min.pct, split_var = "seurat_clusters", 
+                                           batch_feature = batch_feature, verbose = T)
+} else {
+  which.rep.common.expr <- c()
+}
+
+if ("hvg" %in% parameter.list$feature.selection.method){
+  which.rep.common.hvg <- findNetworkFeatures(object = so.query, method = "hvg", 
+                                           n_features =  parameter.list$max.features, 
+                                           min_pct = parameter.list$min.pct, split_var = "seurat_clusters", 
+                                           batch_feature = batch_feature, verbose = T)
+} else {
+  which.rep.common.hvg <- c()
+}
+
+if ("deviance" %in% parameter.list$feature.selection.method){
+  which.rep.common.dev <- findNetworkFeatures(object = so.query, method = "deviance", 
+                                           n_features =  parameter.list$max.features, 
+                                           min_pct = parameter.list$min.pct, split_var = "seurat_clusters", 
+                                           batch_feature = batch_feature, verbose = T)
+} else {
+  which.rep.common.dev <- c()
+}
+
+
+
+# consolidate features
+which.rep.common <- unique(c(which.rep.common.expr, which.rep.common.hvg, which.rep.common.dev))
+
+if (length(which.rep.common) == 0){
+  which.rep.common <- findNetworkFeatures(object = so.query, method = "expr", 
+                                           n_features =  2000, 
+                                           min_pct = 0.5, split_var = "seurat_clusters", 
+                                           batch_feature = NULL, verbose = T)  
+}
+
+
+```
+
+```{r Network analysis - 2 - generate network, warning = FALSE, include = FALSE}
+
+try({
+  so.query <- GetResidual(object = so.query, features = which.rep.common, verbose = T, assay = DefaultAssay(so.query))
+}, silent = T)
+
+so.gene <- runSSN(object = so.query , 
+                  features = which.rep.common, 
+                  scale_free = parameter.list$general.scale.free.topology, 
+                  robust_pca = parameter.list$general.robust.pca, 
+                  data_type = parameter.list$data.type, 
+                  reprocess_sct = F, 
+                  slot = c("scale"), 
+                  batch_feature = batch_feature, 
+                  do_scale = F, do_center = F, 
+                  pca_var_explained = parameter.list$general.pca.cum.sum, 
+                  optimize_resolution = T, 
+                  target_purity = parameter.list$general.cluster.purity, 
+                  step_size =  parameter.list$purity.optimization.step.size,
+                  n_workers = parameter.list$n.workers, verbose = T)
+
+if (parameter.list$general.scale.free.topology){
+  plt.sft <- cowplot::plot_grid(so.gene@misc$scale_free$optimization.plot,
+                                so.gene@misc$scale_free$distribution.plot[[as.character(so.gene@misc$scale_free$powerEstimate)]])
+} else {
+  plt.sft <- NULL
+}
+
+
+if (parameter.list$print.inline) {
+  cluster.UMAP(so.gene)
+  plt.sft
+}
+
+```
+
+```{r run ICA, warning = FALSE}
+
+if (parameter.list$general.ica){
+  so.query <- runICA(object = so.query, 
+                     features = colnames(so.gene),
+                     max_cells = 20000, verbose = T)
+}
+
+```
+
+```{r run NMF, warning = FALSE}
+
+if (parameter.list$general.nmf){
+  miko_message("Running NMF...")
+  
+  if (ncol(so.query) > 20000){
+    set.seed(1023)
+    so.nmf <- so.query[,sample(colnames(so.query), 20000)]
+  } else {
+    so.nmf <- so.query
+  }
+  
+  nmf.genes <- list()
+  
+  for (i in parameter.list$general.nmf.k){
+    
+    miko_message(paste0("\tk = ", i), time = F)
+    
+    so.nmf <- runNMF(object = so.nmf, assay = DefaultAssay(so.nmf), k = i, raster = F,  features = colnames(so.gene), feature.min.pct = 0, n.threads = 8, max.iter = 50, gene.cutoff = 0.5, gene.n = NA, sample.name = "", pathway.db = "GO", verbose = F, do.enrichment = F)
+    
+    
+    ncur <- so.nmf@reductions[[paste0("nmf_k", i)]]@misc[["genes"]] 
+    names(ncur) <- paste0("k", i, "_" , names(ncur))
+    nmf.genes <- c(nmf.genes, ncur)
+  }
+  
+  so.nmf <- consolidateNMF(object = so.nmf, reduction_key = "nmf")
+  so.query@reductions[["nmf"]] <- so.nmf@reductions$nmf_all
+  
+  rm(so.nmf); invisible({gc()});
+}
+
+
+```
+
+
+
+```{r prune clusters}
+
+parameter.list$prune.threshold <- 0.1
+mod.list   <- pruneSSN(object = so.gene, graph = "RNA_snn_power", prune.threshold = parameter.list$prune.threshold)
+df.con.l2   <- pruneSSN(object = so.gene, graph = "RNA_snn_power", prune.threshold = parameter.list$prune.threshold, return.df = T)
+
+plt.prune <- df.con.l2 %>%
+  ggplot(aes(x = wi_l2)) +
+  geom_histogram(bins = 30) +
+  geom_vline(xintercept = parameter.list$prune.threshold, linetype = "dashed", color = "tomato") +
+  labs(x = "Degree (L2 norm)", y = "Count", title = "Network Pruning", subtitle = paste0(signif(100*sum(df.con.l2$wi_l2 <=  parameter.list$prune.threshold)/nrow(df.con.l2), 3), "% (", sum(df.con.l2$wi_l2 <=  parameter.list$prune.threshold), "/", nrow(df.con.l2), ") genes pruning" )) +   theme_miko(grid = T)
+
+
+do.prune.umap  <- F
+if (do.prune.umap){
+  
+  gene.umap <- getUMAP(so.gene)[["df.umap"]]
+  gene.umap$retain <- gene.umap$var %in% unique(unlist(mod.list))
+  
+  plt.pruneumap <- plt.general.connectivitiy +
+    geom_point(data = gene.umap, aes(x = x, y = y, color = retain), size = 0.5) +   scale_color_manual(values = c("TRUE" = "grey", "FALSE" = "tomato"))
+  
+  
+  if (parameter.list$print.inline){
+    plt.pruneumap
+    plt.prune
+  }
+  
+}
+
+```
+
+
+```{r Network analysis - 9 - network connectivity prep}
+
+message("Preparing connectivity objects...")
+meso.connectivity.list <- SSNConnectivity(so.gene, gene.list = mod.list, 
+                                          quantile_threshold = 0.85, raster_dpi = 500,
+                                                  node.size.max = 6, node.size.min = 2,
+                                                  node.alpha = 0.6,
+                                                  node.weights = T, node.color = "grey80")
+
+# generate connectivity plots
+plt.general.connectivitiy <- meso.connectivity.list$plot_edge
+plt.general.net <- plotly::ggplotly(meso.connectivity.list$plot_network + 
+                                      theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) + 
+                                      labs(title = "SSN Graph"),
+                                    height = 700, width=800)
+
+if (parameter.list$print.inline){
+  print(plt.general.connectivitiy)
+  plt.general.net
+}
+
+
+```
+
+
+
+
+```{r Network analysis - 4 - color palettes, warning = FALSE}
+
+# general network #######################
+so.gene@meta.data$seurat_clusters <- as.character(so.gene@meta.data$seurat_clusters)
+so.gene@meta.data$seurat_clusters[which(!c(colnames(so.gene) %in% unique(unlist(mod.list))))] <- "other"
+
+```
+
+```{r summarize gene modules}
+
+so.gene@meta.data$seurat_clusters <- as.character(so.gene@meta.data$seurat_clusters)
+so.gene@meta.data$seurat_clusters[which(!c(colnames(so.gene) %in% unique(unlist(mod.list))))] <- "other"
+
+plt.ssn.gene.all <- summarizeModules(cell.object = so.query, gene.object = so.gene,
+                                     gene.list = mod.list,
+                                     module.type = "ssn", 
+                                     n.workers = parallel::detectCores(), 
+                                     connectivity_plot = plt.general.connectivitiy)
+plt.ssn.gene <- pbapply::pblapply(plt.ssn.gene.all$plt.summary, function(x){ cowplot::plot_grid(
+  cowplot::plot_grid(
+    NULL,
+    x$cell.umap +
+      theme(plot.title = element_text(hjust = 0.5)) +
+      theme(plot.subtitle = element_text(hjust = 0.5)), 
+    x$gene.umap +
+      theme(plot.title = element_text(hjust = 0.5)) +
+      theme(plot.subtitle = element_text(hjust = 0.5)), 
+    NULL, nrow = 1, labels = c("", "A", "B", ""),
+    rel_widths = c(1,4,4,1)),
+  cowplot::plot_grid(x$bp.enrich, x$mf.enrich, x$cc.enrich, nrow = 1, labels = c("C", "D", "E")),
+  ncol = 1
+)})
+plt.ssn.gene.hm.expr <- heatmaply::heatmaply((plt.ssn.gene.all$data.heatmap), scale = "column",
+                                             scale_fill_gradient_fun = scale_fill_miko(),
+                                             xlab = "Module", ylab = "Cluster", main = "SSN Program Activity")
+
+
+if (parameter.list$print.inline) {
+  print(plt.ssn.gene)
+  plt.ssn.gene.hm.expr
+}
+
+if (parameter.list$general.ica){
+  plt.ica.gene.all <- summarizeModules(cell.object = so.query, gene.object = so.gene,
+                                       module.type = "ica", reduction = "ica",
+                                       n.workers = parallel::detectCores(), 
+                                       connectivity_plot = plt.general.connectivitiy)
+  # plt.ica.gene <- plt.ica.gene.all$plt.summary
+  plt.ica.gene <- pbapply::pblapply( plt.ica.gene.all$plt.summary, function(x){ cowplot::plot_grid(
+    cowplot::plot_grid(
+      NULL,
+      x$cell.umap +
+        theme(plot.title = element_text(hjust = 0.5)) +
+        theme(plot.subtitle = element_text(hjust = 0.5)), 
+      x$gene.umap +
+        theme(plot.title = element_text(hjust = 0.5)) +
+        theme(plot.subtitle = element_text(hjust = 0.5)), NULL, nrow = 1, labels = c("", "A", "B", ""), rel_widths = c(1,4,4,1)),
+    cowplot::plot_grid(x$bp.enrich, x$mf.enrich, x$cc.enrich, nrow = 1, labels = c("C", "D", "E")),
+    ncol = 1
+  )})
+  plt.ica.gene.hm.expr <- heatmaply::heatmaply((plt.ica.gene.all$data.heatmap), scale = "column",
+                                               scale_fill_gradient_fun = scale_fill_miko(),
+                                               xlab = "Module", ylab = "Cluster", main = "ICA Program Activity")
+  if (parameter.list$print.inline) {
+    print(plt.ica.gene)
+    plt.ica.gene.hm.expr
+  }
+}
+
+if (parameter.list$general.nmf){
+  plt.nmf.gene.all <- summarizeModules(cell.object = so.query, gene.object = so.gene,
+                                       module.type = "nmf", reduction = "nmf",
+                                       n.workers = parallel::detectCores(), 
+                                       connectivity_plot = plt.general.connectivitiy) 
+  # plt.nmf.gene <- plt.nmf.gene.all$plt.summary
+  plt.nmf.gene <- pbapply::pblapply(plt.nmf.gene.all$plt.summary, function(x){ cowplot::plot_grid(
+    cowplot::plot_grid(
+      NULL,
+      x$cell.umap +
+        theme(plot.title = element_text(hjust = 0.5)) +
+        theme(plot.subtitle = element_text(hjust = 0.5)), 
+      x$gene.umap +
+        theme(plot.title = element_text(hjust = 0.5)) +
+        theme(plot.subtitle = element_text(hjust = 0.5)), NULL, nrow = 1, labels = c("", "A", "B", ""), rel_widths = c(1,4,4,1)),
+    
+    cowplot::plot_grid(x$bp.enrich, x$mf.enrich, x$cc.enrich, nrow = 1, labels = c("C", "D", "E")),
+    ncol = 1
+  )})
+  plt.nmf.gene.hm.expr <- heatmaply::heatmaply((plt.nmf.gene.all$data.heatmap), 
+                                               scale_fill_gradient_fun = scale_fill_miko(), scale = "column",
+                                               xlab = "Gene Program", ylab = "Cluster", main = "NMF Program Activity")
+  if (parameter.list$print.inline) {
+    print(plt.nmf.gene)
+  }
+}
+
+```
+
+```{r prep final tables, fig.width=10, fig.height=7}
+
+# General network 
+df.general.net <- meso.connectivity.list$df.snn.umap
+df.general.net <- df.general.net[ ,c("genes", "x", "y", "seurat_clusters", "wi")]
+colnames(df.general.net) <- c("gene", "umap.x", "umap.y",  "program", "degree")
+
+# if (parameter.list$general.ica){
+df.general.ssn.gene.list <- namedList2wideDF(plt.ssn.gene.all$module.genes)
+# }
+
+if (parameter.list$general.ica){
+  df.general.ica.gene.list <- namedList2wideDF(plt.ica.gene.all$module.genes)
+}
+
+
+if (parameter.list$general.nmf){
+  df.general.nmf.gene.list <- namedList2wideDF(plt.nmf.gene.all$module.genes)
+}
+
+# plt.snn.gene.all
+
+```
+
+```{r jaccard similarity , fig.width=20, fig.height=7}
+
+# jaccard similarity between genesets
+
+if (parameter.list$general.ica){
+  j.mat.gene <- jaccardSimilarityMatrix(c(plt.ica.gene.all$module.genes, plt.ssn.gene.all$module.genes))
+  plt.j.gene <- ggplotify::as.ggplot(pheatmap::pheatmap(j.mat.gene[grepl("m", rownames(j.mat.gene)), grepl("IC", colnames(j.mat.gene))], silent = T,
+                                                        color = CustomPalette(low = "white", high = "tomato", mid = NULL, k = 50))) 
+  
+  plt.j.gene <- plt.j.gene + labs(title = "Jaccard similarity of SSN- and ICA-derived gene programs", 
+                                  subtitle = "x: IC gene program; y: SSN  gene program; z: jaccard similarity") +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    theme(plot.subtitle = element_text(hjust = 0.5))
+}
+
+if (parameter.list$general.nmf){
+  j.nmf.mat.gene <- jaccardSimilarityMatrix(c(plt.nmf.gene.all$module.genes, plt.ssn.gene.all$module.genes))
+  plt.j.nmf.gene <- ggplotify::as.ggplot(pheatmap::pheatmap(j.nmf.mat.gene[grepl("m", rownames(j.nmf.mat.gene)), grepl("NMF", colnames(j.nmf.mat.gene))], silent = T,
+                                                            color = CustomPalette(low = "white", high = "tomato", mid = NULL, k = 50))) 
+  
+  plt.j.nmf.gene <- plt.j.nmf.gene + labs(title = "Jaccard similarity of SNN- and NMF-derived gene programs", 
+                                          subtitle = "x: NMF gene program; y: SSN gene program; z: jaccard similarity") +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    theme(plot.subtitle = element_text(hjust = 0.5))
+}
+
+
+if (parameter.list$general.ica & parameter.list$general.nmf){
+  plt.j.summary <- cowplot::plot_grid(plt.j.gene, plt.j.nmf.gene)
+} else if (!parameter.list$general.ica & parameter.list$general.nmf){
+  plt.j.summary <- plt.j.nmf.gene
+} else if (parameter.list$general.ica & !parameter.list$general.nmf){
+  plt.j.summary <- plt.j.gene
+} else {
+  plt.j.summary <- NULL
+}
+
+
+if (parameter.list$print.inline) {
+  print(plt.j.summary)
+  
+}
+```
+
+
+
+```{r STRING PPI analysis, include = FALSE}
+
+# library(STRINGdb)
+ppi.success <- F
+try({
+  
+  ppiEnrich <- function(gene.list, species, verbose = T){
+    
+    # load library
+    require(STRINGdb, quietly = T)
+    
+    miko_message("Initializing STRING database...", verbose = verbose)
+    # initialize constructor
+    suppressWarnings({
+      suppressMessages({
+        if (species == "Hs"){
+          string_db <- STRINGdb$new( version="11", species=9606, score_threshold=400, input_directory="")
+        } else if (species == "Mm"){
+          string_db <- STRINGdb$new( version="11", species=10090, score_threshold=400, input_directory="")
+        }
+      })
+    })
+    
+    miko_message("Retrieving gene mappings...", verbose = verbose)
+    # get symbol to id mapping
+    invisible({
+      suppressWarnings({
+        suppressMessages({
+          all.genes <- unique(unlist(gene.list))
+          string_map <- string_db$map( data.frame(gene = all.genes), "gene", removeUnmappedRows = TRUE ) 
+        })
+      })      
+    })
+    
+    
+    miko_message("Calculating PPI enrichments...", verbose = verbose)
+    # calculate enrichments for each gene module
+    df.ppi.enrichment <- NULL
+    for (i in 1:length(gene.list)){
+      
+      module.name <- names(gene.list)[i]
+      gene.input <- (string_map %>% dplyr::filter(toupper(gene) %in% toupper(gene.list[[module.name]])))$STRING_id
+      
+      if (length(gene.input) == 0) next
+      
+      p.ppi <- string_db$get_ppi_enrichment(gene.input)
+      
+      if (is.null(p.ppi[["enrichment"]])) next
+      
+      df.ppi.enrichment <- bind_rows(
+        df.ppi.enrichment, 
+        data.frame(
+          module = module.name,
+          p = p.ppi$enrichment,
+          observed = p.ppi$edges,
+          expected = p.ppi$lambda
+        )
+      )
+    }
+    
+    
+    # which entries missing:
+    which.missing <- c()
+    which.missing <- names(gene.list)[!(names(gene.list) %in% df.ppi.enrichment$module)]
+    if (length(which.missing) > 0){
+      for (i in 1:length(which.missing)){
+        df.ppi.enrichment <- bind_rows(df.ppi.enrichment,
+                                       data.frame(
+                                         module = which.missing[i],
+                                         p = 1,
+                                         observed = 0,
+                                         expected = 0
+                                       ))
+      }
+      
+    }
+    
+    # calculate ratio and fdr
+    df.ppi.enrichment$ratio <-(df.ppi.enrichment$observed + 1) /   (df.ppi.enrichment$expected + 1)
+    df.ppi.enrichment$fdr <- p.adjust(df.ppi.enrichment$p)
+    df.ppi.enrichment$fdr[is.na(df.ppi.enrichment$fdr)] <- 1
+    
+    miko_message("Generating summary plot...", verbose = verbose)
+    # generate erichment plot
+    plt.ppi.enrich <- df.ppi.enrichment %>%
+      ggplot(aes(x = (ratio), y = reorder(module, ratio), color = fdr < 0.05)) + #observed
+      geom_vline(xintercept = 1, linetype = "dashed") +
+      geom_point(size = 5) + 
+      geom_segment(aes(x = 1, xend = ratio, y = reorder(module, ratio), yend = reorder(module, ratio))) + 
+      labs(x=  "PPI Enrichment (observed/exected)", y  = "Gene Program",
+           title = "PPI Enrichment", subtitle = "STRING v11.0 database") + 
+      scale_color_manual(values = c("TRUE" = "tomato", "FALSE" = "grey")) + 
+      theme_miko(legend = T, grid = T) 
+    
+    
+    miko_message("PPI enrichment complete!", verbose = verbose)
+    # return results
+    return(list(
+      df.result = df.ppi.enrichment,
+      plot.enrichment = plt.ppi.enrich
+    ))
+  }
+  
+  
+  general.ppi.enrich <- ppiEnrich(gene.list = mod.list, species = parameter.list$species, verbose = T)
+  ppi.success <- T
+}, silent = T)
+
+
+
+```
+
+```{r central log}
+
+# update central log
+
+if (parameter.list$developer){
+  run.id <- NULL
+  if (!exists("user")) user <- "guest"
+  
+  clog.update.success <- F
+  if (parameter.list$update.log){
+    try({
+      run.id <-  updateCentralLog(Module = "M05", input.data = input.file, input.subset = NA, pdf.flag = parameter.list$save.pdf)
+      clog.update.success <-  T
+    }, silent = F) 
+  }
+  
+  if (is.null(run.id))  {
+    warning("Central log update was unsuccessful :(\n")
+    run.id <- paste("M05_", user, "_r", paste0(format(Sys.time(), '%s')), sep = "", collapse = "")
+  }
+} else {
+  run.id <- paste("output_", gsub(":| ", "", paste0(format(Sys.time(), '%X'))), sep = "", collapse = "")
+}
+
+
+```
+
+
+```{r setup output directories}
+
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+
+# create output directories
+if (parameter.list$save.pdf){
+  dir.create(output.path)
+  dir.create(paste0(output.path, "Tables/"))
+  dir.create(paste0(output.path, "PDF/"))
+}
+
+
+```
+
+```{r flex plot helper function}
+
+flexPlotOutput <- function(header.name, fig.width, fig.height, chunk.name, plot.name, do.print = T){
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", header.name))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf(paste0("\n```{r %s, message=FALSE, warning=FALSE, fig.width = ",fig.width, ", fig.height= ", fig.height, "}"),  
+                                          chunk.name))
+  
+  if (do.print){
+    a3 <- knitr::knit_expand(text = sprintf("\n %s", paste0("print(", plot.name, ")"))) 
+  } else {
+    a3 <- knitr::knit_expand(text = sprintf("\n %s", plot.name)) 
+  }
+  
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk'
+  out <- paste(a1, a2, a3, a4, collapse = '\n') 
+  
+  return(out)
+}
+
+```
+
+
+Sample Overview
+===================================== 
+
+Sidebar {.sidebar}
+-------------------------------------
+
+**Uniform manifold approximation and projection** (UMAP) used to dimensionally reduce and visualize data while maintaining global transcriptomic structure. Clusters were determined using unsupervised Louvain community detection.\
+
+```{asis, echo = (ppi.success == T)}
+Enrichment of known protein-protein interactions (PPI) is shown in **PPI enrichment plot**. STRING database was used for enrichment analysis.
+```
+
+**Sample Overview**\
+Gene network size, n: `r ncol(so.gene)`\
+Number of SSN gene programs, n: `r length(mod.list)`\
+
+Cells, n: `r ncol(so.query)`\
+Genes, n: `r nrow(so.query)`\
+Variable genes, n: `r try({length(VariableFeatures(so.query))}, silent = T)`\
+
+UMI/cell, median: `r try({round(median(so.query@meta.data[["nCount_RNA"]]))}, silent = T)`\
+genes/cell, median: `r try({round(median(so.query@meta.data[["nFeature_RNA"]]))}, silent = T)`\
+
+Clusters, n: `r ulength(so.query$seurat_clusters)`\
+Resolution: `r parameter.list$cluster.resolution`\
+Species: `r try({parameter.list$species}, silent = T)`
+
+Row 
+-------------------------------------
+
+### Overview
+
+```{r plt.umap_by_c, fig.width=7, fig.height=6}
+
+plt.umap.final <- cluster.UMAP(so.query) + theme_miko(legend = T) + labs(title = "UMAP", subtitle = paste0(ncol(so.query), " cells | ", ulength(so.query$seurat_clusters), " clusters"))
+
+if (!ppi.success){
+print(plt.umap.final)
+savePDF(file.name = paste0(output.path, "PDF/", "M05_umap_cluster.pdf"), plot.handle = plt.umap.final,
+        fig.width = 7, fig.height = 6, save.flag = parameter.list$save.pdf)
+}
+```
+
+```{r plt.umap_w_string, fig.width=14, fig.height=8}
+
+if (ppi.success){
+plt.umap.final_string <- cowplot::plot_grid(plt.umap.final,  
+                                            general.ppi.enrich$plot.enrichment + 
+                                                theme(legend.position = "bottom"),
+                                              rel_widths = c(1,0.5), nrow = 1)
+print(plt.umap.final_string)
+savePDF(file.name = paste0(output.path, "PDF/", "M05_umap_and_PPIenrich.pdf"), plot.handle = plt.umap.final_string,
+        fig.width=12, fig.height=8, save.flag = parameter.list$save.pdf)
+}
+
+```
+
+Gene Program Activity
+===================================== 
+
+Sidebar {.sidebar}
+-------------------------------------
+
+**Description**:  Gene program activities across cell clusters.
+
+**Method**:  Gene program activities were computed and average cluster-level expression was visualized on hierarchically-clustered heatmap.\
+
+**Definitions**:\
+m| SSN gene program\
+IC| independent-component-derived gene program\
+NMF| Non-negative matrix factorization gene program\
+k| Number of latent factors derived for NMF.\
+c| cell cluster
+
+
+Row {.tabset data-height=400}
+-------------------------------------
+
+### SSN
+
+```{r general network module heatmap, fig.width=10, fig.height=8}
+
+plt.ssn.gene.hm.expr
+
+savePDF(file.name = paste0(output.path, "PDF/", "M05_SSB_gene_program_activity.pdf"), plot.handle = plt.ssn.gene.hm.expr,
+        fig.width=10, fig.height=8, save.flag = parameter.list$save.pdf)
+
+```
+
+
+
+```{r general network ICA heatmap, fig.width=10, fig.height=8}
+
+if (parameter.list$general.ica){
+  
+  # print(plt.ssn.gene.hm.expr)
+  out <- flexPlotOutput(header.name = "ICA", fig.width = 10, fig.height = 8, chunk.name = "ica.gene.hm.expr", plot.name = "plt.ica.gene.hm.expr", do.print= F)
+  
+  savePDF(file.name = paste0(output.path, "PDF/", "M05_ICA_gene_program_activity.pdf"), plot.handle = plt.ica.gene.hm.expr,
+          fig.width=10, fig.height=8, save.flag = parameter.list$save.pdf)
+}
+
+
+```
+
+`r if (parameter.list$general.ica){paste(knitr::knit(text = paste(out, collapse = '\n')))}`
+
+
+```{r general network NMF heatmap, fig.width=10, fig.height=8}
+
+if (parameter.list$general.nmf){
+  out <- flexPlotOutput(header.name = "NMF", fig.width = 10, fig.height = 8, chunk.name = "nmf.gene.hm.expr", plot.name = "plt.nmf.gene.hm.expr", do.print= F)
+  
+  savePDF(file.name = paste0(output.path, "PDF/", "M05_NMF_gene_program_activity.pdf"), plot.handle = plt.nmf.gene.hm.expr,
+          fig.width=10, fig.height=8, save.flag = parameter.list$save.pdf)
+}
+
+
+```
+
+`r if (parameter.list$general.nmf){paste(knitr::knit(text = paste(out, collapse = '\n')))}`
+
+
+Functional Annotation
+===================================== 
+
+Sidebar {.sidebar}
+-------------------------------------
+
+**Transcription Network**
+
+**Description**: Functional annotation of gene prorams 
+
+**Method**: Scale-free shared nearest neighbor network (SSN) was visualized using gene-centric UMAP representation. In network graph, each node represents individual gene, and linkages represent shared nearest neighbor (SNN) similarity, computed as jaccard similarity of KNN graph. SSN-, ICA- and NMF-derived gene programs were functionally annotated using hypergeometric over-representation analysis. Modular activities were computed and cell-level activities were projected onto cellular UMAP. 
+
+**Figure Legends**:\
+**A|** Gene program activity overlaid on cellular UMAP.\
+**B|** SSN network graph, with program genes highlighted and top genes annotated (based on connectivity).\
+**C-E|** Functional annotation of gene program using hypergeometric overrepresentation analysis of Gene Ontology (GO) for Biological Processes (**C**), Molecular Functions (**D**), and Cellular Components (**E**)\
+
+**Definitions**:\
+m| SSN gene program\
+IC| independent component analysis gene program\
+NMF| Non-negative matrix factorization gene program\
+k| Number of latent factors derived for NMF.\
+c| cell cluster
+
+
+Row {.tabset data-height=600}
+-------------------------------------
+
+### SSN Network
+
+
+```{r general network graph, fig.width=9, fig.height=6, fig.align="center"}
+
+# if (!ppi.success){
+
+  htmltools::div(plt.general.net, align="center" )
+  
+  savePDF(file.name = paste0(output.path, "PDF/", "M05_SSN_graph.pdf"), plot.handle = plt.general.net.graph,
+          fig.width=9, fig.height=6, save.flag = parameter.list$save.pdf)
+# }
+
+
+```
+
+
+
+```{r general network annotations - modules}
+# mod.subnet.gene$
+
+
+
+out <- lapply(seq_along(plt.ssn.gene), function(i) {
+  
+  s1 <- names(plt.ssn.gene)[i]
+  s2 <- paste0("plt.ssn.gene[[", i, "]]")
+  
+  a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+  a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE, fig.width = 15, fig.height=10}",  #fig.width = 8, fig.height=8, 
+                                          paste("gwnet_enrich_", i, sep = "")))
+  a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+  a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+  
+})
+
+for (i in 1:length(plt.ssn.gene)){
+  plot.name <- paste0("GeneProgramAnnotation_", names(plt.ssn.gene)[i], ".pdf")
+  try({
+    savePDF(file.name = paste0(output.path, "PDF/", plot.name), 
+            plot.handle =  plt.ssn.gene[[i]], 
+            fig.width = 15, fig.height = 10, save.flag = parameter.list$save.pdf)
+  }, silent = T)
+}
+
+
+# plt.ssn.gene.all$plt.summary$m0
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+```{r general network annotations - ICA}
+
+if (parameter.list$general.ica){
+  out <- lapply(seq_along(plt.ica.gene), function(i) {
+    
+    s1 <- names(plt.ica.gene)[i]
+    s2 <- paste0("plt.ica.gene[[", i, "]]")
+    
+    a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+    a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE, fig.width = 15, fig.height=10}",  #fig.width = 8, fig.height=8, 
+                                            paste("ICA_summary_", i, sep = "")))
+    a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+    a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+    
+    paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+    
+  })
+  
+  
+  for (i in 1:length(plt.ica.gene)){
+    plot.name <- paste0("ICAAnnotation_", names(plt.ica.gene)[i], ".pdf")
+    try({
+      savePDF(file.name = paste0(output.path, "PDF/", plot.name), plot.handle =  plt.ica.gene[[i]], 
+              fig.width = 25, fig.height = 5, save.flag = parameter.list$save.pdf)
+    }, silent = T)
+  }
+} 
+
+```
+
+`r if (parameter.list$general.ica){paste(knitr::knit(text = paste(out, collapse = '\n')))}`
+
+
+```{r general network annotations - NMF}
+
+
+# plt.nmf.gene$
+if (parameter.list$general.nmf){
+  out <- lapply(seq_along(plt.nmf.gene), function(i) {
+    
+    s1 <- names(plt.nmf.gene)[i]
+    s2 <- paste0("plt.nmf.gene[[", i, "]]")
+    
+    a1 <- knitr::knit_expand(text = sprintf("### %s\n", s1))  # tab header
+    a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE, fig.width = 15, fig.height=10}",  #fig.width = 8, fig.height=8, 
+                                            paste("NMF_summary_", i, sep = "")))
+    a3 <- knitr::knit_expand(text = sprintf("\n %s", s2)) 
+    a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+    
+    paste(a1, a2, a3, a4, collapse = '\n') # collapse together all lines with newline separator
+    
+  })
+  
+  
+  for (i in 1:length(plt.nmf.gene)){
+    plot.name <- paste0("NMFAnnotation_", names(plt.nmf.gene)[i], ".pdf")
+    try({
+      savePDF(file.name = paste0(output.path, "PDF/", plot.name), plot.handle =  plt.nmf.gene[[i]],
+              fig.width = 25, fig.height = 5, save.flag = parameter.list$save.pdf)
+    }, silent = T)
+  }
+} 
+
+
+```
+
+`r if (parameter.list$general.nmf){paste(knitr::knit(text = paste(out, collapse = '\n')))}`
+
+
+
+Gene Sets
+===================================== 
+
+Sidebar {.sidebar}
+-------------------------------------
+
+**Gene set similarity matrix** represents the jaccard similarity between gene programs discovered by different methods. If only one gene program discovery method was used, this result is not shown.\
+
+**SSN network layout** provides the UMAP coordinates and gene program membership and connectivity of each gene.\
+
+**SSN programs** List of genes belonging to each SSN program. 
+
+**ICA programs** List of genes belonging to each ICA program (not shown if ICA was not performed).
+
+**NMF programs** List of genes belonging to each NMF program (not shown if NMF was not performed). 
+
+**Definitions**:\
+SSN| scale-free shared-nearest neighbors\
+ICA| independent component analysis\
+NMF| Non-negative matrix factorization\
+k| Number of latent factors derived for NMF.\
+c| cell cluster
+
+
+
+Row {.tabset}
+-------------------------------------
+
+
+
+```{r jaccard similarity, fig.width=20, fig.height=7}
+
+try({
+  out <- flexPlotOutput(header.name = "Gene set Similarity Matrix", fig.width = 20, fig.height = 7, chunk.name = "jaccard similarity output", plot.name = "plt.j.summary")
+  
+  if (!is.null(plt.j.summary)){
+    savePDF(file.name = paste0(output.path, "PDF/", "M05_geneset_jaccard_similarity.pdf"), plot.handle = plt.j.summary,
+            fig.width=20, fig.height=7, save.flag = parameter.list$save.pdf)
+  }
+  
+}, silent = T)
+
+```
+
+`r try({if (!is.null(plt.j.summary)){paste(knitr::knit(text = paste(out, collapse = '\n')))}}, silent = T)`
+
+### SSN network layout
+
+```{r general net umap table, fig.width=20, fig.height=7}
+
+flex.asDT(df.general.net)
+
+```
+
+
+### SSN programs
+
+```{r general ssn set table, fig.width=20, fig.height=7}
+
+flex.asDT(df.general.ssn.gene.list)
+
+```
+
+
+
+### ICA programs
+
+```{r general ica set table, fig.width=20, fig.height=7}
+
+try({
+  flex.asDT(df.general.ica.gene.list)
+}, silent = T)
+
+```
+
+### NMF programs
+
+```{r general nmf set table, fig.width=20, fig.height=7}
+
+try({
+  flex.asDT(df.general.nmf.gene.list)
+}, silent = T)
+
+```
+
+
+```{r}
+
+a1 <- knitr::knit_expand(text = sprintf("\n%s", "Scale-Free Topology"))
+a2 <- knitr::knit_expand(text = "\n=====================================")
+out1 <- paste(a1, a2, collapse = '\n')
+
+```
+
+`r if (( parameter.list$general.scale.free.topology)){ paste(knitr::knit(text = paste(out1, collapse = '\n'))) }`
+
+
+```{r}
+
+a3 <- knitr::knit_expand(text = sprintf("\n%s", "Sidebar {.sidebar}"))
+a4 <- knitr::knit_expand(text = sprintf("\n%s\n", "-------------------------------------"))
+a5 <- knitr::knit_expand(text = "\n**Scale-Free Topology**\n\n**Description**: A network is scale-free if connectivity densities approximate a power-law distribution. In such a case, the majority of genes have few connections, and relatively few 'hub' genes are highly-interconnected. To enforce a scale-free network topology, a range of soft thresholding powers are evaluated, and the optimal soft-thresholding power is used for network construction.\n\n**Methods**: Adopting the framework from weighted correlation analysis (WGCNA), an adjacency matrix is constructed from the shared nearest neighor (snn) graph. Specifically, the adjaceny matrix is defined as the snn graph raised to the soft-thresholding power. To identify the optimal soft-thresholding power, the scale free topology fit index is calculated as the correlation (R^2) between log transformed N linkages and N nodes for a range of powers. The optimal power is taken as the lowest power for which the scale free topology fit (R^2) exceeds 0.9. The adjacency matrix obtained for ths power is used to construct the network UMAP and identify gene programs \n\n**Citation**: Zhang, B., & Horvath, S. (2005). A general framework for weighted gene co-expression network analysis. Statistical applications in genetics and molecular biology, 4(1).")
+
+out2 <- paste(a3, a4,a5, collapse = '\n')
+
+```
+
+`r if ((parameter.list$general.scale.free.topology)){ paste(knitr::knit(text = paste(out2, collapse = '\n'))) }`
+
+```{r scale free}
+
+r1 <- knitr::knit_expand(text = sprintf("\n%s", "Row {.tabset}"))
+r2 <- knitr::knit_expand(text = sprintf("\n%s\n", "-------------------------------------"))
+
+row.chunk <- paste(r1, r2,collapse = '\n')
+
+a1 <- knitr::knit_expand(text = sprintf("### %s\n", "Scale-Free Transformation"))  # tab header
+a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE, fig.width = 10, fig.height=5}",  #fig.width = 8, fig.height=8,
+                                        paste("gene_scale_free", 1, sep = "")))
+a3 <- knitr::knit_expand(text = sprintf("\n %s", "print(plt.sft)"))
+a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+
+a1.chunk <- paste(a1, a2, a3, a4, collapse = '\n') 
+
+try({
+  savePDF(file.name = paste0(output.path, "PDF/", "general_scaleFree_parameterOptimization.pdf"), plot.handle =  plt.sft, 
+          fig.width = 10, fig.height = 5, save.flag = parameter.list$save.pdf)
+}, silent = T)
+
+
+```
+
+`r if ((parameter.list$general.scale.free.topology)){ paste(knitr::knit(text = paste(row.chunk, collapse = '\n'))) }`
+
+`r if ((parameter.list$general.scale.free.topology)){paste(knitr::knit(text = paste(a1.chunk, collapse = '\n')))}`
+
+
+```{r finalize log}
+
+# Update analysis log
+n.cells.analyzed <- nrow(so.gene)
+n.genes.general <- ncol(so.gene)
+df.log <- addLogEntry("Number of cells analyzed", n.cells.analyzed, df.log, "n.cells.analyzed")
+df.log <- addLogEntry("Number of genes evaluated", n.genes.general, df.log, "n.genes.general")
+df.log <- addLogEntry("Seurat Assay", DefaultAssay(so.query), df.log, "DefaultAssay(so.query)")
+
+# Run time
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+if (parameter.list$developer){
+  df.log <- addLogEntry("User", user, df.log, "user")
+  df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
+}
+
+df.log_Module_5 <- df.log
+
+```
+
+
+
+```{r ph10,  echo = FALSE, eval = TRUE}
+
+out1 <- lapply(seq_along(module.logs), function(i) {
+  
+  module.n <- as.numeric(gsub("[^\\d]+", "", module.logs[i], perl=TRUE))
+  
+  a1 <- knitr::knit_expand(text = sprintf("\nLog (M%s)", paste(module.n)))
+  a2 <- knitr::knit_expand(text = "\n=====================================")
+  a3 <- knitr::knit_expand(text = sprintf("\n```{r %s}", paste("mod_", i, sep = ""))) # start r chunk
+  a4<- knitr::knit_expand(text = sprintf("\nknitr::kable(%s)",module.logs[i])) 
+  a5 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+  
+  paste(a1, a2, a3, a4, a5, collapse = '\n') # collapse together all lines with newline separator
+})
+
+
+```
+
+`r paste(knitr::knit(text = paste(out1, collapse = '\n')))`
+
+Log (M5)
+===================================== 
+
+```{r table.log_current}
+knitr::kable(df.log_Module_5)
+```
+
+```{r save analysis log as csv}
+
+try({
+  write.csv(df.log_Module_5, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+            row.names = F)  
+}, silent = T)
+
+```
+
+System Info
+=====================================
+
+```{r}
+
+pander::pander(sessionInfo())
+
+```
