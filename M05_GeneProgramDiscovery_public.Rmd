@@ -790,13 +790,23 @@ Sample Overview
 Sidebar {.sidebar}
 -------------------------------------
 
-**Uniform manifold approximation and projection** (UMAP) used to dimensionally reduce and visualize data while maintaining global transcriptomic structure. Clusters were determined using unsupervised Louvain community detection.\
+For details on the **Gene Program Discovery** scPipeline module, see [documentation](https://nmikolajewicz.github.io/scMiko/articles/scPipeline_module_overview.html).\
+
+---
+
+**Description**: Sample overview and summary of STRING protein-protein interactions (PPI) for gene programs identified by SSN analysis.
+
+---
+
+**UMAP**. UMAP representation of scRNA-seq sample.\
 
 ```{asis, echo = (ppi.success == T)}
-Enrichment of known protein-protein interactions (PPI) is shown in **PPI enrichment plot**. STRING database was used for enrichment analysis.
+**PPI enrichment plot**. Enrichment of known protein-protein interactions (PPI) among gene programs identified by SSN analysis. [STRING database](https://string-db.org/) was used for enrichment analysis.
 ```
 
-**Sample Overview**\
+---
+
+**Statistics**\
 Gene network size, n: `r ncol(so.gene)`\
 Number of SSN gene programs, n: `r length(mod.list)`\
 
@@ -810,6 +820,8 @@ genes/cell, median: `r try({round(median(so.query@meta.data[["nFeature_RNA"]]))}
 Clusters, n: `r ulength(so.query$seurat_clusters)`\
 Resolution: `r parameter.list$cluster.resolution`\
 Species: `r try({parameter.list$species}, silent = T)`
+
+---
 
 Row 
 -------------------------------------
@@ -847,16 +859,24 @@ Gene Program Activity
 Sidebar {.sidebar}
 -------------------------------------
 
-**Description**:  Gene program activities across cell clusters.
+---
+
+**Description**: Gene program activities across cell clusters.
+
+---
 
 **Method**:  Gene program activities were computed and average cluster-level expression was visualized on hierarchically-clustered heatmap.\
 
+---
+
 **Definitions**:\
-m| SSN gene program\
-IC| independent-component-derived gene program\
-NMF| Non-negative matrix factorization gene program\
-k| Number of latent factors derived for NMF.\
-c| cell cluster
+m: SSN gene program\
+IC: independent-component-derived gene program\
+NMF: Non-negative matrix factorization gene program\
+k: Number of latent factors derived for NMF.\
+c: cell cluster
+
+---
 
 
 Row {.tabset data-height=400}
@@ -913,23 +933,31 @@ Functional Annotation
 Sidebar {.sidebar}
 -------------------------------------
 
-**Transcription Network**
+---
 
-**Description**: Functional annotation of gene prorams 
+**Description**: Functional annotation of gene programs 
 
-**Method**: Scale-free shared nearest neighbor network (SSN) was visualized using gene-centric UMAP representation. In network graph, each node represents individual gene, and linkages represent shared nearest neighbor (SNN) similarity, computed as jaccard similarity of KNN graph. SSN-, ICA- and NMF-derived gene programs were functionally annotated using hypergeometric over-representation analysis. Modular activities were computed and cell-level activities were projected onto cellular UMAP. 
+---
+
+**Method**: Scale-free shared nearest neighbor network (SSN) was visualized using gene-centric UMAP representation. In network graph, each node represents individual gene, and linkages represent shared nearest neighbor (SNN) similarity, computed as Jaccard similarity of KNN graph. SSN-, ICA- and NMF-derived gene programs were functionally annotated using hypergeometric over-representation analysis. Modular activities were computed and cell-level activities were projected onto cellular UMAP. 
+
+---
 
 **Figure Legends**:\
 **A|** Gene program activity overlaid on cellular UMAP.\
 **B|** SSN network graph, with program genes highlighted and top genes annotated (based on connectivity).\
 **C-E|** Functional annotation of gene program using hypergeometric overrepresentation analysis of Gene Ontology (GO) for Biological Processes (**C**), Molecular Functions (**D**), and Cellular Components (**E**)\
 
+---
+
 **Definitions**:\
-m| SSN gene program\
-IC| independent component analysis gene program\
-NMF| Non-negative matrix factorization gene program\
-k| Number of latent factors derived for NMF.\
-c| cell cluster
+m: SSN gene program\
+IC: independent component analysis gene program\
+NMF: Non-negative matrix factorization gene program\
+k: Number of latent factors derived for NMF.\
+c: cell cluster
+
+---
 
 
 Row {.tabset data-height=600}
@@ -1065,24 +1093,32 @@ Gene Sets
 Sidebar {.sidebar}
 -------------------------------------
 
-**Gene set similarity matrix** represents the jaccard similarity between gene programs discovered by different methods. If only one gene program discovery method was used, this result is not shown.\
+---
 
-**SSN network layout** provides the UMAP coordinates and gene program membership and connectivity of each gene.\
+**Description** Summary of gene program similarities and composition. 
 
-**SSN programs** List of genes belonging to each SSN program. 
+---
 
-**ICA programs** List of genes belonging to each ICA program (not shown if ICA was not performed).
+**Gene set similarity matrix**. Heatmap(s) visualizing Jaccard similarity between gene programs discovered by different methods. If only one gene program discovery method was used, this result is not shown.\
 
-**NMF programs** List of genes belonging to each NMF program (not shown if NMF was not performed). 
+**SSN network layout**. UMAP coordinates and gene program membership and connectivity of each gene.\
+
+**SSN programs**. List of genes belonging to each SSN program. 
+
+**ICA programs**. List of genes belonging to each ICA program (not shown if ICA was not performed).
+
+**NMF programs**. List of genes belonging to each NMF program (not shown if NMF was not performed). 
+
+---
 
 **Definitions**:\
-SSN| scale-free shared-nearest neighbors\
-ICA| independent component analysis\
-NMF| Non-negative matrix factorization\
-k| Number of latent factors derived for NMF.\
-c| cell cluster
+SSN: scale-free shared-nearest neighbors\
+ICA: independent component analysis\
+NMF: Non-negative matrix factorization\
+k: Number of latent factors derived for NMF.\
+c: cell cluster
 
-
+---
 
 Row {.tabset}
 -------------------------------------
