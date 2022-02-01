@@ -945,7 +945,13 @@ Results
 Sidebar {.sidebar data-width=400}
 -------------------------------------
 
+For details on the **Cluster Optimization** scPipeline module, see [documentation](https://nmikolajewicz.github.io/scMiko/articles/scPipeline_module_overview.html).\
+
+---
+
 **Description**: Cells are clustered using unsupervised Louvain community detection over a range of candidate resolutions. At each resolution, i) cluster-level UMAP and heatmap representations are generated, ii) resolution-specific performance metrics are derived, and iii) cluster-specific differential expression analysis is performed. 
+
+---
 
 **Figure Legends**:\
 **A|** Resolution-specific UMAP representation of cell clusters.\
@@ -959,16 +965,22 @@ Sidebar {.sidebar data-width=400}
 **I|** Purity scores overlaid on a UMAP. See notes for details. \
 **J|** Marker specificity curve. See notes for details. *Red curve*: specified resolution; *grey curves*: all other resolutions.\
 
+---
+
 **Notes**:\
 **1. Purity Score**: For a given cell *i*, the purity score is defined as the proportion of cells within cell *i*'s K-nearest neighborhood (KNN) that belong to the most represented cluster within that KNN. The purity score ranges between 0 to 1. Neighborhoods in which cells belong to many different clusters are considered "*impure*" (low purity score) whereas neighborhoods in which cells belong to a single cluster are "*pure*" (high purity score). The purity score, together with the silhouette width, provides a measure of cluster consistency and may be used in guiding selection of the optimal clustering resolution.\
 **2. Marker Specificity**: The marker specificity score is a measure of how well differentially-expressed genes (DEG) can discriminate (i.e., classify) clusters at a given resolution. To derive the specificity score, nCDI estimates are used to construct a *marker specificity curve* (Panel J). The x axis represents nCDI values ranging from 0 to 1. The y axis represents the proportion of clusters that have at least 1 DEG exceeding the target nCDI (on the x axis). The area under the marker specificity curve represents the *marker specificity score* and can range from 0 (no clusters have a specific DEG) to 1 (each cluster has a specific DEG). The marker specificity score can be compared across different clustering resolutions to determine at which resolution clusters have specific DEGs.\
+
+---
 
 **Definitions**:\
 **res**: Clustering resolution\
 **UMAP**: Uniform manifold approximation and projection\
 **nCDI**: Normalized co-dependency index\
 
-**Sample Overview**:\
+---
+
+**Statistics**:\
 Cells, n: `r ncol(so.query)`\
 Genes, n: `r nrow(so.query)`\
 Variable genes, n: `r length(VariableFeatures(so.query))`\
@@ -1097,7 +1109,11 @@ DEG Table
 Sidebar {.sidebar}
 -------------------------------------
 
+---
+
 **Description**: Differentially-expressed genes (DEG) across different cluster resolutions. Differential expression performed using wilcoxon and co-dependency tests.
+
+---
 
 **Definitions**:\
 **feature**: Gene symbol\
@@ -1119,6 +1135,8 @@ Sidebar {.sidebar}
 **NPV**: Negative predictive value\
 **denominator**: Denominator used to normalized CDI. Dependent on cluster size.\ 
 **avgExpr**: Average cluster-level gene expression.\
+
+---
 
 
 Row {.tabset}
