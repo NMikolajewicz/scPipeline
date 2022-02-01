@@ -861,9 +861,19 @@ Overview
 Sidebar {.sidebar}
 -------------------------------------
 
-**Uniform manifold approximation and projection** (UMAP) used to dimensionally reduce and visualize data while maintaining global transcriptomic structure. 
+For details on the **Cell-Type Annotation** scPipeline module, see [documentation](https://nmikolajewicz.github.io/scMiko/articles/scPipeline_module_overview.html).\
 
-**Sample Overview**\
+---
+
+**Description**: Sample overview
+
+---
+
+**Cluster UMAP**: UMAP representation of scRNA-seq sample.
+
+---
+
+**Statistics**\
 Cells, n: `r ncol(so.query)`\
 Genes, n: `r nrow(so.query)`\
 Variable genes, n: `r try({length(VariableFeatures(so.query))}, silent = T)`\
@@ -874,6 +884,8 @@ genes/cell, median: `r try({round(median(so.query@meta.data[["nFeature_RNA"]]))}
 Clusters, n: `r try({ulength(so.query$seurat_clusters)}, silent = T)`\
 Resolution: `r try({parameter.list$cluster.resolution}, silent = T)`\
 Species: `r try({parameter.list$species}, silent = T)`
+
+---
 
 Row {.tabset}
 -------------------------------------
