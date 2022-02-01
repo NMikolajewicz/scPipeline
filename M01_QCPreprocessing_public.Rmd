@@ -1,0 +1,2075 @@
+---
+title: "QC and Preprocessing"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    source_code: embed
+    theme: 
+      bootswatch: flatly
+    navbar:
+      - { title: "scMiko", href: "https://nmikolajewicz.github.io/scMiko/" }  
+editor_options: 
+  chunk_output_type: inline
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(input = inputFile,
+      encoding = encoding,
+      output_file = if (exists("user")){paste0(
+        xfun::sans_ext(inputFile), '_',user, "_", 
+        paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html'
+      )} else {paste0(xfun::sans_ext(inputFile), '_',"Guest", "_", 
+      paste0(format(Sys.time(), "%d_%b_"), gsub(" ", "_", gsub(":", "_", format(Sys.time(), "%X"))), format(Sys.time(), "_%Y")), '.html')},
+      output_dir = if (exists("data.path")) paste0(data.path, "/HTML_Reports") else NULL
+    )
+  })
+---
+
+```{r setup, include=FALSE}
+
+# clear global enviroment
+rm(list = setdiff(ls(), c("data.path", "user")))
+invisible({gc()})
+
+# initiate timer
+start.time <- proc.time()
+
+# list of packages to load
+packages2load <- c('viridis', 'scMiko', 'ggpubr', 'dplyr', 'ggthemes', 'WGCNA', 'cowplot', 'schex', 'Seurat', 'sctransform', 'plyr', 'tidyr', 'reshape2', 'Matrix', 'RColorBrewer', 'ggplot2', 'gridExtra', 'DT', 'flexdashboard', 'future', 'gplots', 'reticulate')
+
+# load packages
+invisible(lapply(packages2load, library, character.only = TRUE, quietly = T))
+
+```
+
+
+```{r c2 - parameter_specification}
+
+# specify parameters
+parameter.list <- list(
+  
+  # input parameters
+  input.object = NULL,       
+  input.cell_ranger = NULL, 
+  input.matrix = NULL,
+  # input.matrix = "C:/Users/Owner/Dropbox/PDF Projects - JM/R Packages/scMiko/data/cao2019_count_matrix.rds",
+  
+  # output parameters
+  save.flag = T,              
+  output.object.directory = "Preprocessed_Datasets/",
+  output.object.file = "p16_hs_neuron_merged_310122.Rdata",
+
+  # analysis parameters
+  subsample.n = NA, 
+  cluster.resolution = 1,
+  gene.upperlimit = 9000, 
+  gene.lowerlimit = 200,  
+  mt.upperlimit = 10,  
+  unmatched.rate.filter.flag = T,
+  vars2regress = c("percent.mt"), 
+  correct.artifact = T,
+  feature.select.method = "hvg",             # options: hvg (recommended), deviance
+  scale.method = "sct",                      # option: sct (recommended), null_residuals
+  pca.method = "pca",                        # option: pca (recommended), glmpca
+  pca.component.select.method = "cum_var",   # options" cum_var, elbow
+  pca.var.threshold = 0.9,
+  conserve.memory = F,
+  
+  # specify species
+  species.filter.flag = F,                             
+  species.include = "Mm",
+
+  # miscillaneous parameters
+  nworkers = 1,
+  save.pdf = F,
+  print.inline = F,
+  developer = T
+)
+
+
+```
+
+
+```{r developer input}
+
+# developer specific input formats
+do.dev <- parameter.list$developer
+if (do.dev){
+  parameter.list$which.data = c("pilot16.Hs_v2") # c("16-O", "17-O")
+  parameter.list$which.strata = "hs_neuron" # NA
+  parameter.list$update.log = T
+  
+  which.data <- parameter.list$which.data  # REQUIRED 
+
+if ("which.strata" %in% names(parameter.list)){
+  which.strata <- parameter.list$which.strata # NA if no stratification
+} else {
+  which.strata <- NA
+}
+  
+  if (!exists("data.path") & !exists("user")) {
+    stop("data.path and user variables do not exist in global enviroment. Ensure that these are specified in .Rprofile. If specified, try restarting Rstudio.")
+  }
+  
+  # get input data files paths
+  inputDataSpecification <- function(inputs = paste0(data.path,"/Raw_Datasets/pilots/", "M01_inputs.csv"), 
+                                     subsets = paste0(data.path,"/Raw_Datasets/pilots/", "M01_subsets.csv")){
+    
+    input.data <- read.csv(inputs, stringsAsFactors = F)
+    colnames(input.data) <- rmvCSVprefix(colnames(input.data))
+    input.data <- apply(input.data, 2, function(x) gsub("Â", "", x))
+    input.data <- as.data.frame(input.data)
+    
+    # get subsets
+    input.subset <- read.csv(subsets, stringsAsFactors = F)
+    
+    # wrangle into list
+    u.samples <- unique(input.subset$sample)
+    input.barcode.strata <- list()
+    for (i in 1:length(u.samples)){
+      
+      subset.strata <- input.subset[input.subset$sample %in% u.samples[i], ]
+      current.strata <- list()
+      
+      for (j in 1:nrow(subset.strata)){
+        
+        current.barcodes <- subset.strata$barcodes[j]
+        current.barcodes <- strsplit(current.barcodes, ", ")[[1]]
+        current.strata[[subset.strata$set[j]]] <- current.barcodes
+      }
+      
+      input.barcode.strata[[u.samples[i]]] <- current.strata
+      
+    }
+    
+    return(list(
+      input.data = input.data,
+      input.barcode.strata = input.barcode.strata
+    ))
+  }
+  
+  input.list <- inputDataSpecification()
+  input.data <- input.list$input.data
+  input.barcode.strata <- input.list$input.barcode.strata
+  
+  # specify input 
+  stopifnot(all(which.data %in% as.vector(input.data$sample)))
+  specified.input <- input.data[as.vector(input.data$sample) %in% which.data, ]
+  
+  # get input data specifications
+  input_data <- as.vector(specified.input$files)
+  input_pcr_barcodes <- as.vector(specified.input$pcr.barcodes)
+  input_rt_barcodes <- as.vector(specified.input$rt.barcodes)
+  input_set <- c(input_data, input_pcr_barcodes, input_rt_barcodes)
+  input.type <- as.vector(specified.input$input.type)
+  all_input_organisms <- as.vector(specified.input$species)
+  dir <- as.vector(specified.input$directory) 
+  
+  # ensure correct path is used for data input
+  if (exists("data.path")){
+    dir <- paste0(data.path, dir)
+  }
+  
+  # ensure regression variables are correctly specified
+  if (length(which.data) == 1){
+    parameter.list$vars2regress <- parameter.list$vars2regress[!(parameter.list$vars2regress %in% "dataset")]
+  }
+  
+  # get stratification details
+  if (!is.na(which.strata)){
+    which.strata.specified <- which.strata
+    which.strata <- c()
+    for (i in 1:length(which.strata.specified)){
+      which.strata <- c(which.strata, input.barcode.strata[[which.data[i]]][[which.strata.specified[i]]])
+    }
+  } 
+  
+  # ensure correct directory is specified
+  stopifnot(exists("input.type")) 
+  
+  # ensure input data are specified
+  stopifnot(exists("input_set")) 
+  
+  try({
+    parameter.list$species.include <- rep(parameter.list$species.include, length(input_data))
+  }, silent = T)
+  
+  # if set_names are not specified, set_names <-  ""
+  if (exists("parameter.list$set_names")){
+    stopifnot(is.character(parameter.list$set_names))
+  } else {parameter.list$set_names <- ""}
+  
+  # if pilot input are not specified, pilot_input <-  ""
+  if (exists("pilot_input")){
+    stopifnot(length(pilot_input) == 1)
+  } else {pilot_input <- ""}
+  
+  total_sets <- input_set
+  
+} else {
+  parameter.list$which.data = NA
+  parameter.list$which.strata = NA
+    all_input_organisms <- NULL
+  # input.type <- NA
+  dir <- ""
+  
+  which.data <- parameter.list$which.data  # REQUIRED 
+
+if ("which.strata" %in% names(parameter.list)){
+  which.strata <- parameter.list$which.strata # NA if no stratification
+} else {
+  which.strata <- NA
+}
+
+}
+
+
+
+```
+
+```{r specify input pathways}
+
+
+if (!exists("input.type")){
+
+
+if ("input.object" %in% names(parameter.list)){
+  if (!is.na(parameter.list$input.object) && !is.null(parameter.list$input.object)){
+    input_data <- total_sets <- parameter.list$input.object
+    input.type <- 0
+  }
+} 
+
+if ("input.cell_ranger" %in% names(parameter.list)){
+  if (!is.na(parameter.list$input.cell_ranger) && !is.null(parameter.list$input.cell_ranger)){
+    input_data <- total_sets <- parameter.list$input.cell_ranger
+    input.type <- 2
+  }
+} 
+
+if ("input.matrix" %in% names(parameter.list)){
+  if (!is.na(parameter.list$input.matrix) && !is.null(parameter.list$input.matrix)){
+    input_data <- total_sets <- parameter.list$input.matrix
+    input.type <- 3
+  }
+} 
+  
+    
+}
+
+```
+
+
+```{r c4 - analysis log}
+
+df.log <- initiateLog("Preprocessing & QC")
+
+if (input.type == 1){
+  df.log <- addLogEntry("Input Data (.Rdata)", input_data, df.log, "input_data")
+  df.log <- addLogEntry("Input RT Barcode (.txt)", input_rt_barcodes, df.log, "input_rt_barcodes")
+  df.log <- addLogEntry("Input PCR Barcode (.txt)", input_pcr_barcodes, df.log, "input_pcr_barcodes")
+} else if (input.type == 2){
+  df.log <- addLogEntry("Input Cell Ranger", input_data, df.log, "input_data")
+} else if (input.type == 3){
+  df.log <- addLogEntry("Input Expression Matrix", input_data, df.log, "input_data")
+} else if (input.type == 0){
+  df.log <- addLogEntry("Seurat object", input_data, df.log, "input_data")
+}
+
+df.log <- addLogEntry("gene/cell Upper Limit (N/cell)", 
+                      as.character(parameter.list$gene.upperlimit), df.log, "gene.upperlimit")
+df.log <- addLogEntry("gene/cell Lower Limit (N/cell)", 
+                      as.character(parameter.list$gene.lowerlimit), df.log, "gene.lowerlimit")
+df.log <- addLogEntry("Filtered by unmatched reads", 
+                      as.character(parameter.list$unmatched.rate.filter.flag), df.log, "unmatched.rate.filter.flag")
+df.log <- addLogEntry("Mitochondrial Content Upper Limit (%/cell)", 
+                      as.character(parameter.list$mt.upperlimit), df.log, "mt.upperlimit")
+
+if ("subsample_factor" %in% names(parameter.list)){
+  if (parameter.list$subsample_factor == 1){subsampled <- FALSE} else {subsampled <- TRUE}
+} else {
+  parameter.list$subsample_factor <- 1
+  subsampled <- FALSE
+}
+
+df.log <- addLogEntry("Data Subsampled", subsampled, df.log, "subsampled")
+df.log <- addLogEntry("Cluster Resolution", as.character(parameter.list$cluster.resolution), 
+                      df.log, "cluster.resolution")
+df.log <- addLogEntry("Filtered by species", 
+                      as.character(parameter.list$species.filter.flag), df.log, "species.filter.flag")
+
+if (parameter.list$species.filter.flag) {
+  df.log <- addLogEntry("Species Included", 
+                        as.character(parameter.list$species.include), df.log, "species.include")
+}
+df.log <- addLogEntry("Number of Workers", as.character(parameter.list$nworkers), df.log, "normScale")
+
+if (!is.na(which.strata)) {
+  df.log <- addLogEntry("Barcode(s) Included", which.strata, df.log, "which.strata")
+}
+
+df.log <- addLogEntry("Variables regressed out", 
+                      as.character(parameter.list$vars2regress), df.log, "vars2regress")
+df.log <- addLogEntry("Input Species", all_input_organisms, df.log, "all_input_organisms")
+
+df.log <- addLogEntry("Feature selection method", 
+                      parameter.list$feature.select.method, df.log, "feature.select.method")
+df.log <- addLogEntry("PCA component selection method", 
+                      parameter.list$pca.component.select.method, df.log, "pca.component.select.method")
+
+
+
+```
+
+```{r c6 - load_data}
+
+# Run import function
+so.list <- list()
+gNames.list.list <- list()
+
+# sequence indices
+idx.seq <- c(1, 1+length(input_data), 1+(2*length(input_data)))
+
+# assertions
+stopifnot(length(dir) == length(input_data))
+
+for (i in 1:length(input_data)){
+  if (input.type[i] == 0){
+    output.list <-  list(so =  readRDS(file = input_data[i]),
+                         gnames = NULL)
+
+    output.list$so <-  CreateSeuratObject(counts = output.list[["so"]]@assays[["RNA"]]@counts, 
+                                          meta.data =  output.list[["so"]]@meta.data)
+    output.list$so@meta.data$Barcode = "unspecified"
+    output.list$so@meta.data$Species = "unspecified"
+  } else {
+    cur.total_sets <- total_sets[idx.seq + (i-1)]
+    
+    io <- NULL
+    try({
+      io <- stringr::str_trim(unlist(strsplit(all_input_organisms[i], ","))) 
+    }, silent = T)
+   
+    
+    if (input.type[i] == 1) {
+      output.list <- loadMoffat(import_set = cur.total_sets, 
+                                subsample_factor = parameter.list$subsample_factor, 
+                                input_organisms = io , 
+                                organism_include = parameter.list$species.include[i], 
+                                dir = dir[i])
+    } else if (input.type[i] == 2){
+      output.list <- loadCellRanger(import_set = cur.total_sets, 
+                                    input_organisms = io, 
+                                    dir = dir[i])
+    } else if (input.type[i] == 3){
+      output.list <- loadMat(file = cur.total_sets, 
+                             dir =  dir[i])
+    } 
+  }
+  # unlist outputs
+  so.list[[i]] <- output.list[[1]]
+  
+  gNames.list.list[[i]] <- output.list[[2]]
+  if ((unique(so.list[[i]]@meta.data[["Barcode"]]) == "unspecified") ){
+    so.list[[i]]@meta.data[["Barcode"]] <- paste("T", i, sep = "")
+  } else if (is.na(unique(so.list[[i]]@meta.data[["Barcode"]]))){
+    stop("Barcodes incorrectly specified") 
+  }
+  
+}
+
+# assign set labels and merge seurat objects if multiple present
+for (i in 1:length(so.list)){
+  if (length(which.data) == length(which.strata)){
+    set.label <- paste0(which.data[i],"_", which.strata[i])
+  } else {
+    set.label <- which.data[i]
+  }
+  so.list[[i]][["dataset"]] <- set.label
+}
+
+so <- mergeSeuratList(so.list)
+rm(so.list);
+rm(output.list);
+invisible({gc()})
+
+# consolidate gene lists
+try({
+  df.gname <- unique(bind_rows(lapply(gNames.list.list, function(x) data.frame(ensembl = names(x), gene = as.character(x)))))
+gNames.list <- df.gname$gene
+names(gNames.list) <- df.gname$ensembl
+so@misc[["g2e"]] <- gNames.list
+}, silent = T)
+
+```
+
+```{r c8 - filter_data_by_subset, include = FALSE}
+
+# define subset parameters
+if ("species.include" %in% names(parameter.list)){
+  if (sum(c("Mm", "Hs") %in%  parameter.list$species.include) > 0){
+    subset.df <- data.frame(field = "Species", subgroups = parameter.list$species.include)
+  }
+  
+  # subset data
+  if (sum(parameter.list$species.include %in% so@meta.data$Species) > 0){
+    so <- subsetSeurat(so, subset.df)
+  }
+
+} 
+
+if ("subsample.n" %in% names(parameter.list)){
+ so <-  downsampleSeurat(object = so, subsample.n = parameter.list$subsample.n)
+}
+
+
+```
+
+```{r c9 - subset barcodes, include = FALSE}
+
+if (!is.na(which.strata)) so <- barcodeLabels(so, which.strata)
+
+```
+
+
+```{r c10 - get_mt_content, include = FALSE}
+
+# MITOCHONDRIAL CONTENT
+so <- getMitoContent(so, gNames = so@misc[["g2e"]])
+
+```
+
+
+```{r c11 - barcode rankings, fig.width= 15, fig.height=5, include = FALSE}
+
+# get metadata
+df.meta.qc <- so@meta.data
+
+# rank QC metrics
+df.meta.qc$rank.umi <- rank(-df.meta.qc$nCount_RNA)
+df.meta.qc$rank.gene <- rank(-df.meta.qc$nFeature_RNA)
+df.meta.qc$rank.mt <- rank(-df.meta.qc$percent.mt)
+
+df.meta.qc$mitoOmit <- df.meta.qc$percent.mt > parameter.list$mt.upperlimit
+df.meta.qc$mitoColor <- "black"
+df.meta.qc$mitoColor[df.meta.qc$mitoOmit] <- "tomato"
+
+line.col <- '#2C3E50'
+
+plt.gene.umi.mito <- df.meta.qc %>%
+  dplyr::arrange(mitoOmit) %>%
+  ggplot(aes(x = nCount_RNA, y = (nFeature_RNA))) + 
+  geom_point(aes(color = mitoOmit)) + 
+  scale_y_continuous(trans='log10') + 
+  scale_x_continuous(trans='log10') + 
+  geom_hline(yintercept = parameter.list$gene.upperlimit , color = line.col, linetype = "dashed") + 
+  geom_hline(yintercept = parameter.list$gene.lowerlimit, color = line.col, linetype = "dashed") + 
+  xlab("Transcript counts (n/cell)") + ylab("Gene counts (n/cell)") + 
+  theme_classic() + labs(title = "Transcript vs Gene Counts", caption = "dashed line: gene count thresholds\norange points: high mt content.") + 
+  theme_miko(color.palette = "flatly3", center.title = T)
+
+# generate ranking plots
+plt.umi.rank.mito <- df.meta.qc %>%
+  dplyr::arrange(mitoOmit) %>%
+  ggplot(aes(x = rank.umi, y = (nCount_RNA))) + 
+  geom_point(aes(color = mitoOmit)) + 
+  scale_y_continuous(trans='log10') + 
+  xlab("Cell Rank") + ylab("Transcript counts (n/cell)") + 
+  theme_classic() + labs(title = "Transcript count ranking", caption = "orange points: high mt content.") + 
+  theme_miko(color.palette = "flatly3", center.title = T)
+
+plt.gene.rank.mito <- df.meta.qc %>%
+  dplyr::arrange(mitoOmit) %>%
+  ggplot(aes(x = rank.gene, y = (nFeature_RNA))) + 
+  geom_point(aes(color = mitoOmit)) + scale_y_continuous(trans='log10') + 
+  geom_hline(yintercept = parameter.list$gene.upperlimit , color = line.col, linetype = "dashed") + 
+  geom_hline(yintercept = parameter.list$gene.lowerlimit, color = line.col, linetype = "dashed") + 
+  xlab("Cell Rank") + ylab("Gene counts (n/cell)") + 
+  theme_classic() + labs(title = "Gene count ranking", caption = "dashed line: gene count thresholds\norange points: high mt content.") + 
+  theme_miko(color.palette = "flatly3", center.title = T)
+
+plt.mt.rank.mito <- df.meta.qc %>%
+  dplyr::arrange(mitoOmit) %>%
+  ggplot(aes(x = rank.mt, y = (percent.mt))) + 
+  geom_point(aes(color = mitoOmit)) + scale_y_continuous(trans='log10') + 
+  geom_hline(yintercept = parameter.list$mt.upperlimit, color = line.col, linetype = "dashed")  + 
+  xlab("Cell Rank") + ylab("Mitochondrial Content (%/cell)") + 
+  theme_classic() + labs(title = "Mitochondrial content ranking", caption = "orange: high mt content.") + 
+  theme_miko(color.palette = "flatly3", center.title = T)
+
+
+if (input.type == 1){
+  
+  unmatch.median <- median(df.meta.qc$unmatched.rate)
+  unmatch.mad <- mad(df.meta.qc$unmatched.rate, unmatch.median)
+  
+  if (parameter.list$unmatched.rate.filter.flag){
+    unmatch.high <- unmatch.median + (1.96*unmatch.mad)
+    unmatch.low <- unmatch.median - (1.96*unmatch.mad)
+  } else {
+    unmatch.high <- 1
+    unmatch.low <- 0
+  }
+
+  df.meta.qc$matchOmit <- (df.meta.qc$unmatched.rate > unmatch.high) | (df.meta.qc$unmatched.rate < unmatch.low)
+  # df.meta.qc$matchColor <- "black"
+  # df.meta.qc$matchColor[df.meta.qc$matchOmit] <- "skyblue"
+  
+  plt.unmatch.umi <- df.meta.qc %>%
+    dplyr::arrange(matchOmit) %>%
+    ggplot(aes(x = nCount_RNA, y = (unmatched.rate))) + 
+    geom_point(aes(color = matchOmit))  + 
+    xlab("Transcript Count") + ylab("Unmatched Rate") + 
+    geom_hline(yintercept = unmatch.high, color = line.col, linetype = "dashed")  + 
+    geom_hline(yintercept = unmatch.low, color = line.col, linetype = "dashed")  + 
+    theme_classic() + labs(title = "Transcript count vs. unmatched rate", caption = "orange: unmatched rate outliers") + 
+  theme_miko(color.palette = "flatly3", center.title = T)
+  
+  df.meta.qc$unmatch.rank <- rank(-df.meta.qc$unmatched.rate)
+  plt.umatch.rank <- df.meta.qc %>%
+    dplyr::arrange(matchOmit) %>%
+    ggplot(aes(x = unmatch.rank, y = (unmatched.rate))) + 
+    geom_point(aes(color = matchOmit)) + 
+    scale_y_continuous(trans='log10') + 
+    geom_hline(yintercept = unmatch.high, color = line.col, linetype = "dashed")  + 
+    geom_hline(yintercept = unmatch.low, color = line.col, linetype = "dashed")  + 
+    xlab("Cell Rank") + ylab("Unmatched Rate") + 
+    theme_classic() + labs(title = "Unmatched rate ranking", caption = "orange: unmatched rate outliers") + 
+  theme_miko(color.palette = "flatly3", center.title = T)
+  
+  
+  plt.gene.umi.match <- df.meta.qc %>%
+    dplyr::arrange(matchOmit) %>%
+    ggplot(aes(x = nCount_RNA, y = (nFeature_RNA))) + 
+    geom_point(aes(color = matchOmit)) + 
+    scale_y_continuous(trans='log10') + 
+    scale_x_continuous(trans='log10') + 
+    geom_hline(yintercept = parameter.list$gene.upperlimit , color = line.col, linetype = "dashed") + 
+    geom_hline(yintercept = parameter.list$gene.lowerlimit, color = line.col, linetype = "dashed") + 
+    xlab("Transcript counts (n/cell)") + ylab("Gene counts (n/cell)") + 
+    theme_classic() + labs(title = "Transcript vs Gene Counts", caption ="orange: unmatched rate outliers") + 
+  theme_miko(color.palette = "flatly3", center.title = T)
+  
+  # generate ranking plots
+  plt.umi.rank.match <- df.meta.qc %>%
+    dplyr::arrange(matchOmit) %>%
+    ggplot(aes(x = rank.umi, y = (nCount_RNA))) + 
+    geom_point(aes(color = matchOmit)) + 
+    scale_y_continuous(trans='log10') + 
+    xlab("Cell Rank") + ylab("Transcript counts (n/cell)") + 
+    theme_classic() + labs(title = "Transcript count ranking", caption = "orange: unmatched rate outliers") + 
+  theme_miko(color.palette = "flatly3", center.title = T)
+  
+  plt.gene.rank.match <- df.meta.qc %>%
+    dplyr::arrange(matchOmit) %>%
+    ggplot(aes(x = rank.gene, y = (nFeature_RNA))) + 
+    geom_point(aes(color = matchOmit)) + scale_y_continuous(trans='log10') + 
+    geom_hline(yintercept = parameter.list$gene.upperlimit , color = line.col, linetype = "dashed") + 
+    geom_hline(yintercept = parameter.list$gene.lowerlimit, color = line.col, linetype = "dashed") + 
+    xlab("Cell Rank") + ylab("Gene counts (n/cell)") + 
+    theme_classic() + labs(title = "Gene count ranking", caption = "orange: unmatched rate outliers") + 
+  theme_miko(color.palette = "flatly3", center.title = T) 
+  
+  plt.mt.rank.match <- df.meta.qc %>%
+    dplyr::arrange(matchOmit) %>%
+    ggplot(aes(x = rank.mt, y = (percent.mt))) + 
+    geom_point(aes(color = matchOmit)) + scale_y_continuous(trans='log10') + 
+    geom_hline(yintercept = parameter.list$mt.upperlimit, color = line.col, linetype = "dashed")  + 
+    xlab("Cell Rank") + ylab("Mitochondrial Content (%/cell)") + 
+    theme_classic() + labs(title = "Mitochondrial content ranking", caption = "orange: unmatched rate outliers") + 
+  theme_miko(color.palette = "flatly3", center.title = T) 
+  
+} else {
+  plt.umatch.rank <- NULL
+  plt.unmatch.umi <- NULL
+  unmatch.high <- 1
+  unmatch.low <- 0
+}
+
+if (parameter.list$print.inline) {
+ cowplot::plot_grid(plt.gene.umi.mito, plt.umi.rank.mito, plt.gene.rank.mito, plt.mt.rank.mito, ncol = 4, align = "h") 
+  
+  if (input.type == 1){
+    ggpubr::ggarrange(plt.umi.rank.match, plt.gene.rank.match, plt.mt.rank.match,
+                      plt.unmatch.umi, plt.gene.umi.match, plt.umatch.rank,ncol = 3, nrow = 2) 
+  }
+}
+
+
+
+```
+
+
+```{r c12 - Density plot of % mitochondrial genes, warning = FALSE, include = FALSE}
+
+# MITOCHONDRIAL CONTENT DISTRIBUTIONS
+
+calc_mito_content_by_bc <- function(so, set_name, bc_info_flag, input.type = 1){
+  
+  if (bc_info_flag == TRUE & input.type != 2){   
+    # Compute mitochrondrial content for each cell type
+    
+    # get unique cell types
+    barcodes <-unique(so@meta.data[["Barcode"]])
+    
+    # create dataframe to store mitochondrial content, stratified by cell type
+    df_by_bc <- NULL
+    
+    # for each cell type
+    for (i in 1:length(barcodes)) {
+      percent.mt_by_bc <- as.vector(so$percent.mt[so$Barcode == barcodes[i]])
+      count.feature_by_bc <- as.vector(so$nFeature_RNA[so$Barcode == barcodes[i]])
+      count.rna_by_bc <- as.vector(so$nCount_RNA[so$Barcode == barcodes[i]])
+      n_cells <- length(percent.mt_by_bc)
+      cur_length <- dim(df_by_bc)[1]
+      
+      # get QC parameters for each cell sample
+      df_by_bc <- bind_rows(
+        df_by_bc,
+          data.frame(barcode = barcodes[i],
+                     percent.mt = percent.mt_by_bc,
+                     count.feature = count.feature_by_bc,
+                     count.rna = count.rna_by_bc)
+      )
+      
+    }
+  } else { # if no cell type information provided, pool everything together
+    df_by_bc <- data.frame()
+    percent.mt_by_bc <- as.vector(so$percent.mt)
+    count.feature_by_bc <- as.vector(so$nFeature_RNA)
+    count.rna_by_bc <- as.vector(so$nCount_RNA)
+    df_by_bc <- data.frame(percent.mt_by_bc, count.feature_by_bc, count.rna_by_bc)
+    colnames(df_by_bc) <- c("percent.mt", "count.feature", "count.rna")
+    df_by_bc["barcode"] <-"unspecified"
+    barcodes <- "unspecified"
+    so@meta.data[["Barcode"]] <-  "unspecified"
+  }
+  
+  # Create summary graphs 
+  # plot density plot
+  plt.handle <- ggplot(df_by_bc, aes(percent.mt, color=barcode)) + 
+    geom_density(size = 1) + 
+    ggtitle(paste(set_name)) + 
+    xlab("Mitochrondrial Content (%)")
+  
+  output <- list(so, plt.handle)
+  return(output)
+}
+
+# calculate mitochondrial content, stratified by barcode (if available)
+output_by_bc <- calc_mito_content_by_bc(so, parameter.list$set_names, (length(total_sets)>1), input.type)
+
+# retrive results
+so <- output_by_bc[[1]]
+plt.mito_by_bc <- output_by_bc[[2]] 
+
+# show mito filter threhsold
+if ("mt.upperlimit" %in% names(parameter.list)){
+  if (parameter.list$mt.upperlimit >=0 & parameter.list$mt.upperlimit <= 100){
+    plt.mito_by_bc <- plt.mito_by_bc + geom_vline(xintercept = parameter.list$mt.upperlimit, linetype = "dashed")
+  }
+}
+
+try({
+  if (ulength(so$Barcode) == 1){
+    plt.mito_by_bc <- plt.mito_by_bc + theme_miko(color.palette = "flatly2")
+  }
+})
+
+if (parameter.list$print.inline){
+  print(plt.mito_by_bc)
+}
+
+```
+
+
+```{r c13 - qc_violin_plots, fig.height= 5, fig.width = 12, include = FALSE}
+
+if (length(unique(so@meta.data[["subset_group"]]))> 1){
+  df.qc <- data.frame(so@meta.data[["subset_group"]],  
+                      so@meta.data[["nFeature_RNA"]], 
+                      so@meta.data[["nCount_RNA"]], 
+                      so@meta.data[["percent.mt"]]) 
+  colnames(df.qc) <- c("group", "nFeature_RNA", "nCount_RNA", "percent.mt")
+  
+  df.qc_sum <- df.qc %>%
+    group_by(group) %>%
+    summarize(nFeature_mean = round(mean(nFeature_RNA),2),
+              nCount_mean = round(mean(nCount_RNA),2),
+              percent.mt_mean = round(mean(percent.mt),2), 
+              nFeature_median = round(median(nFeature_RNA),2),
+              nCount_median = round(median(nCount_RNA),2),
+              percent.mt_median = round(median(percent.mt),2))
+  
+  nFeat_aov <- summary(aov(nFeature_RNA ~ group, data = df.qc))
+  nCount_aov <- summary(aov(nCount_RNA ~ group, data = df.qc))
+  mT_aov <- summary(aov(percent.mt ~ group, data = df.qc))
+} else {
+  df.qc <- data.frame()
+  df.qc_sum <- data.frame()
+  nFeat_aov <- c()
+  nCount_aov <- c()
+  mT_aov <- c()
+}
+
+plt.QC_violin <- tryCatch({
+  violin.list <- QC.violinPlot(so, plt.log.flag = T, cols = alpha('#2C3E50', alpha = 0.5))
+  cowplot::plot_grid(violin.list[[1]])
+}, error = function(e){
+  violin.list <- QC.violinPlot(so, plt.log.flag = T)
+  return(cowplot::plot_grid(violin.list[[1]]))
+})
+
+if (parameter.list$print.inline){
+  print(plt.QC_violin) 
+}
+
+
+```
+
+
+```{r c14 - QC scatterplots, fig.height= 5, fig.width = 12, include = FALSE}
+
+# Generate QC scatterplots
+max.cells <- 40000
+if (ncol(so) > max.cells) {
+  plt.QC_scatter <- QC.scatterPlot(downsampleSeurat(so,  subsample.n = max.cells))
+} else {
+  plt.QC_scatter <- QC.scatterPlot(so)
+}
+
+if (parameter.list$print.inline)  {
+  print(plt.QC_scatter)
+}
+
+```
+
+
+```{r c15 - filter_QC, fig.width = 5, fig.height = 5, include = FALSE}
+
+if (length(parameter.list$set_names) == 2) {
+  set.n <- NULL
+} else {
+  set.n <- parameter.list$set_names
+}
+filter_output_list <- filterSeurat(so = so, 
+                                   RNA.upperlimit = parameter.list$gene.upperlimit, 
+                                   RNA.lowerlimit = parameter.list$gene.lowerlimit, 
+                                   mt.upperlimit = parameter.list$mt.upperlimit, 
+                                   unmatch.low = unmatch.low, 
+                                   unmatch.high = unmatch.high,
+                                   set_names = set.n)
+so <- filter_output_list[["seurat"]]
+plt.filter_pre_post <- filter_output_list[["plot"]] 
+plt.filter_pre_post <- plt.filter_pre_post + theme_miko(fill.palette = "flatly2", legend = T)
+filter.breakdown.list <- filter_output_list[["filter.breakdown"]]
+
+rm(filter_output_list)
+
+
+# colfunc <- colorRampPalette(c('#18BC9C','#2C3E50','#F39C12'))
+
+plt.filter.venn <- NULL
+try({
+  plt.filter.venn <- ggVennDiagram::ggVennDiagram(filter.breakdown.list) + 
+    scale_color_manual(values =  rep("white", length(filter.breakdown.list))) + 
+    scale_fill_gradient(low = "#F4FAFE", high = '#2C3E50')
+}, silent = T)
+
+
+if (parameter.list$print.inline){
+  print(plt.filter.venn)
+  print(plt.filter_pre_post)
+}
+
+
+```
+
+
+```{r c16 - normalize_data, warning = FALSE, include = FALSE}
+
+# Run data normalization
+normalization_method_ps <- "SCT" # "NFS" or "SCT"
+
+
+if ("conserve.memory" %in% names(parameter.list) ){
+  if (is.logical(parameter.list$conserve.memory)){
+    conserve.memory <- parameter.list$conserve.memory
+  } else {
+    conserve.memory <- F
+  }
+} else {
+  conserve.memory <- F
+}
+
+enable.parallelization <- F
+if (parameter.list$nworkers == 1) enable.parallelization <- F
+
+parameter.list$clip.range <- c(-sqrt(x = ncol(x = so[["RNA"]])/30), 
+                               sqrt(x = ncol(x = so[["RNA"]])/30))
+max.memory <- 200 # numeric, in terms of Gb 
+
+# ensure regression variables have non-zero variance
+cov <- parameter.list$vars2regress
+df.meta <- so@meta.data
+cov <- cov[cov %in% colnames(df.meta)]
+cov.regress <- c()
+if (length(cov) > 0){
+  for (i in 1:length(cov)){
+    x <- unlist(df.meta[ , cov[i]])
+    if (is.numeric(x)){
+      if (var(x) > 0){
+        cov.regress <- c(cov.regress, cov[i])
+      }
+    } else {
+       cov.regress <- c(cov.regress, cov[i])
+    }
+  }
+}
+ parameter.list$vars2regress <- cov.regress
+
+
+so <- tryCatch({
+ scNormScale(object = so, 
+              method = normalization_method_ps, 
+              vars2regress = parameter.list$vars2regress,
+              n.workers = parameter.list$nworkers,  
+              max.memory = (max.memory*20480/20 * 1024^2), 
+              enable.parallelization = enable.parallelization, 
+              conserve.memory = conserve.memory,
+              clip.range = parameter.list$clip.range)
+}, error = function(e){
+  
+  if (!conserve.memory){
+    conserve.memory <- T
+    is.success <- F
+    
+    try({
+      so <- scNormScale(object = so, 
+                        method = normalization_method_ps, 
+                        vars2regress = parameter.list$vars2regress,
+                        n.workers = parameter.list$nworkers,  
+                        max.memory = (max.memory*20480/20 * 1024^2), 
+                        enable.parallelization = enable.parallelization, 
+                        conserve.memory = conserve.memory,
+                        clip.range = parameter.list$clip.range)     
+      is.success <- T
+    })
+    
+    if (!is.success){
+      normalization_method_ps <- "NFS"  # "NFS" 
+      so <- scNormScale(object = so, 
+                        method = normalization_method_ps, 
+                        vars2regress = parameter.list$vars2regress,
+                        n.workers = parameter.list$nworkers,  
+                        max.memory = (max.memory*20480/20 * 1024^2), 
+                        enable.parallelization = enable.parallelization, 
+                        conserve.memory = conserve.memory,
+                        clip.range = parameter.list$clip.range)  
+    }
+    
+  } else {
+    return(NULL)
+  }
+  
+
+})
+
+
+if (is.null(so)) stop("Failed to normalized data. Troubleshooting required.")
+
+nassay <- DefaultAssay(so)
+var.gene.orig <- so@assays[[nassay]]@var.features
+
+if (nassay == "RNA"){
+ normalization_method_ps = "NFS"
+ parameter.list$scale.method <- "nfs"
+} else if (nassay == "SCT"){
+  normalization_method_ps = "SCT"
+  parameter.list$scale.method <- "sct"
+}
+
+```
+
+
+```{r c17 - per cell statistics, include = FALSE}
+
+# ptm <- proc.time()
+df_nCount <- data.frame(so@meta.data[["nCount_RNA"]], so@meta.data[[paste0("nCount_", nassay)]])
+colnames(df_nCount) <- c("UMI/cell (raw)",  "UMI/cell (normalized)")
+df_nCount_m <- melt(df_nCount)
+
+df_nFeat <- data.frame(so@meta.data[["nFeature_RNA"]], so@meta.data[[paste0("nFeature_", nassay)]])
+colnames(df_nFeat) <- c("genes/cell (raw)","genes/cell (normalized)")
+df_nFeat_m <- melt(df_nFeat)
+
+plt.UMI_per_cell <- ggplot(df_nCount_m, aes(x = value, fill = variable)) + 
+  geom_density(alpha = 0.3) + scale_x_log10()+  xlab("UMI/cell") + 
+  theme_miko(fill.palette = "flatly", legend= T)
+plt.genes_per_cell <- ggplot(df_nFeat_m, aes(x = value, fill = variable)) + 
+  geom_density(alpha = 0.3) + scale_x_log10()+   xlab("genes/cell") + 
+  theme_miko(fill.palette = "flatly", legend= T)
+
+
+plt.pre_post_norm <- tryCatch({
+  plt.pre_post_1 <- FeatureScatter(so, feature1 = "nCount_RNA", feature2 = paste0("nCount_", nassay)) + 
+  xlab("UMI/cell (raw)") + ylab("UMI/cell (normalized)") + 
+  theme_miko(color.palette = "flatly2", legend= T)
+  
+  plt.pre_post_2 <- FeatureScatter(so, feature1 = "nFeature_RNA", feature2 = paste0("nFeature_", nassay)) + 
+  xlab("Genes/cell (raw)") + ylab("Genes/cell (normalized)") + 
+  theme_miko(color.palette = "flatly2", legend= T)
+  
+  CombinePlots(plots = list(plt.pre_post_1, plt.pre_post_2), ncol = 2, legend = 'none')
+  
+}, error = function(e){
+  plt.pre_post_1 <- FeatureScatter(so, feature1 = "nCount_RNA", feature2 = paste0("nCount_", nassay)) + 
+  xlab("UMI/cell (raw)") + ylab("UMI/cell (normalized)")  + 
+  theme_miko(legend= T)
+  plt.pre_post_2 <- FeatureScatter(so, feature1 = "nFeature_RNA", feature2 = paste0("nFeature_", nassay)) + 
+  xlab("Genes/cell (raw)") + ylab("Genes/cell (normalized)")  + 
+  theme_miko(legend= T)
+
+  return(CombinePlots(plots = list(plt.pre_post_1  + theme(text = element_text(size = 15))  , 
+                                   plt.pre_post_2 +  theme(text = element_text(size = 15))  ), ncol = 2, legend = 'none'))
+}, silent = T)
+
+if (parameter.list$print.inline){
+  print(plt.UMI_per_cell)
+  print(plt.genes_per_cell)
+  print(plt.pre_post_norm)
+}
+
+```
+
+```{r deviance feature selection, include = FALSE}
+
+
+# feature selection using deviance #############################################
+
+# get deviant features using subset of data ####################################
+
+if (parameter.list$feature.select.method == "deviance"){
+  
+  miko_message("Performing feature selection using deviance scores...")
+  
+  DefaultAssay(so) <- nassay
+  so.sub <- downsampleSeurat(object = so, subsample.n = 20000)
+  
+  m <- GetAssayData(so.sub, slot = "data", assay = nassay)
+  m <- m[rownames(m) %in% rownames(so.sub), ]
+  m <- as.matrix(m)
+  batch.factor <- as.factor(so.sub@meta.data$Barcode)
+  
+  devs <- scry::devianceFeatureSelection(object = m, batch = batch.factor, fam = "binomial")
+  
+  df.dev <- data.frame(
+    gene = rownames(m),
+    d = devs,
+    is.var = rownames(m) %in% var.gene.orig
+  ) %>% dplyr::arrange(-d)
+  
+  df.dev$d.norm <- df.dev$d/sum(df.dev$d)
+  df.dev$d.cumsum <- cumsum(df.dev$d.norm )
+  
+  dev.gene <- df.dev$gene[df.dev$d.cumsum < 0.8]
+  if (length(dev.gene) > 2000){
+    dev.gene <- df.dev$gene[1:2000]
+  }
+  
+  dev.gene <- dev.gene[!grepl("MT", toupper(gNames.list[dev.gene]))]
+  so@assays[[nassay]]@var.features <- dev.gene
+  
+} else if (parameter.list$feature.select.method == "hvg"){
+  
+  if (!is.null(gNames.list)){
+    dev.gene <- var.gene.orig[!grepl("MT", toupper(gNames.list[var.gene.orig]))]
+  } else {
+    dev.gene <- var.gene.orig[!grepl("MT", toupper(var.gene.orig))]
+  }
+  
+
+  so@assays[[nassay]]@var.features <- dev.gene
+  
+}
+
+
+```
+
+```{r null model residuals, include = FALSE}
+
+if (parameter.list$scale.method == "null_residuals"){
+  
+  
+  m <-  GetAssayData(so, slot = "data", assay = nassay)
+  m <- m[rownames(m) %in% dev.gene, ]
+  so[["DEV"]] <- CreateAssayObject(counts = m)
+  m <- as.matrix(m)
+  batch.factor <- as.factor(so@meta.data$Barcode)
+  
+  # system.time({
+    m.deviance <- scry::nullResiduals(
+      object = m,
+      fam = c("binomial"),
+      type = c("deviance"),
+      batch = batch.factor
+    )
+  # })
+  
+  m.deviance[is.na(m.deviance)] <- 0
+  rownames(m.deviance) <- rownames(m);
+  colnames(m.deviance) <- colnames(m)
+  invisible({gc()})
+  
+  
+  m.deviance[m.deviance < parameter.list$clip.range[1]] <- parameter.list$clip.range[1]
+  m.deviance[m.deviance > parameter.list$clip.range[2]] <- parameter.list$clip.range[2]
+  
+  # parameter.list$clip.range
+  so@assays[["DEV"]]@scale.data <- m.deviance
+  so@assays[["DEV"]]@var.features <- dev.gene
+  
+  DefaultAssay(so) <- "DEV" 
+  
+  rm(so.sub)
+  rm(m);
+  rm(m.deviance);
+  invisible({gc() })
+  
+}
+
+```
+
+```{r identify artifact genes, include = FALSE}
+
+u.bc <- unique(so@meta.data$Barcode)
+
+if (length(u.bc) > 2){
+  
+  # var.gene <- var.gene.orig
+  var.gene <- so@assays[[DefaultAssay(so)]]@var.features
+  
+  miko_message("Identifying artifact genes...")
+  ag.res <-  findArtifactGenes(object = so, assay = "RNA", features = var.gene, 
+                               meta.feature = "Barcode", umi.count.threshold = 5, difference.threshold = 30, verbose = T)
+  plt.ag <- ag.res[["plot"]]
+  
+  try({
+    gene.rep <- checkGeneRep(reference.genes = gNames.list, query.genes = plt.ag[["data"]][["gene"]])
+    if (gene.rep == "ensembl"){
+      plt.ag[["data"]][["gene"]] <- as.character(gNames.list[plt.ag[["data"]][["gene"]]])
+      plt.ag[["layers"]][[2]][["data"]][["gene"]] <- as.character(gNames.list[plt.ag[["layers"]][[2]][["data"]][["gene"]]])
+    }      
+  }, silent = T)
+  
+  if (parameter.list$correct.artifact){
+    miko_message(paste0(length(ag.res$artifact.gene), " artifact genes omitted from PCA..."))
+    var.gene.update <- var.gene[!c(var.gene %in% ag.res$artifact.gene)]
+    artifact.gene <- ag.res$artifact.gene
+
+    var.gene.update <- var.gene.update[!grepl("MT", toupper(gNames.list[var.gene.update]))]
+    so@assays[[DefaultAssay(so)]]@var.features <- var.gene.update
+    
+    
+  }
+  
+  if (!is.null(plt.ag)){
+    plt.ag <- plt.ag + theme_miko(color.palette = "flatly3", legend = T)
+  }
+  if (parameter.list$print.inline) {
+    print(plt.ag)
+  }
+  
+}  else {
+  var.gene <- so@assays[[DefaultAssay(so)]]@var.features
+  var.gene.update <- var.gene[!grepl("MT", toupper(gNames.list[var.gene]))]
+  so@assays[[DefaultAssay(so)]]@var.features <- var.gene.update
+  plt.ag <- NULL
+}
+
+if (parameter.list$scale.method == "sct" & (nassay == "SCT")){
+  try({
+   so <- GetResidual(so, features = so@assays[[DefaultAssay(so)]]@var.features, verbose = F) 
+  }, silent = T)
+}
+
+
+
+
+```
+
+
+
+```{r c18 - preliminary umap}
+
+n.dim.all <- 50
+
+if (length(so@assays[[DefaultAssay(so)]]@var.features) == 0){
+ so <- FindVariableFeatures(so)
+}
+
+# Run pca
+if (parameter.list$pca.method == "pca"){
+  miko_message("Running PCA...")
+  so <- RunPCA(so, verbose = FALSE, features = so@assays[[DefaultAssay(so)]]@var.features, 
+               npcs = n.dim.all)
+} else if (parameter.list$pca.method == "glmpca"){
+  miko_message("Running GLM-PCA...")
+  so <- SeuratWrappers::RunGLMPCA(
+    object = so,
+    L = n.dim.all,
+    assay = NULL,
+    features = so@assays[[DefaultAssay(so)]]@var.features,
+    reduction.name = "pca",
+    reduction.key = "PC_",
+    verbose = F,
+    minibatch = "stochastic")
+}
+
+# specify number of PCA components to use for downstream analysis
+pca.var.threshold <- parameter.list$pca.var.threshold
+pca.prop <- propVarPCA(so)
+
+pca.elbow.low <- 0.015
+if (parameter.list$pca.component.select.method == "elbow"){
+  nDim <- pcaElbow(pca.prop$pc.prop_var, low = pca.elbow.low, max.pc = 0.9)
+} else if (parameter.list$pca.component.select.method == "cum_var"){
+  nDim <- max(pca.prop$pc.id[pca.prop$pc.cum_sum<pca.var.threshold])+1
+} else {
+  nDim <- pcaElbow(pca.prop$pc.prop_var, low = pca.elbow.low, max.pc = 0.9)
+}
+
+if ("cluster.resolution" %in% names(parameter.list)){
+  cluster_resolution <- parameter.list$cluster.resolution
+} else {
+  cluster_resolution <- 1
+}
+
+miko_message("Clustering data...")
+so <- FindNeighbors(object = so, reduction = "pca", dims = 1:nDim)
+so <- FindClusters(object = so, resolution = cluster_resolution, verbose = 0, algorithm = 1, modularity.fxn = 1)
+
+miko_message("Running UMAP...")
+so <- RunUMAP(so, dims = 1:nDim)
+
+plt.umap_by_cluster <- DimPlot(so, reduction = "umap", label = TRUE)  + 
+  labs(title = "Cell Clusters", subtitle = "UMAP") +
+  xlab("UMAP 1") + ylab("UMAP 2") + theme_miko(legend = F)
+
+plt.umap <- DimPlot(so, reduction = "umap",group.by = "Barcode")  + 
+  labs(label = "Sample Information", subtitle = "UMAP") +
+  xlab("UMAP 1") + ylab("UMAP 2") + theme_miko(legend = T, color.luminescence = 50)
+
+# combine plots
+plt.umap.combo <- cowplot::plot_grid(plt.umap_by_cluster  + theme(text = element_text(size = 15)), 
+                                     plt.umap  + theme(text = element_text(size = 15)), ncol = 2, labels = c("A", "B"))
+
+so <- schex::make_hexbin(so, nbins = 80, dimension_reduction = "UMAP")
+plt.umap_umi <- schex::plot_hexbin_meta(so, col="nCount_RNA", 
+                           action="mean", xlab="UMAP1", ylab="UMAP2") + 
+  labs(title = "Transcript counts (n/cell)", subtitle = "Post-Filtering")
+plt.umap_features <- schex::plot_hexbin_meta(so, col="nFeature_RNA", 
+                           action="mean", xlab="UMAP1", ylab="UMAP2") + 
+  labs(title = "Gene counts (n/cell)", subtitle = "Post-Filtering")
+plt.umap_mito <- schex::plot_hexbin_meta(so, col="percent.mt", 
+                           action="mean", xlab="UMAP1", ylab="UMAP2") + 
+  labs(title = "Mitochondrial Content (%/cell)", subtitle = "Post-Filtering")
+
+
+if ("unmatched.rate" %in% names(so@meta.data)){
+plt.umap_umr <- schex::plot_hexbin_meta(so, col="unmatched.rate", 
+                           action="mean", xlab="UMAP1", ylab="UMAP2") + 
+  labs(title ="Unmatched Rate", subtitle = "Post-Filtering")  
+} else {
+ plt.umap_umr <- NULL 
+}
+
+if (is.null(plt.umap_umr)){
+  plt.umap.qc <- cowplot::plot_grid(plt.umap_umi + theme(legend.position = "bottom") + theme(text = element_text(size = 15)), 
+                                    plt.umap_features + theme(legend.position = "bottom") + theme(text = element_text(size = 15)), 
+                                    plt.umap_mito + theme(legend.position = "bottom") + theme(text = element_text(size = 15)), 
+                                    ncol = 3, align = "hv", labels = c("C", "D", "E"))
+} else {
+  plt.umap.qc <- cowplot::plot_grid(plt.umap_umi + theme(legend.position = "bottom") + theme(text = element_text(size = 15)), 
+                                    plt.umap_features + theme(legend.position = "bottom") + theme(text = element_text(size = 15)), 
+                                    plt.umap_mito + theme(legend.position = "bottom") + theme(text = element_text(size = 15)), 
+                                    plt.umap_umr + theme(legend.position = "bottom") + theme(text = element_text(size = 15)), 
+                                    ncol = 4 , labels = c("C", "D", "E"))
+}
+
+if (parameter.list$print.inline){
+  print(plt.umap_by_cluster)
+  print(plt.umap) + theme(legend.position = "none")
+  print(plt.umap_umi)
+  print(plt.umap_features)
+  print(plt.umap_mito)
+}
+
+if (parameter.list$scale.method == "null_residuals"){
+  DefaultAssay(so) <- "SCT"
+}
+
+```
+
+
+```{r c19 - PCA}
+
+pc.elbow_min_difference_ps <- 0.001
+pc.cum_var_explained_threshold_ps <- pca.var.threshold
+PC_number_method_ps <- 2
+
+# calculate proportion of variance explained by each PC ---------------------
+pc.std <- so@reductions[["pca"]]@stdev
+pc.var <- pc.std^2
+pc.prop_var <- pc.var/sum(pc.var)
+pc.cum_sum <- cumsum(pc.prop_var)
+pc.id <- c(1:ncol(so@reductions[["pca"]]))
+scree.var <- data.frame(pc.id, pc.prop_var, pc.cum_sum)
+
+# determine number of PCs included ------------------------------------------
+pc.nPC_method_1 <- sum(abs(diff(pc.prop_var))>pc.elbow_min_difference_ps) +1 
+pc.nPC_method_2 <- sum(pc.cum_sum<pc.cum_var_explained_threshold_ps) + 1
+
+pc.n_relevant_components <- nDim
+
+# generate Scree Plot -------------------------------------------------------
+plt.scree1 <- ggplot(scree.var, aes(x = pc.id, y = pc.prop_var)) + 
+  geom_point(color = '#2C3E50') +  
+  theme(legend.position="right") +
+  geom_vline(xintercept = pc.n_relevant_components+0.5, color = '#F39C12') + 
+  ggtitle("Scree Plot") + xlab("Principal Components") + ylab("Variance Explained (proportion)")  + theme_miko()
+
+plt.scree2 <- ggplot(scree.var, aes(x = pc.id, y = pc.cum_sum)) + 
+  geom_point(color = '#2C3E50') +  
+  theme(legend.position="right") +
+  geom_vline(xintercept = pc.n_relevant_components+0.5, color = '#F39C12') + 
+  ylim(0, 1) + 
+  ggtitle("Cumulative Variance Explained") + xlab("Principal     Components") + ylab("Cumulative Variance Explained (proportion)") + theme_miko()
+
+
+if (parameter.list$print.inline){
+  print(plt.scree1)
+  print(plt.scree2)
+}
+
+```
+
+
+
+```{r helper functions}
+
+# alternative function to plot cluster composition
+plot.cluster_composition_alt <- function(df.cluster_annotations, other_threshold = 0.05, set_color = 2, lab_color = NULL, label_order = NULL){
+  levels(df.cluster_annotations$predicted_labels) <- c(levels(df.cluster_annotations$predicted_labels), "other")
+  df.cluster_annotations$predicted_labels[df.cluster_annotations$freq < other_threshold] <- as.character("other")
+  
+  # create graph to visualize representation across clusters
+  u_predictions <- unique(df.cluster_annotations$predicted_labels)
+  n_subgroups <- length(u_predictions)
+  
+  if (is.null(lab_color)){
+    color_count <- max(n_subgroups)
+    my_cols = colorRampPalette(brewer.pal(8, paste("Set", set_color, sep = "")))(color_count)
+  } else {
+    my_cols <- lab_color
+  }
+  
+  if (is.null(label_order)){
+    label_order <- unique(df.cluster_annotations$predicted_labels)
+  } 
+  
+  
+  # ensure that clusters are ordered numerically
+  reordered_clusters <- order(as.numeric(as.vector(df.cluster_annotations$cluster_membership)))
+  df.cluster_annotations <- df.cluster_annotations[reordered_clusters, ]
+  df.cluster_annotations$cluster_membership <- as.numeric(as.vector(df.cluster_annotations$cluster_membership))
+  cluster_chart_labels <- unique(df.cluster_annotations$cluster_membership)
+  
+  plt.cluster_composition <- ggplot(df.cluster_annotations, aes(x = cluster_membership, fill = factor(predicted_labels, levels = label_order), y = freq)) +
+    geom_bar(position = "fill", stat = "identity") + 
+    scale_x_continuous("Cluster", labels = as.character(cluster_chart_labels), breaks = cluster_chart_labels) + 
+    scale_fill_manual(values = my_cols) + 
+    xlab("Cluster ID") + ylab("Cluster Representation") + ggtitle("Cluster Annotations")
+  
+  return(plt.cluster_composition)
+}
+
+
+# function to convert long to wide df
+long2wide <- function(df){
+  
+  # create wide version (for output to excel), reorder factors, and get basic descriptive stats
+  df.wide <- dcast(df, cluster_membership ~ predicted_labels, value.var = "n")
+  df.wide[is.na(df.wide)] <- 0
+  reordered_factors <- order(as.numeric(as.vector(df.wide$cluster_membership)))
+  df.wide <- df.wide[reordered_factors, ]
+  rownames(df.wide) <- df.wide$cluster_membership
+  df.wide <- as.data.frame(t(df.wide))
+  df.wide <- df.wide[2:dim(df.wide)[1], ]
+  df_id_rnames <- rownames(df.wide)
+  colnames(df.wide) <- paste("cluster", colnames(df.wide), sep = "")
+  df.wide <- data.frame(apply(df.wide, 2, function(x) as.numeric(as.character(x))))
+  df.wide[dim(df.wide)[1]+1, ] <- apply(df.wide, 2, sum)
+  rownames(df.wide) <- c(df_id_rnames, "TOTAL")
+  df.wide[, dim(df.wide)[2]+1] <- apply(df.wide, 1, sum)
+  colnames(df.wide)[dim(df.wide)[2]] <- "TOTAL"
+  
+  return(df.wide)
+}
+
+
+```
+
+
+
+
+```{r cluster composition by barcode, warning = FALSE}
+
+# get barcode labels and clusters
+cluster_membership <- as.vector(so@meta.data[["seurat_clusters"]])
+barcode_labels <- as.vector(so@meta.data[["Barcode"]])
+df.bar_codes <- data.frame(cluster_membership, barcode_labels)
+
+# tally up cluster compositions
+df.all_barcodes <- df.bar_codes %>% 
+  dplyr::group_by(cluster_membership, barcode_labels) %>%
+  tally() %>% 
+  dplyr::mutate(freq = n / sum(n)) 
+
+u_barcodes <- unique(df.all_barcodes$barcode_labels)
+
+if (length(u_barcodes) > 1) {
+  
+  # convert long to wide (cell type table)
+  df_for_wide_barcodes <- df.all_barcodes
+  colnames(df_for_wide_barcodes)[colnames(df_for_wide_barcodes) == "barcode_labels"] <- "predicted_labels"
+  df.all_barcodes_wide <- long2wide(df_for_wide_barcodes)
+  
+  # plot cluster compositio by barcode
+  df.cluster_annotations_barcodes <- df.all_barcodes
+  colnames(df.cluster_annotations_barcodes)[colnames(df.cluster_annotations_barcodes) == "barcode_labels"] <- "predicted_labels"
+  
+  plt.cluster_composition_barcodes <- plot.cluster_composition_alt(df.cluster_annotations_barcodes, 
+                                                                   other_threshold = 0)
+  
+  plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes + 
+    theme_miko(legend = T) + 
+    ggthemes::scale_fill_ptol("Barcode") + 
+    labs(title = "Cluster Composition", subtitle = "Stratified by Barcodes")
+} else {
+  df_for_wide_barcodes <- data.frame()
+  df.all_barcodes_wide <- data.frame()
+  df.cluster_annotations_barcodes <- data.frame()
+  plt.cluster_composition_barcodes <- c()
+  
+}
+
+if (parameter.list$print.inline) {
+  print(plt.cluster_composition_barcodes)
+}
+
+```
+
+
+
+```{r c20 - cell cycle scoring, fig.width=14, fig.height = 4}
+
+# get cell cycle genes
+s.genes <- cc.genes.updated.2019$s.genes
+g2m.genes <- cc.genes.updated.2019$g2m.genes
+
+if (length(unique(parameter.list$species.include)) > 1){
+  s.genes <-  toupper(s.genes)
+  g2m.genes <-  toupper(g2m.genes)
+} else if (unique(parameter.list$species.include) == "Mm"){
+  s.genes <-  firstup(s.genes)
+  g2m.genes <-  firstup(g2m.genes)
+} else if (unique(parameter.list$species.include) == "Hs"){
+  s.genes <-  toupper(s.genes)
+  g2m.genes <-  toupper(g2m.genes)
+}
+
+so <- ens2sym.so(so, gNames.list)
+
+# cell cycle scoring and umap
+plt.cc.umap <- tryCatch({
+  
+  so <- CellCycleScoring(object = so, s.features = s.genes, g2m.features = g2m.genes, set.ident = F, nbin = optimalBinSize(so))
+  
+  plt.cc.umap <- cluster.UMAP(
+    so,
+    # pt.size = scMiko::autoPointSize(nrow(so), scale.factor = 10000),
+    group.by = "Phase",
+    x.label = "UMAP 1",
+    y.label = "UMAP 2",
+    plot.name = "Cell Cycle Classifications",
+    include.labels = F) 
+  
+}, error = function(e){
+  plt.cc.umap <- NULL
+  return(plt.cc.umap)
+})
+
+# cluster-level composition
+plt.cc <- NULL
+if ("Phase" %in% names(so@meta.data)){
+  df.cc <- data.frame(clusters =  so@meta.data[["seurat_clusters"]], phase =  so@meta.data[["Phase"]])
+  
+  df.cc.tally <- df.cc %>%
+    group_by(clusters, phase) %>%
+    tally()
+  
+  plt.cc.compo <- df.cc.tally %>%
+    ggplot(aes(x = clusters, y = n, fill = phase)) + 
+    geom_bar(position="fill", stat="identity") + 
+    theme_miko(legend = T) + 
+    labs(title = "Cluster Composition by Cell Cycle") + 
+    xlab("Cluster ID") + ylab("Relative Frequency")
+  plt.cc <- cowplot::plot_grid(plt.cc.umap + ggthemes::scale_colour_tableau() + theme(text = element_text(size = 15)),
+  plt.cc.compo + ggthemes::scale_fill_tableau() + theme(text = element_text(size = 15)), nrow = 1, labels = c("F", "G"))
+    # plt.cc <- cowplot::plot_grid(plt.cc.umap + theme_miko(color.palette = "flatly2", legend = T), 
+                               # plt.cc.compo + theme_miko(fill.palette = "flatly2", legend = T), nrow = 1, labels = c("F", "G"))
+} 
+
+
+if (parameter.list$print.inline) {
+  print(plt.cc)
+}
+
+```
+```{r c21 - variable gene list}
+
+if (normalization_method_ps == "SCT"){
+  df.var.meta <- so@assays[["SCT"]]@meta.features
+  df.var.model <- so@assays[["SCT"]]@SCTModel.list[["model1"]]@feature.attributes
+  var.gene <- so@assays[["SCT"]]@var.features
+  
+  if (is.null(df.var.meta$ENSEMBLE) & is.null(df.var.meta$SYMBOL)){
+    df.var.model$GENE <- rownames(df.var.meta)
+    df.var.meta <- df.var.model %>% dplyr::filter(GENE %in% var.gene)
+  } else {
+    df.var.model$ENSEMBLE <- df.var.meta$ENSEMBLE
+    df.var.model$SYMBOL <- df.var.meta$SYMBOL   
+    df.var.meta <- df.var.model %>% dplyr::filter(SYMBOL %in% var.gene)
+  }
+  
+  so@assays[["SCT"]]@SCTModel.list[["model1"]]@feature.attributes <- df.var.model
+  df.var.meta <- df.var.meta %>% dplyr::arrange(-residual_variance)
+  
+  which.round <- colnames(df.var.meta)[ !(colnames(df.var.meta) %in% c("ENSEMBLE", "SYMBOL", "genes_log_gmean_step1", "step1_theta", "step1_(intercept)", "step1_log_umi"))]
+  try({df.var.meta[which.round] <- signif(df.var.meta[which.round], 3)}, silent = T)
+} else {
+  df.var.meta <- NULL
+  try({
+   df.var.meta <- so@assays[[nassay]]@meta.features
+  df.var.meta <- df.var.meta %>% dplyr::filter(SYMBOL %in%  so@assays[[nassay]]@var.features)   
+  })
+
+}
+
+```
+
+```{r variable gene plot}
+
+# plot variable genes
+
+plt.variable_genes <- variableGenes.Plot(so, gNames.list, set_name = parameter.list$set_names, 
+                                         pt.color = c('#2C3E50', '#F39C12'))
+
+plt.variable_genes <- cowplot::plot_grid(plt.variable_genes + 
+  labs(title = "Variably-Expressed Genes") + 
+  theme_miko(legend = T) + 
+  theme(legend.position = "bottom") + theme(text = element_text(size = 15)))
+
+if (parameter.list$print.inline) {
+  print(plt.variable_genes)
+}
+
+```
+
+
+```{r c23 - summary statistics, warning = FALSE}
+
+meta.data <- names(so@meta.data)
+
+# get subgroup names
+quantifier.stem <- c("Count", "Feature", "percent.mt")
+which.quant <- grepl(paste(quantifier.stem, collapse = "|"), meta.data)
+quant.names <- meta.data[which.quant]
+meta.names <- meta.data[!which.quant]
+
+df.meta <- so@meta.data
+
+quant.names2 <- colnames(df.meta)[unlist(lapply(df.meta, is.numeric))]
+if (length(quant.names2) > 0){
+  meta.names <- meta.names[!(meta.names %in% quant.names2)]
+}
+
+summary.list <- list()
+
+for (i in 1:length(meta.names)){
+  
+  current.meta.name <- meta.names[i]
+  if (current.meta.name %in% c("unmatched.rate", "S.Score", "G2M.Score")) next
+  
+  df.meta.summary <- NULL
+  
+  df.meta.summary <- df.meta %>%
+    group_by(get(meta.names[i])) %>%
+    dplyr::summarise(n.nuclei =n(),
+              UMI.mean = round(mean(nCount_RNA)),
+              UMI.median =  round(median(nCount_RNA)),
+              UMI.min = min(nCount_RNA),
+              UMI.max = max(nCount_RNA),
+              genes.mean =  round(mean(nFeature_RNA)),
+              genes.median =  round(median(nFeature_RNA)),
+              genes.min = min(nFeature_RNA),
+              genes.max = max(nFeature_RNA),
+              mito.mean =  signif(mean(percent.mt),3) ,
+              mito.median =  signif(median(percent.mt),3) ,
+              mito.min =  signif(min(percent.mt),3) ,
+              mito.max =  signif(max(percent.mt),3))
+  
+  
+  if (nrow(df.meta.summary) > ncol(so)/2) next
+  
+  colnames(df.meta.summary)[1] <- meta.names[i]
+  
+  if (dim(df.meta.summary)[1] == 1){
+    df.meta.summary <- data.frame(t(df.meta.summary)[2:dim(df.meta.summary)[2], ])
+    colnames(df.meta.summary)[1] <- meta.names[i]
+  } else {
+    df.meta.summary <- as.data.frame(t(df.meta.summary))
+    new.col.name <- as.matrix(df.meta.summary[1,])
+    df.meta.summary <- as.data.frame(df.meta.summary[2:nrow(df.meta.summary),])
+    colnames(df.meta.summary) <- new.col.name
+  }
+  
+  try({
+    summary.list[[meta.names[i]]] <- df.meta.summary
+  }, silent = T)
+  
+}
+
+```
+```{r central log}
+
+# update central log
+run.id <- NULL
+
+if (do.dev){
+  
+  if (!exists("user")) user <- "guest"
+  
+  clog.update.success <- F
+  if (parameter.list$update.log){
+    try({
+      run.id <-  updateCentralLog(Module = "M01", input.data = which.data,
+                                  input.subset = which.strata, pdf.flag = parameter.list$save.pdf)
+      clog.update.success <-  T
+    }, silent = F)
+  }
+  
+  if (is.null(run.id))  {
+    warning("Central log update was unsuccessful :(\n")
+    run.id <- paste("M01_", user, "_", gsub(":| ", "", paste0(format(Sys.time(), '%d_%m_%X'))), sep = "", collapse = "")
+  }
+  
+  
+} else {
+  run.id <- paste("output_", gsub(":| ", "", paste0(format(Sys.time(), '%X'))), sep = "", collapse = "")
+  # %d_%m_
+}
+
+```
+
+
+
+```{r analysis log}
+
+# Normalization Method #
+if (normalization_method_ps == "NFS"){
+  norm_method <- "normalize, find features, scale"
+} else if (normalization_method_ps == "SCT"){
+  norm_method <- "SCT"
+}
+df.log <- addLogEntry("Normalization Method", norm_method, df.log, "norm_method")
+df.log <- addLogEntry("PCA Method", parameter.list$pca.method, df.log, "pca.method")
+df.log <- addLogEntry("Principal Components Included", nDim, df.log, "nDim")
+df.log <- addLogEntry("Unmatched rate upper limit", unmatch.high, df.log, "unmatch.high")
+df.log <- addLogEntry("Unmatched rate lower limit", unmatch.low, df.log, "unmatch.low")
+df.log <- addLogEntry("nPCA components used", nDim, df.log, "nDim")
+
+end.time <- proc.time()
+elapsed.time <- round((end.time - start.time)[[3]], 2)
+df.log <- addLogEntry("Run Time (s)", elapsed.time, df.log, "elapsed.time")
+df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
+
+
+if (do.dev){
+df.log <- addLogEntry("User", user, df.log, "user")
+df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
+}
+
+
+```
+
+```{r output path and save results}
+
+# output path
+if (!exists("data.path")) data.path = ""
+output.path <- paste0(data.path, "Module_Outputs/", paste0(run.id,"_",format(Sys.time(), '%d%m%y'), "/"))
+
+# create output directories
+if (parameter.list$save.pdf) {
+  dir.create(output.path)
+  dir.create(paste0(output.path, "Tables/"))
+  dir.create(paste0(output.path, "PDF/"))
+}
+
+parameter.list$output.object.file <- paste0(run.id, "_", parameter.list$output.object.file)
+
+df.log <- addLogEntry("Scaling method", parameter.list$scale.method, df.log, "scale.method")
+df.log <- addLogEntry("Output Saved", as.character(parameter.list$save.flag), df.log, "save.flag")
+
+# save results to Preprocessed_Datasets/
+output.object.file <- paste0(data.path, parameter.list$output.object.directory , parameter.list$output.object.file)
+
+try({
+  df.log <- addLogEntry("Output Results (.Rdata)", as.character(parameter.list$output.object.file), df.log, "output.object.file")
+  df.log <- addLogEntry("Output Directory", as.character(parameter.list$output.object.directory), df.log, "output.object.directory")
+}, silent = T)
+
+df.log_Module_1 <- df.log
+if ((parameter.list$save.flag == TRUE) ){
+  
+  save(so, gNames.list, df.log_Module_1, file = output.object.file)
+}
+
+
+```
+
+
+
+QC Overview
+===================================== 
+
+Sidebar {.sidebar }
+-------------------------------------
+
+For details on the **Quality Control & Preprocessing** scPipeline module, see [documentation](https://nmikolajewicz.github.io/scMiko/articles/scPipeline_module_overview.html#module-1-quality-control-qc-preprocessing-1).\
+
+---
+
+**Description**: scRNA-seq preprocessing and quality check (QC)\
+
+---
+
+**Figure Legends**:\
+**A|** Distribution of gene counts, transcript counts, and mitochondrial percentage per cell.\
+**B|** Relationship between QC measures. *Color* scale represents cell density.\
+**C|** Distribution of mitochondial percentage per cell, stratified by samples ID.\
+**D|** Number of cells pre- and post- filtering step. Percentage of omitted cells are indicated.\
+**E|** Relationship between pre and post-normalized transcript and gene counts.\
+**F|** Distribution of pre and post-normalized transcript counts.\
+**G|** Distribution of pre and post-normalized gene counts.\
+**H|** Variable gene plot.\
+
+**Notes**:\
+*For A-C*, all cells are shown (i.e., pre-filtering step)\
+*For E-H*, subset of filtered cells are shown (i.e., post-filtering step)\
+
+---
+
+**Definitions**:\
+**nFeature**: Number of genes.\
+**nCount**: Number of transcripts.\
+**percent.mt**: Percentage of mitochondrial transcripts.\
+**Barcode**: Sample identifier.\
+
+---
+
+Row 
+-----------------------------------------------------------------------
+
+### A| QC distributions
+
+```{r plt.QC_violin, fig.height= 5, fig.width = 10}
+
+print(plt.QC_violin)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M01_QC_violin.pdf"), plot.handle = plt.QC_violin, fig.width = 10, fig.height = 5, save.flag = parameter.list$save.pdf)
+
+```
+
+### B| Pairwise QC relationships
+
+```{r plt.QC_scatter, fig.height= 5, fig.width = 12}
+print(plt.QC_scatter)
+savePDF(file.name = paste0(output.path, "PDF/", "M01_QC_scatter.pdf"), plot.handle = plt.QC_scatter, fig.width = 12, fig.height = 5, save.flag = parameter.list$save.pdf)
+
+```
+
+### C| Mitochondrial content distribution 
+
+```{r mt.mito_by_bc}
+
+plt.mito_by_bc <- plt.mito_by_bc + 
+  theme_miko(legend = T, color.luminescence = 50) + 
+  labs(color = "Barcode") + 
+  theme(text = element_text(size = 15))     
+  # theme(legend.title = element_text(size=15), legend.text = element_text(size=12))
+print(plt.mito_by_bc) 
+savePDF(file.name = paste0(output.path, "PDF/", "M01_mito_by_bc.pdf"), 
+        plot.handle = plt.mito_by_bc + theme_miko(legend = T), fig.width = 8, fig.height = 5, save.flag = parameter.list$save.pdf)
+
+```
+
+### D| Cells Recovered: Pre- and Post-Filtering
+
+```{r plt.filter_pre_post}
+
+plt.filter_pre_post <- plt.filter_pre_post + theme_miko(legend = T) + labs(fill = "Filter", x = NULL) + 
+  theme(text = element_text(size = 15))  
+print(plt.filter_pre_post)
+savePDF(file.name = paste0(output.path, "PDF/", "M01_filter_pre_post.pdf"), plot.handle = plt.filter_pre_post + theme_miko(legend = T), 
+        fig.width = 5, fig.height = 5, save.flag = parameter.list$save.pdf)
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### E| Pre- vs Post-Normalization Statistics
+
+```{r plt.pre_post_norm}
+
+print(plt.pre_post_norm) 
+savePDF(file.name = paste0(output.path, "PDF/", "M01_pre_post_norm.pdf"), plot.handle = plt.pre_post_norm, 
+        fig.width = 5, fig.height = 5, save.flag = parameter.list$save.pdf)
+```
+
+### F| Transcripts per cell
+
+```{r plt.UMI_per_cell}
+print(plt.UMI_per_cell + theme_miko(legend = T)   + 
+  theme(text = element_text(size = 15)) + labs(fill = NULL) + theme(legend.position = "bottom") )
+savePDF(file.name = paste0(output.path, "PDF/", "M01_transcripts_per_cell.pdf"), plot.handle = plt.UMI_per_cell + theme_miko(legend = T), 
+        fig.width = 5, fig.height = 5, save.flag = parameter.list$save.pdf)
+```
+
+### G| Genes per cell
+
+```{r plt.genes_per_cell}
+print(plt.genes_per_cell + theme_miko(legend = T)  + 
+  theme(text = element_text(size = 15)) + labs(fill = NULL) + theme(legend.position = "bottom")  )
+savePDF(file.name = paste0(output.path, "PDF/", "M01_genes_per_cell.pdf"), plot.handle = plt.genes_per_cell + theme_miko(legend = T), 
+        fig.width = 5, fig.height = 5, save.flag = parameter.list$save.pdf)
+```
+
+
+### H| Variable gene plot
+
+```{r plt.variable_genes}
+
+print(plt.variable_genes)
+savePDF(file.name = paste0(output.path, "PDF/", "M01_variable_genes.pdf"), plot.handle = plt.variable_genes, 
+        fig.width = 5, fig.height = 5, save.flag = parameter.list$save.pdf)
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Cells Recovered
+```{r valuebox1}
+valueBox(ncol(so))
+```
+
+### Genes per Cell (Median)
+```{r valuebox2}
+valueBox(round(median(so$nFeature_RNA)))
+```
+
+### Transcripts per Cell (Median)
+```{r valuebox3}
+valueBox(round(median(so$nCount_RNA)))
+```
+
+Filter and PCA Summary
+===================================== 
+
+Sidebar {.sidebar }
+-------------------------------------
+
+---
+
+**Description**: QC rank plots and filtering cutoffs, along with PCA summary. 
+
+---
+
+**Figure Legends**:\
+**A|** Transcript vs. gene count relationship.\
+**B|** Transcript count per cell ranking.\
+**C|** Gene count per cell ranking.\
+**D|** Mitochondrial content per cell ranking.\
+**E|** Venn diagram of filtered cells, grouped by filtering criteria.\
+**F|** PCA scree plot showing proportion of variance explained by each principal component.\
+**G|** Cumulative variance explained by principal components.\
+**H|** Artifact gene detection ([Lause et al. (2021). *Genome Biology*](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-021-02451-7))
+
+---
+
+**Definitions**:\
+**PCA**: Principal component analysis.\
+
+---
+
+Row {.tabset}
+-------------------------------------
+
+### Filtering Statistics
+
+```{r plt QC ranks mT, fig.width = 15, fig.height = 8}
+plt.QC.stat <-  cowplot::plot_grid(cowplot::plot_grid(
+  plt.gene.umi.mito + theme(text = element_text(size = 15)) + labs(title = NULL) ,  
+  plt.umi.rank.mito + theme(text = element_text(size = 15)) + labs(title = NULL), 
+  plt.gene.rank.mito + theme(text = element_text(size = 15)) + labs(title = NULL) ,  
+  plt.mt.rank.mito + theme(text = element_text(size = 15)) + labs(title = NULL, y = "Mito. Content (%/cell"), 
+  ncol = 2, labels = c("A", "B", "C", "D"), align = "h"), plt.filter.venn, labels = c("", "E")) 
+
+print(plt.QC.stat)
+
+savePDF(file.name = paste0(output.path, "PDF/", "M01_filtering_statistics.pdf"), 
+        plot.handle =  plt.QC.stat, 
+        fig.width = 15, fig.height = 8, save.flag = parameter.list$save.pdf)
+
+```
+
+
+
+### PCA Scree Plots
+
+```{r plt.PCA, fig.width=10, fig.height = 4}
+
+cowplot::plot_grid(plt.scree1 + theme(text = element_text(size = 15)) + labs(y = "Variance Explained", x = "Principal Components", title = NULL), 
+                   plt.scree2 + theme(text = element_text(size = 15)) + labs(y = "Cumulative Variance Explained", x = "Principal Components", title = NULL), ncol=2, labels=  c("F", "G"))
+
+savePDF(file.name = paste0(output.path, "PDF/", "M01_scree.pdf"), plot.handle =  cowplot::plot_grid(plt.scree1, plt.scree2, ncol=2), 
+        fig.width = 8, fig.height = 4, save.flag = parameter.list$save.pdf)
+
+```
+
+```{r artefact gene outpuers}
+
+try({
+  savePDF(file.name = paste0(output.path, "PDF/", "M01_artifact_genes.pdf"), plot.handle =  plt.ag,
+          fig.height=7, fig.width=8, save.flag = parameter.list$save.pdf)
+}, silent =T)
+
+
+a1 <- knitr::knit_expand(text = sprintf("### %s\n", "Artifact Genes"))  # tab header
+a2 <- knitr::knit_expand(text = sprintf("\n```{r %s, message=FALSE, warning=FALSE,  fig.height=7, fig.width=8}", 
+                                        paste("artifact gene plot", 1, sep = "")))
+a3 <- knitr::knit_expand(text = sprintf("\n %s", "print(plt.ag)"))
+a4 <- knitr::knit_expand(text = "\n```\n") # end r chunk
+a1.chunk <- paste(a1, a2, a3, a4, collapse = '\n') 
+
+```
+
+`r if (!is.null(plt.ag)){paste(knitr::knit(text = paste(a1.chunk, collapse = '\n')))}`
+
+UMAP
+===================================== 
+
+Sidebar {.sidebar }
+-------------------------------------
+
+---
+
+**Description**: Uniform Manifold Approximation and Projection (UMAP) plots with overlaid cluster, sample, QC and cell cycle information. 
+
+---
+
+**Figure Legends**:\
+**A|** Cell cluster UMAP.\
+**B|** Sample UMAP.\
+**C|** Transcript count (n/cell) UMAP.\
+**D|** Gene count (n/cell) UMAP.\
+**E|** Mitochondrial content (%/cell) UMAP.\
+**F|** Cell cycle state UMAP.\
+**G|** Barplot of Relative abundances of cells in each cell cycle state, stratified by cell cluster.\
+
+---
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Cell Clusters
+
+```{r, fig.width=12, fig.height=5}
+print(plt.umap.combo)
+  savePDF(file.name =paste0(output.path, "PDF/", "M01_umap.pdf"), plot.handle =  plt.umap.combo, 
+          fig.width = 12, fig.height = 5, save.flag = parameter.list$save.pdf)
+  
+```
+
+
+
+### QC Statistics
+
+
+```{r UMAP QC plots, fig.width=17, fig.height=6}
+
+plt.umap.qc
+
+savePDF(file.name = paste0(output.path, "PDF/", "M01_QC_umap.pdf"), plot.handle =  plt.umap.qc, 
+        fig.width = 20, fig.height = 6, save.flag = parameter.list$save.pdf)
+
+
+```
+
+### Cell Cycle
+
+
+```{r plot cc plot, fig.width=12, fig.height=5}
+
+try({
+  print(plt.cc)
+  savePDF(file.name = paste0(output.path, "PDF/", "M01_cell_cycle.pdf"), plot.handle =  plt.cc, 
+        fig.width = 14, fig.height = 4, save.flag = parameter.list$save.pdf)
+  
+}, silent = T)
+
+```
+
+
+QC Tables
+===================================== 
+
+Sidebar {.sidebar }
+-------------------------------------
+
+---
+
+**Description**: QC statistics stratified by factors of potential interest, including cell cluster and cell cycle. 
+
+---
+
+**Definitions**:\
+**n.nuclei**: number of nuclei/cells\
+**UMI.mean**: mean transcript count (n/cell)\
+**UMI.median**: median transcript count (n/cell)\
+**UMI.min**: minimum transcript count (n/cell)\
+**UMI.max**: maximum transcript count (n/cell)\
+**gene.mean**: mean gene count (n/cell)\
+**gene.median**: median gene count (n/cell)\
+**gene.min**: minimum gene count (n/cell)\
+**gene.max**: maximum gene count (n/cell)\
+**mito.mean**: mean mitochondrial content (%/cell)\
+**mito.median**: median mitochondrial content (%/cell)\
+**mito.min**: minimum mitochondrial content (%/cell)\
+**mito.max**: maximum mitochondrial content (%/cell)\
+
+---
+
+Row {.tabset}
+-------------------------------------
+
+
+```{r summary statistis,  echo = FALSE, eval = TRUE, message=FALSE, warning=FALSE}
+
+out <- flex.multiTabTables(summary.list, "summary.list")
+
+```
+
+`r paste(knitr::knit(text = paste(out, collapse = '\n')))`
+
+
+Variable Genes Table
+===================================== 
+
+Sidebar {.sidebar }
+-------------------------------------
+
+---
+
+**Description**: Results from SCtransform workflow. In brief, variance stabilizing transformation to UMI count data was applied using regularized Negative Binomial regression model to remove unwanted effects from UMI data. See Seurat::sctransform() for details. \
+
+---
+
+**Definitions**:\
+gmean: geometric mean\
+variance: expression variance\
+genes_log_gmean_step1: log-geometric mean of genes used in initial step of parameter estimation\
+
+---
+
+**Citation**:\
+Hafemeister, C. & Satija, R. Normalization and variance stabilization of single-cell RNA-seq data using regularized negative binomial regression. Genome Biol 20, 296 (December 23, 2019). https://doi.org/10.1186/s13059-019-1874-1
+
+---
+
+Row 
+-------------------------------------
+
+```{r var table list}
+
+if (!is.null(df.var.meta)){
+  
+  rownames(df.var.meta) <- NULL
+  
+ col.av <-  c( "ENSEMBLE","ENSEMBL",  "SYMBOL", "GENE", "GENES",  "mvp.mean", "mvp.dispersion", "mvp.dispersion.scaled", "mvp.variable", "detection_rate", "gmean", "variance", "residual_mean", "residual_variance", "theta", "(Intercept)", "log_umi", "genes_log_gmean_step1","step1_theta", "step1_(Intercept)", "step1_log_umi")
+ col.av <- col.av[col.av %in% colnames(df.var.meta)]
+  df.var.meta <- df.var.meta[ ,col.av]
+  is.nums <- unlist(lapply(df.var.meta, is.numeric))  
+  for (i in 1:length(is.nums)){
+    if (is.nums[i]){
+      df.var.meta[ ,names(is.nums)[i]] <- signif( df.var.meta[ ,names(is.nums)[i]], 3)
+    }
+  }
+  
+  flex.asDT(df.var.meta)
+}
+
+
+colnames(df.var.meta)
+
+```
+
+
+```{r save variable gene table}
+if (!is.null(df.var.meta)){
+  if (parameter.list$save.pdf){
+  write.csv(df.var.meta, file = paste0(output.path, "Tables/", "variableGenes.csv"), 
+    row.names = F)
+  }
+}
+```
+
+Log (M1)
+===================================== 
+
+```{r}
+knitr::kable(df.log_Module_1)
+
+```
+
+```{r save analysis log as csv}
+
+try({
+  if (do.dev){
+    write.csv(df.log_Module_1, file = paste0(output.path, "Tables/", "analysisLog.csv"), 
+              row.names = F)      
+  }
+}, silent = T)
+
+```
+
+
+System Info
+=====================================
+
+```{r}
+
+pander::pander(sessionInfo())
+
+```
