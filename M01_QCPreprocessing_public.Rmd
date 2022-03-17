@@ -387,7 +387,12 @@ for (i in 1:length(input_data)){
   # unlist outputs
   so.list[[i]] <- output.list[[1]]
   
-  gNames.list.list[[i]] <- output.list[[2]]
+  if ("gnames" %in% names(output.list)){
+    gNames.list.list[[i]] <- output.list[[2]]
+  } else {
+    gNames.list.list[[i]] <- prepGeneList(so = so.list[[i]], NULL)
+  }
+  
   if ((unique(so.list[[i]]@meta.data[["Barcode"]]) == "unspecified") ){
     so.list[[i]]@meta.data[["Barcode"]] <- paste("T", i, sep = "")
   } else if (is.na(unique(so.list[[i]]@meta.data[["Barcode"]]))){
