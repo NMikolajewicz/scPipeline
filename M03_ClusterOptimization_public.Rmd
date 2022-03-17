@@ -50,13 +50,14 @@ invisible(lapply(packages2load, library, character.only = TRUE))
 
 ```{r parameter specification}
 
+# TODO handle configurations with one cluster
+
 parameter.list <- list(
-  input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Preprocessed_Datasets/output_33016PM_demo_ps_10000cell.Rdata",
-  cluster.resolution = c(0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3),
-  lfc.threshold = 0.5,            
+  input.file = "output_34245PM_demo_zeisel_10000cell.Rdata",
+  cluster.resolution = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3),
+  lfc.threshold = 0.25,            
   fdr.threshold = 0.05,
   group.singletons = F,                
-  print.inline = FALSE, 
   subsample_factor = 1,
   subsample_n = 10000,
   n.workers =list(  
@@ -64,6 +65,7 @@ parameter.list <- list(
     deg = 4       
   ),
   only.pos = T, 
+  print.inline = F, 
   save.pdf = F, 
   update.log = F,
   rprofile.dir = F,
@@ -390,7 +392,6 @@ query_markers.list <- list()
 
 # store current identities
 cur_idents <- Idents(object)
-# so.markers <- so.query
 
 # assay for DEG
  deg_assay <- c("RNA", "SCT")[which(c("RNA", "SCT") %in% names(object@assays)) ]
@@ -727,109 +728,6 @@ if (parameter.list$print.inline){
 }
 
 ```
-```{r}
-# 
-# object = so.query; groups = cluster.name; assay_pattern = assay.pattern; verbose = T
-# assay <- NULL
-# 
-#   if (is.null(assay_pattern) & is.null(assay)){
-#     assay_pattern <- paste0(DefaultAssay(object), "_snn_res.")
-#   } else if (is.null(assay_pattern) & !is.null(assay)){
-#     assay_pattern <- paste0(assay, "_snn_res.")
-#   }
-# 
-#   sil.plot <- list()
-#   df.umap <- getUMAP(object)[["df.umap"]]
-#   umap.dist <- dist(x = (df.umap[,c("x", "y")]), method = "euclidean", diag = FALSE, upper = FALSE, p = 2)
-# 
-#   miko_message("Generating silhouette plots...", verbose = verbose)
-#   mean.silw <- c()
-#   suppressWarnings({
-#     suppressMessages({
-# 
-#       for (i in 1:length(groups)){
-#         set.name <- groups[i]
-#         sil.plot.success <- F
-#         try({
-# 
-#           clust.mem <- as.numeric(as.character(object@meta.data[,set.name] ))
-#           if (sum(is.na(clust.mem)) > 0){
-#             which.av <- which(!is.na(clust.mem))
-#             clust.mem <- clust.mem[which.av]
-#             umap.dist.av <- dist(x = (df.umap[which.av,c("x", "y")]), method = "euclidean", diag = FALSE, upper = FALSE, p = 2)
-# 
-#             sil <- cluster::silhouette(
-#               x = clust.mem,
-#               dist = umap.dist.av)
-#           } else {
-#             sil <- cluster::silhouette(
-#               x = clust.mem,
-#               dist = umap.dist)
-#           }
-# 
-# 
-#           sil.plot[[ set.name]] <- factoextra::fviz_silhouette(sil, print.summary = F)
-# 
-#           gtitle <-  sil.plot[[set.name]][["labels"]][["title"]]
-#           mean.silw[i] <- as.numeric(gsub("Clusters silhouette plot \nAverage silhouette width: ", "", gtitle))
-#           gtitle <- gsub("Clusters silhouette plot", paste("resolution: ", set.name, sep = ""), gtitle)
-# 
-#           sil.plot[[set.name]] <- sil.plot[[set.name]] + ggtitle(gtitle)
-#           sil.plot.success <- T
-#         }, silent = T)
-#       }
-# 
-#     })
-#   })
-# 
-#   # cluster.name
-# 
-#   miko_message("Calculating silhouette widths...", verbose = verbose)
-#   df.silw <- NULL
-#   for (i in 1:length(sil.plot)){
-#     set.name <- names(sil.plot)[i]
-# 
-#     if (is.null(set.name)) next
-#     clust.id <- as.numeric(gsub(assay_pattern, "", set.name))
-#     df.silw <- bind_rows(df.silw, data.frame(
-#       cluster.resolution = as.character(clust.id),
-#       sil.width = sil.plot[[set.name]][["data"]][["sil_width"]]
-#     ))
-#   }
-# 
-#   miko_message("Summarizing results...", verbose = verbose)
-#   if (!is.null(df.silw)){
-# 
-#     df.silw.sum <- df.silw %>%
-#       dplyr::group_by(cluster.resolution) %>%
-#       dplyr::summarize(sil.mean = mean(sil.width, na.rm = T), .groups = 'drop')
-#     plt.silw.dep <- df.silw.sum %>%
-#       ggplot(aes(x = as.numeric(cluster.resolution), y = sil.mean)) +
-#       geom_point(size = 3) + geom_line() +
-#       theme_miko() +
-#       labs(x = "Resolution", y = "Silhouette Width", title = "Silhouette Width") +
-#       theme(panel.grid.minor = element_line(colour="grey95", size=0.1),
-#             panel.grid.major = element_line(colour="grey85", size=0.1),
-#             panel.grid.minor.y = element_blank(),
-#             panel.grid.major.y = element_blank()) +
-#       scale_x_continuous(minor_breaks = seq(0 , max(df.silw$cluster.resolution, na.rm = T), 0.1) ,
-#                          breaks = seq(0, max(df.silw$cluster.resolution, na.rm = T), 0.2))
-# 
-# 
-#   }
-# 
-# 
-#   return(
-#     list(
-#       silhouette_plots = sil.plot,
-#       resolution_plot = plt.silw.dep,
-#       silhouette_raw = df.silw,
-#       silhouette_summary = df.silw.sum
-#     )
-#   )
-#   
-```
-
 
 ```{r res vs n clust curve}
 
