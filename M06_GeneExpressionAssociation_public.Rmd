@@ -36,10 +36,7 @@ invisible({gc()})
 start.time <- proc.time()
 
 # load packages
-packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", "grid", "plotly",
-                   "DT", "flexdashboard", "ggpmisc", "future", "foreach", "doParallel",
-                   "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "ggplot2", "reactome.db",
-                   "schex", "RColorBrewer", "cowplot", "viridis", "viridisLite", "presto", "variancePartition", "lme4", "ggdendro")
+packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", "grid", "plotly","DT", "flexdashboard", "ggpmisc", "future", "foreach", "doParallel","AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "ggplot2", "reactome.db","schex", "RColorBrewer", "cowplot", "viridis", "viridisLite", "presto", "variancePartition", "lme4", "ggdendro")
 
 # load packages
 invisible(lapply(packages2load, library, character.only = T, quietly = T))
@@ -51,19 +48,19 @@ invisible(lapply(packages2load, library, character.only = T, quietly = T))
 
 # PARAMETER SPECIFICATION ######################################################
 parameter.list <- list(
-  input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Preprocessed_Datasets/output_33016PM_demo_ps_10000cell.Rdata",
+  input.file = "output_34245PM_demo_zeisel_10000cell.Rdata",
   features = NULL,
-  feature.format = 2, # 0 user-provided, 1 M06_features.csv, 2 discovery
-  feature.csv.path = "M06_features.csv", # csv spreadsheet containing features, called by column name. Required if feature.format = 1 
-  discovery.method = "Wilcoxon", # options: Wilcoxon, CDI, Gini
-  discovery.pct.min = 0.05, # minimum expression fraction per group. 
+  feature.format = 2,                             # 0 user-provided, 1 M06_features.csv, 2 discovery
+  feature.csv.path = NULL,                        # csv spreadsheet with features, called by column name. Required if feature.format = 1 
+  discovery.method = "Wilcoxon",                  # options: Wilcoxon, CDI, Gini
+  discovery.pct.min = 0.05,                       # minimum expression fraction per group. 
   discovery.group.by = "seurat_clusters", 
   discovery.top.n = 10,
   discovery.max.n = 40,
   as.module = F,
   
   # Correlation parameters #####################################################
-  cor.method = "cdi",                # Options: 'pearson', 'spearman', 'rho_p', 'cdi'
+  cor.method = "cdi",                # Options: 'cdi', 'spearman', 'pearson', 'rho_p'
   cor.top.n = 100,
   cor.which.data = "data",
   cor.min.expr = 0.05,               # min expressing fraction to be included in correlation
