@@ -260,32 +260,32 @@ df.all_barcodes <- df.bar_codes %>%
 
 u_barcodes <- unique(df.all_barcodes$barcode_labels)
 
-if (length(u_barcodes) > 1) {
-  
-  # convert long to wide (cell type table)
-  df_for_wide_barcodes <- df.all_barcodes
-  colnames(df_for_wide_barcodes)[colnames(df_for_wide_barcodes) == "barcode_labels"] <- "predicted_labels"
-  df.all_barcodes_wide <- long2wide(df_for_wide_barcodes)
-  
-  # plot cluster compositio by barcode
-  df.cluster_annotations_barcodes <- df.all_barcodes
-  colnames(df.cluster_annotations_barcodes)[colnames(df.cluster_annotations_barcodes) == "barcode_labels"] <- "predicted_labels"
-  
-  plt.cluster_composition_barcodes <- plot.cluster_composition_alt(df.cluster_annotations_barcodes, 
-                                                                   other_threshold = 0)
-  if (length(u_barcodes) < 13){
-    plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes + ggthemes::scale_fill_ptol("Barcode") 
-  }
-  plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes  + 
-    theme_miko(legend = T) + 
-    labs(title = "Cluster Composition", subtitle = "Stratified by Barcodes")
-} else {
+# if (length(u_barcodes) > 1) {
+#   
+#   # convert long to wide (cell type table)
+#   df_for_wide_barcodes <- df.all_barcodes
+#   colnames(df_for_wide_barcodes)[colnames(df_for_wide_barcodes) == "barcode_labels"] <- "predicted_labels"
+#   df.all_barcodes_wide <- long2wide(df_for_wide_barcodes)
+#   
+#   # plot cluster compositio by barcode
+#   df.cluster_annotations_barcodes <- df.all_barcodes
+#   colnames(df.cluster_annotations_barcodes)[colnames(df.cluster_annotations_barcodes) == "barcode_labels"] <- "predicted_labels"
+#   
+#   plt.cluster_composition_barcodes <- plot.cluster_composition_alt(df.cluster_annotations_barcodes, 
+#                                                                    other_threshold = 0)
+#   if (length(u_barcodes) < 13){
+#     plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes + ggthemes::scale_fill_ptol("Barcode") 
+#   }
+#   plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes  + 
+#     theme_miko(legend = T) + 
+#     labs(title = "Cluster Composition", subtitle = "Stratified by Barcodes")
+# } else {
   df_for_wide_barcodes <- data.frame()
   df.all_barcodes_wide <- data.frame()
   df.cluster_annotations_barcodes <- data.frame()
   plt.cluster_composition_barcodes <- c()
   
-}
+# }
 
 ```
 
@@ -391,14 +391,7 @@ try({
   my.breaks <- seq((-1*scale.lim), scale.lim, by = 0.01)
 
   df.s4plt <- df.s4plt[!(apply(df.s4plt, 1, function(x) all(is.na(x)))), ]
-  
-  # plt.heat.scaled <- pheatmap::pheatmap(df.s4plt,
-  #                                       breaks = my.breaks,
-  #                                       color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdBu")))(length(my.breaks)),
-  #                                       show_rownames = F,
-  #                                       main = "Scaled Expression\nx=cluster, y=gene, z=scaled expression", silent = T)
-    # plt.heat.scaled <- ggplotify::as.ggplot(plt.heat.scaled)
-  
+
       plt.heat.scaled <-  heatmaply::heatmaply(x = df.s4plt,
                                                      main = "Variable Feature Expression",
                                                      key.title = "Average\nScaled\nExpression", 
@@ -432,7 +425,7 @@ ns.res <- nullScore(object = so.query, assay = DefaultAssay(so.query), n.replica
 
 # Step 2: Miko scores
 miko_message("Step 2: Miko score calculation...")
-so.query <- mikoScore(object = so.query, geneset = gene.list, nbin = 24, 
+so.query <- mikoScore(object = so.query, geneset = gene.list, nbin = 24, do.center = parameter.list$do.center,
                             nullscore = ns.res, assay = DefaultAssay(so.query), nworkers = parameter.list$n.workers)
 
 # Step 3: Significance assignment
