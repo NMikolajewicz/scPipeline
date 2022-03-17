@@ -174,7 +174,7 @@ if ("filter.parameters" %in% names(parameter.list)){
 
 ```
 
-```{r analysis log, include = FALSE, }
+```{r analysis log, include = FALSE}
 
 miko_message("Updating analysis log...")
 
@@ -729,7 +729,7 @@ if (parameter.list$developer){
   clog.update.success <- F
   if (parameter.list$update.log){
     try({
-      run.id <-  updateCentralLog(Module = "M05", input.data = input.file, input.subset = NA, pdf.flag = parameter.list$save.pdf)
+      run.id <-  updateCentralLog(Module = "M05", input.data = parameter.list$input.file, input.subset = NA, pdf.flag = parameter.list$save.pdf)
       clog.update.success <-  T
     }, silent = F) 
   }
