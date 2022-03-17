@@ -4,4 +4,4 @@ The [scPipeline](https://github.com/NMikolajewicz/scPipeline) analysis pipeline 
 
 To get started with scPipeline, please refer to our [scMiko](https://nmikolajewicz.github.io/scMiko/) and [scPipeline](https://nmikolajewicz.github.io/scMiko/) tutorials.   
 
-if using scPipeline and scMiko, please consider citing our work: [Mikolajewicz, et al., BioRxiv](...) 
+if using scPipeline and scMiko, please consider citing our work: [Mikolajewicz, et al., BioRxiv](https://www.biorxiv.org/content/10.1101/2022.03.13.484162v1) 
