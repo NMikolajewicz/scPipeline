@@ -68,15 +68,15 @@ parameter.list <- list(
   pca.var.threshold = 0.9, 
   correct.artifact = F,                              # recommended only if similar integrated data have similar cellular composition
   n.workers = list(                                  # number of workers for parallel implementation
-    import = 2,
+    import = 4,
     integration = 1 #(limit to 1 for cluster)
   ),
-  print.inline = FALSE,
+  print.inline = F,
   save.integrated.object = T,
   save.pdf = F,
-  update.log = T,
-  rprofile.dir =T,
-  developer = T
+  update.log = F,
+  rprofile.dir =F,
+  developer = F
 )
 
 
