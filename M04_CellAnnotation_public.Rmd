@@ -38,10 +38,7 @@ invisible({gc()})
 start.time <- proc.time()
 
 # List of packages to load
-packages2load <- c("Seurat", "GSVA", "scMiko", "presto",
-                   "plyr", "dplyr", "tidyr", "reshape2", "preprocessCore", "stringr", "RColorBrewer", "ggplot2", "gridExtra", "GGally", "splines",
-                   "DT", "flexdashboard", "ggpmisc", "ggExtra", "grid", "ggrepel", "future", "gridGraphics", "ggwordcloud", "scales",
-                   "org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "tm", "homologene", "parallel", "doParallel", "foreach", "quantreg")
+packages2load <- c("Seurat", "GSVA", "scMiko", "presto", "plyr", "dplyr", "tidyr", "reshape2", "preprocessCore", "stringr", "RColorBrewer", "ggplot2", "gridExtra", "GGally", "splines","DT", "flexdashboard", "ggpmisc", "ggExtra", "grid", "ggrepel", "future", "gridGraphics", "ggwordcloud", "scales","org.Mm.eg.db", "org.Hs.eg.db", "ddpcr", "tm", "homologene", "parallel", "doParallel", "foreach", "quantreg")
 
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE, quietly = TRUE))
@@ -54,33 +51,33 @@ invisible(lapply(packages2load, library, character.only = TRUE, quietly = TRUE))
 ```{r analysis specifications}
 
 parameter.list <- list(
-  input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Preprocessed_Datasets/output_33016PM_demo_ps_10000cell.Rdata",
+  input.file ="output_34245PM_demo_zeisel_10000cell.Rdata",
   external.markers = NULL,
   internal.markers = "Cell_Catalog",
-  marker.filter = "Cao2019|Cao2020|Zeisel2018|Tyser2021|Manno2021", # filter markers using `grepl` pattern matching. E.g., "Manno2021" for all La Manno 2021 markers. (Cao2019, Cao2020, Manno2021, Zeisel2018, TabulaMuris, TabulaSapiens, Tyser2021, PijuanSala2019)
-  coherence.threshold = 0.8,
+  marker.filter = "Manno2021|Cao2019|Cao2020|TabulaMuris|TabulaSapiens|Tyser2021|PijuanSala2019", 
+  coherence.threshold = 0.8, 
   p.threshold = 0.05,
+  do.center = F,                    # center miko score using null model (not recommended)
   frequent.filter.threshold = 0.75,
-  filter.frequent.fliers = T,
+  filter.frequent.fliers = T,       # T if diverse population, F if homogenous
   min.representation = 0.5,
   cluster.resolution = 0.5, 
   fdr.correction = F, 
   clean.clusters = F,
   max.cells = 20000,
   subsample_factor = 1, 
-  min.geneset.size = 3, 
+  min.geneset.size = 2, 
   max.geneset.size = 200,
-  pathway.db = "Bader", # options: Bader, GO
+  pathway.db = "Bader",             # options: Bader, GO
   n.workers = parallel::detectCores(),
   save.pdf = F,
   show.top.n.gene.panels = 5,
   max.gene.panels.allowed = 70,
-  print.inline = FALSE ,
+  print.inline = F ,
   update.log = F,
   rprofile.dir = F,
   developer = F
 )
-
 
 ```
 
@@ -260,26 +257,6 @@ df.all_barcodes <- df.bar_codes %>%
 
 u_barcodes <- unique(df.all_barcodes$barcode_labels)
 
-# if (length(u_barcodes) > 1) {
-#   
-#   # convert long to wide (cell type table)
-#   df_for_wide_barcodes <- df.all_barcodes
-#   colnames(df_for_wide_barcodes)[colnames(df_for_wide_barcodes) == "barcode_labels"] <- "predicted_labels"
-#   df.all_barcodes_wide <- long2wide(df_for_wide_barcodes)
-#   
-#   # plot cluster compositio by barcode
-#   df.cluster_annotations_barcodes <- df.all_barcodes
-#   colnames(df.cluster_annotations_barcodes)[colnames(df.cluster_annotations_barcodes) == "barcode_labels"] <- "predicted_labels"
-#   
-#   plt.cluster_composition_barcodes <- plot.cluster_composition_alt(df.cluster_annotations_barcodes, 
-#                                                                    other_threshold = 0)
-#   if (length(u_barcodes) < 13){
-#     plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes + ggthemes::scale_fill_ptol("Barcode") 
-#   }
-#   plt.cluster_composition_barcodes <- plt.cluster_composition_barcodes  + 
-#     theme_miko(legend = T) + 
-#     labs(title = "Cluster Composition", subtitle = "Stratified by Barcodes")
-# } else {
   df_for_wide_barcodes <- data.frame()
   df.all_barcodes_wide <- data.frame()
   df.cluster_annotations_barcodes <- data.frame()
@@ -713,10 +690,6 @@ suppressMessages({
         mad.threshold <- 5
         pumap <- score.result$cell_stats %>% 
           dplyr::filter(name == u.sig[i]) %>%
-          # ggplot(aes(x=  reduction.x, y = reduction.y, 
-          #            color = snip(value.rs, verbose = F,
-          #                         lower.cutoff = median(dat$value.rs, na.rm = T) - mad.threshold*mad(dat$value.rs, na.rm = T), 
-          #                         upper.cutoff = median(dat$value.rs, na.rm = T) + mad.threshold*mad(dat$value.rs, na.rm = T)))) + 
           ggplot(aes(x=  reduction.x, y = reduction.y, 
                      color = snip(value, verbose = F,
                                   lower.cutoff = median(dat$value, na.rm = T) - mad.threshold*mad(dat$value, na.rm = T), 
