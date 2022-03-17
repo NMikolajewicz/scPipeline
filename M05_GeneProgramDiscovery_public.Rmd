@@ -38,10 +38,7 @@ invisible({gc()})
 start.time <- proc.time()
 
 # List of packages to load
-packages2load <- c("Seurat", "scMiko", "DT", "scales", "STRINGdb","dplyr", "NNLM", "BiocGenerics", "IRanges", "AnnotationDbi",
-                   "tidyr", "RColorBrewer", "ggplot2", "heatmaply", "htmltools",
-                   "flexdashboard", "future", "BiocParallel",
-                   "parallel", "doParallel", "foreach", "iterators")
+packages2load <- c("Seurat", "scMiko", "DT", "scales", "STRINGdb","dplyr", "NNLM", "BiocGenerics", "IRanges", "AnnotationDbi","tidyr", "RColorBrewer", "ggplot2", "heatmaply", "htmltools","flexdashboard", "future", "BiocParallel","parallel", "doParallel", "foreach", "iterators")
 
 # load packages
 suppressMessages(suppressWarnings(lapply(packages2load, library, character.only = TRUE, quietly = T)))
@@ -55,16 +52,16 @@ suppressMessages(suppressWarnings(lapply(packages2load, library, character.only 
 
 # parameter specification
 parameter.list <- list(
-  input.file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Preprocessed_Datasets/output_34818PM_demo_cao2019_10000cell.Rdata",
-  cluster.resolution = 0.3, #0.5
+   input.file = "output_34245PM_demo_zeisel_10000cell.Rdata",
+  cluster.resolution = 0.3,
   subsample_factor = 1,
   subsample_n = NA,
   subset.data = NA,
   batch.feature = NA, 
-  feature.selection.method = c("deviance"), #options: expr, hvg, deviance 
+  feature.selection.method = c("expr"),        # options: expr, hvg, deviance 
   max.features = 2000, 
   min.pct = 0.5, 
-  data.type = "pearson", #options: pearson (SCTransform), deviance
+  data.type = "pearson",                       # options: pearson (SCTransform), deviance
   purity.optimization.step.size = 0.05,
   filter.parameters =  list(
     include = NULL,
@@ -555,8 +552,6 @@ if (parameter.list$general.ica){
 if (parameter.list$general.nmf){
   df.general.nmf.gene.list <- namedList2wideDF(plt.nmf.gene.all$module.genes)
 }
-
-# plt.snn.gene.all
 
 ```
 
