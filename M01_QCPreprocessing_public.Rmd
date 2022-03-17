@@ -49,15 +49,14 @@ invisible(lapply(packages2load, library, character.only = TRUE, quietly = T))
 parameter.list <- list(
   
   # input parameters
-  input.object = NULL,       
+  input.object = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Preprocessed_Datasets/R6_M02_BC2_allGBM_271020.Rdata",       
   input.cell_ranger = NULL, 
   input.matrix = NULL,
-  # input.matrix = "C:/Users/Owner/Dropbox/PDF Projects - JM/R Packages/scMiko/data/cao2019_count_matrix.rds",
-  
+
   # output parameters
   save.flag = T,              
   output.object.directory = "Preprocessed_Datasets/",
-  output.object.file = "p16_hs_neuron_merged_310122.Rdata",
+  output.object.file = "murine_allGBM_reboot_170322.Rdata",
 
   # analysis parameters
   subsample.n = NA, 
@@ -73,17 +72,17 @@ parameter.list <- list(
   pca.method = "pca",                        # option: pca (recommended), glmpca
   pca.component.select.method = "cum_var",   # options" cum_var, elbow
   pca.var.threshold = 0.9,
-  conserve.memory = F,
+  conserve.memory = T,
   
   # specify species
   species.filter.flag = F,                             
-  species.include = "Mm",
+  species.include = "Mm",                    # required; options: Hs, Mm
 
   # miscillaneous parameters
   nworkers = 1,
   save.pdf = F,
   print.inline = F,
-  developer = T
+  developer = F
 )
 
 
@@ -95,8 +94,8 @@ parameter.list <- list(
 # developer specific input formats
 do.dev <- parameter.list$developer
 if (do.dev){
-  parameter.list$which.data = c("pilot16.Hs_v2") # c("16-O", "17-O")
-  parameter.list$which.strata = "hs_neuron" # NA
+  parameter.list$which.data = c("pilot14.Hs") # c("16-O", "17-O")
+  parameter.list$which.strata = "PR" # NA
   parameter.list$update.log = T
   
   which.data <- parameter.list$which.data  # REQUIRED 
@@ -321,6 +320,7 @@ df.log <- addLogEntry("PCA component selection method",
 
 ```
 
+
 ```{r c6 - load_data}
 
 # Run import function
@@ -335,13 +335,31 @@ stopifnot(length(dir) == length(input_data))
 
 for (i in 1:length(input_data)){
   if (input.type[i] == 0){
-    output.list <-  list(so =  readRDS(file = input_data[i]),
-                         gnames = NULL)
-
-    output.list$so <-  CreateSeuratObject(counts = output.list[["so"]]@assays[["RNA"]]@counts, 
-                                          meta.data =  output.list[["so"]]@meta.data)
-    output.list$so@meta.data$Barcode = "unspecified"
-    output.list$so@meta.data$Species = "unspecified"
+    
+    if (grepl(".rds", input_data[i])){
+      output.list <-  list(so =  readRDS(file = input_data[i]),
+                           gnames = NULL)
+      output.list$so <-  CreateSeuratObject(counts = output.list[["so"]]@assays[["RNA"]]@counts, 
+                                            meta.data =  output.list[["so"]]@meta.data)
+      if (!("Barcode" %in% colnames(output.list$so@meta.data))) output.list$so@meta.data$Barcode = "unspecified"
+      if (!("Species" %in% colnames(output.list$so@meta.data))) output.list$so@meta.data$Species = "unspecified"
+    } else if (grepl(".Rdata", input_data[i])){
+      load(file = input_data[i])
+      if (exists("so")){
+        output.list <- list()
+        output.list$so <-  CreateSeuratObject(counts = so@assays[["RNA"]]@counts, 
+                                              meta.data =  so@meta.data)
+        output.list$gnames = NULL
+        if (!("Barcode" %in% colnames(output.list$so@meta.data))) output.list$so@meta.data$Barcode = "unspecified"
+        if (!("Species" %in% colnames(output.list$so@meta.data))) output.list$so@meta.data$Species = "unspecified"       
+        try({rm(so)}, silent = T); invisible({gc()})
+      } else {
+        stop("If importing seurat object from .Rdata file, seurat object must be named 'so'.")
+      }
+    } else {
+      stop("Input format is not recognized.")
+    }
+    
   } else {
     cur.total_sets <- total_sets[idx.seq + (i-1)]
     
@@ -790,7 +808,6 @@ if (parameter.list$print.inline){
 
 # Run data normalization
 normalization_method_ps <- "SCT" # "NFS" or "SCT"
-
 
 if ("conserve.memory" %in% names(parameter.list) ){
   if (is.logical(parameter.list$conserve.memory)){
