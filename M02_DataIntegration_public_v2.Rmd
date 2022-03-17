@@ -26,8 +26,6 @@ knit: (function(inputFile, encoding) {
   })
 ---
 
-
-
 ```{r setup, include=FALSE}
 
 # clear global enviroment
@@ -48,28 +46,28 @@ invisible({lapply(packages2load, library, character.only = TRUE)})
 
 ```{r}
 # TODO
-# 241021: accomodate RDATA and RDS data 
+# 170322: accomodate RDS data 
 
 ```
 
 ```{r parameter specification}
 
+# parameter specification ######################################################
 parameter.list <- list(
-  save.filename = "p9_14_16_hs_pr_gbm", 
-  integration.feature.select.method = "hvg", #option: hvg (recommended), deviance
-  integration.k.filter =  200, # lower integration.k.filter value (e.g., 50) if there is few cells. Default = 200
-  integration.k.anchor = 10, # strength of alignment (default is 5, 20 suggested for stronger alignment). Default = 5.
-  integration.k.weight = 100, # number of neighbors to consider when weighting anchor. Default = 100.
-  integration.n.genes = 2000,  # number of genes for integration: 1000-3000 recommended
-  integration.method = "rPCA", # options: CCA, rPCA
-  integration.limit.memory = T, # specify whether to limit max memory (set T if local)
-  integration.max.memory = 150, # numeric, in terms of Gb (set to 100 for cluster)
+  save.filename = "integrated_seurat_object", 
+  integration.feature.select.method = "hvg",         # option: hvg (recommended), deviance
+  integration.k.filter =  200,                       # lower integration.k.filter value (e.g., 50) if there is few cells. Default = 200
+  integration.k.anchor = 10,                         # strength of alignment (default is 5, 20 suggested for stronger alignment). Default = 5.
+  integration.k.weight = 100,                        # number of neighbors to consider when weighting anchor. Default = 100.
+  integration.n.genes = 2000,                        # number of genes for integration: 1000-3000 recommended
+  integration.method = "rPCA",                       # options: CCA, rPCA
+  integration.limit.memory = T,                      # specify whether to limit max memory
+  integration.max.memory = 150,                      # numeric, in terms of Gb
   integration.cluster.resolution = 0.35, 
-  # integration.rerun.SCT = F,
   integration.compute.diveristy = T,
   pca.var.threshold = 0.9, 
-  correct.artifact = F, # recommended only if similar integrated data have similar cellular composition
-  n.workers = list(
+  correct.artifact = F,                              # recommended only if similar integrated data have similar cellular composition
+  n.workers = list(                                  # number of workers for parallel implementation
     import = 2,
     integration = 1 #(limit to 1 for cluster)
   ),
@@ -81,73 +79,20 @@ parameter.list <- list(
   developer = T
 )
 
-# input.data <- list(
-#   PijuanSala = list(
-#     file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Preprocessed_Datasets/output_33016PM_demo_ps_10000cell.Rdata",
-#     integrate.by = NA,
-#     subsample = 0.3,
-#     meta.feature.name = NA,
-#     meta.feature.recode = NA,
-#     meta.feature.filter = NA),
-#   # LaManno = list(
-#   #   file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Preprocessed_Datasets/output_33647PM_demo_manno_10000cell.Rdata",
-#   #   integrate.by = NA,
-#   #   subsample = 0.3,
-#   #   meta.feature.name = "Barcode",
-#   #   meta.feature.recode = NA,
-#   #   meta.feature.filter = NA
-#   # ),
-#   Tyser = list(
-#     file = "C:/Users/Owner/Dropbox/PDF Projects - JM/R Packages/scMiko/data/so_tyser2021_220621.rds",
-#     integrate.by = NA,
-#     subsample = 1,
-#     meta.feature.name = "Barcode",
-#     meta.feature.recode = NA,
-#     meta.feature.filter = NA
-#   )
-#   #   Zeisel = list(
-#   #   file = "C:/Users/Owner/Dropbox/PDF Projects - JM/Data/scRNA-seq/01_sci-RNA-seq3_Hong_Kevin_Jason/NM_HH/Data/Preprocessed_Datasets/output_34245PM_demo_zeisel_10000cell.Rdata",
-#   #   integrate.by = NA,
-#   #   subsample = 0.3,
-#   #   meta.feature.name = "Barcode",
-#   #   meta.feature.recode = NA,
-#   #   meta.feature.filter = NA
-#   # )
-#   )
 
-
-# input.data <- list(
-#   HAP1 = list(
-#     file = "R579_M01_NM2_p15_HAP1_GIN_230821.Rdata",
-#     integrate.by = "Barcode",
-#     subsample = 0.1,
-#     meta.feature.name = "Barcode",
-#     # meta.feature.recode.name = "Replicate",
-#     # meta.feature.recode = list(R1 = "R4", R2 = "R5"),
-#     meta.feature.filter = NA)
-#   )
-
+# specify input data ###########################################################
 input.data <- list(
-  p9 = list(
-    file = "R687_M01_NM2_p9_hs_pr_gbm_310122.Rdata",
-    integrate.by = "Barcode",
-    subsample = 1,
-    meta.feature.name = "Barcode",
-    meta.feature.filter = NA),
-  p14 = list(
-    file = "R688_M01_NM2_p14_hs_pr_gbm_310122.Rdata",
-    integrate.by = "Barcode",
-    subsample = 1,
-    meta.feature.name = "Barcode",
-    meta.feature.filter = NA),
-  p16 = list(
-    file = "R685_M01_NM2_p16_hs_pr_gbm_merged_310122.Rdata",
-    integrate.by = "Barcode",
-    subsample = 1,
-    meta.feature.name = "Barcode",
-    meta.feature.filter = NA)
+  dataset1 = list(
+    file = "dataset1.Rdata",        # path to .Rdata file containing seurat object named 'so'
+    integrate.by = "Barcode"        # meta data features specifying sample labels
+  ),       
+  dataset2 = list(
+    file = "dataset2.Rdata"
+  ),
+  dataset3 = list(
+    file = "dataset3.Rdata"
+  )
 )
-
 
 
 ```
@@ -219,9 +164,7 @@ df.log <- addLogEntry("K Weight", (parameter.list$integration.k.weight), df.log,
 df.log <- addLogEntry("N Integration Genes", (parameter.list$integration.n.genes), df.log, "integration.n.genes")
 df.log <- addLogEntry("N workers", (paste(names(parameter.list$n.workers), "=", 
                                           (purrr::map_dbl(parameter.list$n.workers,  1)), "workers",  collapse = "; ")), df.log, "n.workers")
-# df.log <- addLogEntry("rerun SCT",parameter.list$integration.rerun.SCT, df.log, "integration.rerun.SCT")
 df.log <- addLogEntry("Proportion of variance explained by PCA",parameter.list$pca.var.threshold, df.log, "pca.var.threshold")
-# df.log <- addLogEntry("PCA method",parameter.list$pca.method, df.log, "pca.method")
 df.log <- addLogEntry("cluster resolution",parameter.list$integration.cluster.resolution, df.log, "integration.cluster.resolution")
 df.log <- addLogEntry("memory limit",parameter.list$integration.limit.memory, df.log, "integration.limit.memory")
 df.log <- addLogEntry("max memory (Gb)",parameter.list$integration.max.memory, df.log, "integration.max.memory")
@@ -332,10 +275,7 @@ import.list <- foreach(i = 1:length(input.files), .packages = c("scMiko", "Seura
   
   # get dataset name
   input.label <- input.labels[i]
-  
-  # ensure correct extension is present
-  # if (!grepl(".Rdata|.RData", input.files[i])) input.files[i] <- paste0(input.files[i], ".Rdata")
-  
+
   if (grepl(".Rdata|.RData", input.files[i])){
     load(input.files[i])
     so <- prepSeurat(so)
