@@ -35,7 +35,7 @@ invisible({gc()})
 start.time <- proc.time()
 
 # list of packages to load
-packages2load <- c('viridis', 'scMiko', 'ggpubr', 'dplyr', 'ggthemes', 'WGCNA', 'cowplot', 'schex', 'Seurat', 'sctransform', 'plyr', 'tidyr', 'reshape2', 'Matrix', 'RColorBrewer', 'ggplot2', 'gridExtra', 'DT', 'flexdashboard', 'future', 'gplots', 'reticulate')
+packages2load <- c('viridis', 'scMiko', 'ggpubr', 'dplyr', 'ggthemes', 'WGCNA', 'cowplot', 'schex', 'Seurat', 'sctransform', 'plyr', 'tidyr', 'reshape2', 'Matrix', 'RColorBrewer', 'ggplot2', 'gridExtra', 'DT', 'flexdashboard', 'future', 'gplots', 'reticulate', 'glmGamPoi')
 
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE, quietly = T))
@@ -424,6 +424,7 @@ names(gNames.list) <- df.gname$ensembl
 so@misc[["g2e"]] <- gNames.list
 }, silent = T)
 
+
 ```
 
 ```{r c8 - filter_data_by_subset, include = FALSE}
@@ -445,6 +446,9 @@ if ("subsample.n" %in% names(parameter.list)){
  so <-  downsampleSeurat(object = so, subsample.n = parameter.list$subsample.n)
 }
 
+
+
+miko_message(paste0(ncol(so), " cells available for preprocessing..."))
 
 ```
 
@@ -1494,13 +1498,21 @@ if (normalization_method_ps == "SCT"){
 ```{r variable gene plot}
 
 # plot variable genes
-plt.variable_genes <- variableGenes.Plot(so, gNames.list, set_name = parameter.list$set_names, 
-                                         pt.colors = c('#2C3E50', '#F39C12'))
+variable.plot.success <- F
+try({
+  plt.variable_genes <- variableGenes.Plot(so, gNames.list, set_name = parameter.list$set_names, 
+                                           pt.colors = c('#2C3E50', '#F39C12'))
+  
+  plt.variable_genes <- cowplot::plot_grid(plt.variable_genes + 
+                                             labs(title = "Variably-Expressed Genes") + 
+                                             theme_miko(legend = T) + 
+                                             theme(legend.position = "bottom") + theme(text = element_text(size = 15)))
+  
+  variable.plot.success <- T
+})
 
-plt.variable_genes <- cowplot::plot_grid(plt.variable_genes + 
-  labs(title = "Variably-Expressed Genes") + 
-  theme_miko(legend = T) + 
-  theme(legend.position = "bottom") + theme(text = element_text(size = 15)))
+if(!variable.plot.success) plt.variable_genes <- NULL
+
 
 if (parameter.list$print.inline) {
   print(plt.variable_genes)
