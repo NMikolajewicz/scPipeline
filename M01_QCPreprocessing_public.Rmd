@@ -1494,9 +1494,8 @@ if (normalization_method_ps == "SCT"){
 ```{r variable gene plot}
 
 # plot variable genes
-
 plt.variable_genes <- variableGenes.Plot(so, gNames.list, set_name = parameter.list$set_names, 
-                                         pt.color = c('#2C3E50', '#F39C12'))
+                                         pt.colors = c('#2C3E50', '#F39C12'))
 
 plt.variable_genes <- cowplot::plot_grid(plt.variable_genes + 
   labs(title = "Variably-Expressed Genes") + 
