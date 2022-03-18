@@ -35,7 +35,7 @@ invisible({gc()})
 start.time <- proc.time()
 
 # list of packages to load
-packages2load <- c('viridis', 'scMiko', 'ggpubr', 'dplyr', 'ggthemes', 'WGCNA', 'cowplot', 'schex', 'Seurat', 'sctransform', 'plyr', 'tidyr', 'reshape2', 'Matrix', 'RColorBrewer', 'ggplot2', 'gridExtra', 'DT', 'flexdashboard', 'future', 'gplots', 'reticulate', "glmGamPoi")
+packages2load <- c('viridis', 'scMiko', 'ggpubr', 'dplyr', 'ggthemes', 'WGCNA', 'cowplot', 'schex', 'Seurat', 'sctransform', 'plyr', 'tidyr', 'reshape2', 'Matrix', 'RColorBrewer', 'ggplot2', 'gridExtra', 'DT', 'flexdashboard', 'future', 'gplots', 'reticulate')
 
 # load packages
 invisible(lapply(packages2load, library, character.only = TRUE, quietly = T))
