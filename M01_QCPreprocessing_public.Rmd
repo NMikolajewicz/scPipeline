@@ -701,7 +701,7 @@ try({
   if (ulength(so$Barcode) == 1){
     plt.mito_by_bc <- plt.mito_by_bc + theme_miko(color.palette = "flatly2")
   }
-})
+}, silent = T)
 
 if (parameter.list$print.inline){
   print(plt.mito_by_bc)
@@ -880,7 +880,7 @@ so <- tryCatch({
                         conserve.memory = conserve.memory,
                         clip.range = parameter.list$clip.range)     
       is.success <- T
-    })
+    }, silent = T)
     
     if (!is.success){
       normalization_method_ps <- "NFS"  # "NFS" 
@@ -1489,7 +1489,7 @@ if (normalization_method_ps == "SCT"){
   try({
    df.var.meta <- so@assays[[nassay]]@meta.features
   df.var.meta <- df.var.meta %>% dplyr::filter(SYMBOL %in%  so@assays[[nassay]]@var.features)   
-  })
+  }, silent = T)
 
 }
 
@@ -1500,7 +1500,7 @@ if (normalization_method_ps == "SCT"){
 # plot variable genes
 variable.plot.success <- F
 try({
-  plt.variable_genes <- variableGenes.Plot(so, gNames.list, set_name = parameter.list$set_names, 
+  plt.variable_genes <- scMiko::variableGenes.Plot(so, gNames.list, set_name = parameter.list$set_names, 
                                            pt.colors = c('#2C3E50', '#F39C12'))
   
   plt.variable_genes <- cowplot::plot_grid(plt.variable_genes + 
@@ -1509,7 +1509,7 @@ try({
                                              theme(legend.position = "bottom") + theme(text = element_text(size = 15)))
   
   variable.plot.success <- T
-})
+}, silent = T)
 
 if(!variable.plot.success) plt.variable_genes <- NULL
 
