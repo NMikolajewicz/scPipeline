@@ -716,7 +716,7 @@ for (i in 1:length(so.list)){
   batch.name <- names(so.list)[i]
   
   successfull.cluster <- F
-  if (parameter.list$integration.compute.diveristy){
+  if (parameter.list$integration.compute.diversity){
 
   try({
     
@@ -846,57 +846,6 @@ if (parameter.list$print.inline){
 
 ```
 
-
-```{r BBKNN integration}
-
-if (toupper(parameter.list$integration.method) == "BBKNN" ){
-  
-  miko_message("Merging seurat objects...")
-  so <-  mergeSeuratList(so.list)
-  
-  try({
-    if (parameter.list$correct.artifact){
-      ag.res <-  findArtifactGenes(object = so.list, assay = NULL, features = so.features, 
-                                   meta.feature = "batch", umi.count.threshold = 5, difference.threshold = 30, verbose = F) 
-      so.features <- so.features[!c(so.features %in% ag.res$artifact.gene)]
-      miko_message(paste0(length(ag.res$artifact.gene), " artifact genes identified and omitted: ", paste(ag.res$artifact.gene, collapse = ", ")))
-    }      
-  }, silent = T)
-  
-  miko_message("Selecting integration features...")
-  so.features <- SelectIntegrationFeatures(object.list = so.list,
-                                           assay = rep("SCT", length(so.list)),
-                                           nfeatures = parameter.list$integration.n.genes,
-                                           fvf.nfeatures = parameter.list$integration.n.genes)
-  
-  miko_message("Computing residuals in merged object...")    
-  so <- GetResidual(object = so,features =  so.features, assay = "SCT", replace.value = T)
-  
-  av.feat <- so.features[so.features %in% rownames(so@assays[["SCT"]]@scale.data)]
-  
-  miko_message("Running PCA...")
-  so <- RunPCA(so, features = av.feat, assay = "SCT")
-  
-  so <- runBBKNN(
-    object = so,
-    batch = "batch",
-    reduction = "pca",
-    assay = DefaultAssay(so),
-    do.umap = F,
-    verbose = T
-  )
-
-  names(so@graphs)[which(names(so@graphs) %in% "bbknn")] <- "integrated_snn"
-  so@assays[["integrated"]] <- so@assays[["SCT"]]
-  so@assays[["integrated"]]@scale.data <- matrix()
-  so@assays[["integrated"]]@counts <- as.sparse( matrix())
-  so@assays[["integrated"]]@data <- as.sparse( matrix())
-  DefaultAssay(so) <- "integrated"
-  so <- RunUMAP(so, graph = "integrated_snn")
-  
-  
-}
-```
 
 
 ```{r feature selection, include = FALSE}
@@ -1106,6 +1055,60 @@ rm(so.anchors);invisible({gc()})
 
 
 ```
+
+
+```{r BBKNN integration}
+
+if (toupper(parameter.list$integration.method) == "BBKNN" ){
+  
+  miko_message("Merging seurat objects...")
+  so <-  mergeSeuratList(so.list)
+  
+  try({
+    if (parameter.list$correct.artifact){
+      ag.res <-  findArtifactGenes(object = so.list, assay = NULL, features = so.features, 
+                                   meta.feature = "batch", umi.count.threshold = 5, difference.threshold = 30, verbose = F) 
+      so.features <- so.features[!c(so.features %in% ag.res$artifact.gene)]
+      miko_message(paste0(length(ag.res$artifact.gene), " artifact genes identified and omitted: ", paste(ag.res$artifact.gene, collapse = ", ")))
+    }      
+  }, silent = T)
+  
+  miko_message("Selecting integration features...")
+  so.features <- SelectIntegrationFeatures(object.list = so.list,
+                                           assay = rep("SCT", length(so.list)),
+                                           nfeatures = parameter.list$integration.n.genes,
+                                           fvf.nfeatures = parameter.list$integration.n.genes)
+  
+  miko_message("Computing residuals in merged object...")    
+  so <- GetResidual(object = so,features =  so.features, assay = "SCT", replace.value = T)
+  
+  av.feat <- so.features[so.features %in% rownames(so@assays[["SCT"]]@scale.data)]
+  
+  miko_message("Running PCA...")
+  so <- RunPCA(so, features = av.feat, assay = "SCT")
+  
+  so <- runBBKNN(
+    object = so,
+    batch = "batch",
+    reduction = "pca",
+    assay = DefaultAssay(so),
+    do.umap = F,
+    verbose = T
+  )
+
+  names(so@graphs)[which(names(so@graphs) %in% "bbknn")] <- "integrated_snn"
+  so@assays[["integrated"]] <- so@assays[["SCT"]]
+  so@assays[["integrated"]]@scale.data <- matrix()
+  so@assays[["integrated"]]@counts <- as.sparse( matrix())
+  so@assays[["integrated"]]@data <- as.sparse( matrix())
+  DefaultAssay(so) <- "integrated"
+  so <- RunUMAP(so, graph = "integrated_snn")
+  
+  rm(so.list); invisible({gc()})
+  
+}
+```
+
 
 ```{r corrected counts with fixed sequencing depth}
 
