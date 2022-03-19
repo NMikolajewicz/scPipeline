@@ -44,12 +44,6 @@ invisible({lapply(packages2load, library, character.only = TRUE)})
 
 ```
 
-```{r}
-# TODO
-# 170322: accomodate RDS data 
-
-```
-
 ```{r parameter specification}
 
 # parameter specification ######################################################
@@ -705,6 +699,7 @@ so.list <- pbapply::pblapply(X = so.list, FUN = function(x){
   miko_message("Running PCA...")
   so.list <- pbapply::pblapply(X = so.list, FUN = RunPCA,verbose = F) 
 
+  invisible({gc()})
 
 ```
 
@@ -765,7 +760,7 @@ for (i in 1:length(so.list)){
 
 ```{r subset common set of genes, fig.width = 6, fig.height=8}
 
-miko_message("Subsetting common genes...")
+miko_message("Identifying common gene subsets...")
 
 gene.av.list <- list()
 
@@ -852,6 +847,58 @@ if (parameter.list$print.inline){
 ```
 
 
+```{r BBKNN integration}
+
+if (toupper(parameter.list$integration.method) == "BBKNN" ){
+  
+  miko_message("Merging seurat objects...")
+  so <-  mergeSeuratList(so.list)
+  
+  try({
+    if (parameter.list$correct.artifact){
+      ag.res <-  findArtifactGenes(object = so.list, assay = NULL, features = so.features, 
+                                   meta.feature = "batch", umi.count.threshold = 5, difference.threshold = 30, verbose = F) 
+      so.features <- so.features[!c(so.features %in% ag.res$artifact.gene)]
+      miko_message(paste0(length(ag.res$artifact.gene), " artifact genes identified and omitted: ", paste(ag.res$artifact.gene, collapse = ", ")))
+    }      
+  }, silent = T)
+  
+  miko_message("Selecting integration features...")
+  so.features <- SelectIntegrationFeatures(object.list = so.list,
+                                           assay = rep("SCT", length(so.list)),
+                                           nfeatures = parameter.list$integration.n.genes,
+                                           fvf.nfeatures = parameter.list$integration.n.genes)
+  
+  miko_message("Computing residuals in merged object...")    
+  so <- GetResidual(object = so,features =  so.features, assay = "SCT", replace.value = T)
+  
+  av.feat <- so.features[so.features %in% rownames(so@assays[["SCT"]]@scale.data)]
+  
+  miko_message("Running PCA...")
+  so <- RunPCA(so, features = av.feat, assay = "SCT")
+  
+  so <- runBBKNN(
+    object = so,
+    batch = "batch",
+    reduction = "pca",
+    assay = DefaultAssay(so),
+    do.umap = F,
+    verbose = T
+  )
+
+  names(so@graphs)[which(names(so@graphs) %in% "bbknn")] <- "integrated_snn"
+  so@assays[["integrated"]] <- so@assays[["SCT"]]
+  so@assays[["integrated"]]@scale.data <- matrix()
+  so@assays[["integrated"]]@counts <- as.sparse( matrix())
+  so@assays[["integrated"]]@data <- as.sparse( matrix())
+  DefaultAssay(so) <- "integrated"
+  so <- RunUMAP(so, graph = "integrated_snn")
+  
+  
+}
+```
+
+
 ```{r feature selection, include = FALSE}
 
 
@@ -887,7 +934,6 @@ for (i in 1:length(so.list)){
   }
   
 }
- 
 }
 
 
@@ -949,6 +995,7 @@ try({
 
 ```{r integrate data, include = FALSE}
 
+if (toupper(parameter.list$integration.method) != "BBKNN" ){
 if (length(so.list) > 1){ 
   
   # Select features for downstream integration 
@@ -993,7 +1040,7 @@ if (length(so.list) > 1){
     try({
       if (parameter.list$correct.artifact){
         ag.res <-  findArtifactGenes(object = so.list, assay = NULL, features = so.features, 
-                                     meta.feature = "Barcode", umi.count.threshold = 5, difference.threshold = 30, verbose = F) 
+                                     meta.feature = "batch", umi.count.threshold = 5, difference.threshold = 30, verbose = F) 
         so.features <- so.features[!c(so.features %in% ag.res$artifact.gene)]
         miko_message(paste0(length(ag.res$artifact.gene), " artifact genes identified and omitted: ", paste(ag.res$artifact.gene, collapse = ", ")))
       }      
@@ -1055,6 +1102,8 @@ n.anchors.effect <- length(so.anchors@command@params[["anchor.features"]])
 # remove baggage
 rm(so.anchors);invisible({gc()})
 
+}
+
 
 ```
 
@@ -1076,8 +1125,10 @@ try({
 ```{r PCA}
 
 # Run PCA
-miko_message("Running PCA...")
-so <- RunPCA(so, verbose = FALSE)
+if (toupper(parameter.list$integration.method) != "BBKNN" ){
+  miko_message("Running PCA...")
+  so <- RunPCA(so, verbose = FALSE)
+}
 
 # proportion of variance explained by each PC 
 pc.std <- so@reductions[["pca"]]@stdev
@@ -1130,8 +1181,10 @@ if (parameter.list$print.inline){
 
 ```{r cluster data}
 # Find clusters ---------------------------------------------------------------------------
-miko_message("Finding nearest neighbors...")
-so <- FindNeighbors(object = so, reduction = "pca", dims = 1:pc.n_relevant_components)
+if (toupper(parameter.list$integration.method) != "BBKNN" ){
+  miko_message("Finding nearest neighbors...")
+  so <- FindNeighbors(object = so, reduction = "pca", dims = 1:pc.n_relevant_components)
+}
 
 # integration.cluster.resolution <- 1
 miko_message("Clustering data...")
@@ -1144,7 +1197,9 @@ so <- FindClusters(object = so, resolution = parameter.list$integration.cluster.
 
 # Run umap and generate plot --------------------------------------------------------------------
 nDim_umap <- pc.n_relevant_components
-so <- RunUMAP(so, dims = 1:nDim_umap)
+if (toupper(parameter.list$integration.method) != "BBKNN" ){
+  so <- RunUMAP(so, dims = 1:nDim_umap)
+}
 plt.integration <- DimPlot(so, reduction = "umap",
                            group.by = "batch")  +  #autoPointSize(ncol(so))
   ggtitle(label = "UMAP") +
@@ -1272,7 +1327,6 @@ if (parameter.list$print.inline){
   print(plt.integration_by_batch)
 }
 
-# plt.overlay.combine
 
 ```
 
@@ -1306,6 +1360,8 @@ df.mm <- data.frame(cells = colnames(so.sub),
 
 miko_message("Calculating local structure presevation...") #####################
 
+
+if (toupper(parameter.list$integration.method) != "BBKNN" ){
 lstruct <- LocalStruct(
   object = so.sub,
   grouping.var = "batch",
@@ -1324,6 +1380,7 @@ df.ls <- bind_rows(lapply(1:length(lstruct), function(x){
     local_structure = lstruct[[ind]]
   )
 }))
+}
 
 label.median.mm <- paste0("Median: ", round(median(df.mm$mixing_metric)), "/", max.k, " (dashed)")
 label.mean.mm <- paste0("Mean: ", round(mean(df.mm$mixing_metric)), "/", max.k, " (solid)")
@@ -1338,6 +1395,8 @@ plt.mm <- df.mm %>%
        title = "Mixing Metric",
        subtitle = paste0(label.mean.mm, ", ", label.median.mm))
 
+
+if (toupper(parameter.list$integration.method) != "BBKNN" ){
 label.median.ls <- paste0("Median: ", signif(median(df.ls$local_structure), 2), " (dashed)")
 label.mean.ls <- paste0("Mean: ", signif(mean(df.ls$local_structure), 2), " (solid)")
 
@@ -1350,8 +1409,12 @@ plt.ls <- df.ls %>%
   labs(x = "Local Structure Preservation", y = "Density", fill = "Batch",
        title = "Local Structure Preservation",
        subtitle = paste0(label.mean.ls, ", ", label.median.ls))
+} else {
+  plt.ls <- NULL
+}
 
 
+if (toupper(parameter.list$integration.method) != "BBKNN" ){
 miko_message("Calculating conservation of highly-variable genes...") ###########
 
 var.gene.list$integrated <- VariableFeatures(so)
@@ -1376,6 +1439,9 @@ plt.jac <- df.jac %>%
   geom_bar(stat =  "identity", fill = '#2C3E50') + 
   theme_miko(x.axis.rotation =rotate.x ) + 
   labs(x = "Batch", y = "Jaccard Similarity", title = "HVG Preservation", subtitle = "HVG overlap, pre- vs. post-integration")
+} else {
+  plt.jac <- NULL
+}
 
 
 miko_message("Calculating adjusted rand indices...") ###########################
@@ -1418,25 +1484,34 @@ df.div <- bind_rows(data.frame(
                     )
 
 if (nrow(df.div) > 1){
-  plt.diversity <- df.div %>% 
-  ggplot(aes(x = batch, y = shannon_index, fill = batch)) + 
-  geom_bar(stat = "identity") + 
-  scale_fill_manual(values = c('#F39C12',rep('#2C3E50', nrow(df.div)-1))) + 
-  theme_miko(x.axis.rotation = rotate.x) + 
-    labs(title = "Shannon Diversity", 
-         subtitle =  paste0("Resolution: ", parameter.list$integration.cluster.resolution),  
-         x = "Batch", y = "Shannon Diversity Index")
   
+  div.success <- F
+  try({
+    df.div$batch <- factor(df.div$batch, levels = as.character(df.div$batch))
+    plt.diversity <- df.div %>% 
+      ggplot(aes(x = batch, y = shannon_index, fill = batch)) + 
+      geom_bar(stat = "identity") + 
+      scale_fill_manual(values = c('#F39C12',rep('#2C3E50', nrow(df.div)-1))) + 
+      theme_miko(x.axis.rotation = rotate.x) + 
+      labs(title = "Shannon Diversity", 
+           subtitle =  paste0("Resolution: ", parameter.list$integration.cluster.resolution),  
+           x = "Batch", y = "Shannon Diversity Index")
+    
     plt.nclust <- df.div %>% 
-  ggplot(aes(x = batch, y = k_clust, fill = batch)) + 
-  geom_bar(stat = "identity") + 
-  scale_fill_manual(values = c('#F39C12',rep('#2C3E50', nrow(df.div)-1))) + 
-  theme_miko(x.axis.rotation = rotate.x) + 
-    labs(title = "Number of Clusters", 
-         subtitle = paste0("Resolution: ", parameter.list$integration.cluster.resolution),  
-         x = "Batch", y = "Number of Clusters")
+      ggplot(aes(x = batch, y = k_clust, fill = batch)) + 
+      geom_bar(stat = "identity") + 
+      scale_fill_manual(values = c('#F39C12',rep('#2C3E50', nrow(df.div)-1))) + 
+      theme_miko(x.axis.rotation = rotate.x) + 
+      labs(title = "Number of Clusters", 
+           subtitle = paste0("Resolution: ", parameter.list$integration.cluster.resolution),  
+           x = "Batch", y = "Number of Clusters")
+    div.success <- T
+  }, silent = T)
+  
+  if (!div.success) plt.diversity <- plt.nclust <- NULL
+
 } else {
-  plt.diversity <- NULL
+  plt.diversity <- plt.nclust <- NULL
 }
 
   
@@ -1474,7 +1549,7 @@ if (parameter.list$print.inline){
 
 ```{r umap by barcode, fig.height=5, fig.width=10}
 
-plt.umap_by_barcode <- DimPlot(so, split.by = "batch", group.by = "Barcode",  pt.size = 0.02) + 
+plt.umap_by_barcode <- DimPlot(so, split.by = "batch", group.by = "batch",  pt.size = 0.02) + 
   xlab("UMAP 1") + ylab("UMAP 2")+ theme_miko() + theme(legend.position = "bottom")
 
 plt.umap_by_batch <- DimPlot(so, group.by = "batch",  pt.size = 0.02) + 
@@ -1629,8 +1704,9 @@ For details on the **Integration** scPipeline module, see [documentation](https:
 
 ---
 
-**Citation**: Stuart, T., Butler, A., Hoffman, P., Hafemeister, C., Papalexi, E., Mauck III, W. M., ... & Satija, R. (2019). Comprehensive integration of single-cell data. *Cell*, 177(7), 1888-1902. [link](https://doi.org/10.1016/j.cell.2019.05.031). 
-
+**Citation**: 
+- Stuart, T., Butler, A., Hoffman, P., Hafemeister, C., Papalexi, E., Mauck III, W. M., ... & Satija, R. (2019). Comprehensive integration of single-cell data. *Cell*, 177(7), 1888-1902. [link](https://doi.org/10.1016/j.cell.2019.05.031). 
+- Polański, K., Young, M. D., Miao, Z., Meyer, K. B., Teichmann, S. A., & Park, J. E. (2020). BBKNN: fast batch alignment of single cell transcriptomes. *Bioinformatics*, 36(3), 964-965.
 ---
 
 
