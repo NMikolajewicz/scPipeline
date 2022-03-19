@@ -1344,22 +1344,33 @@ if (ncol(so) > 40000){
   so.sub <- so
 }
 
+if (n.datasets  > 3) {
+  rotate.x = 45
+} else {
+  rotate.x = 0
+}
+
 miko_message("Calculating mixing metric...") ###################################
 
-max.k <- 300
-mm <- MixingMetric(
-  object = so.sub,
-  grouping.var = "batch",
-  reduction = "pca",
-  dims = 1:30,
-  k = 5,
-  max.k = max.k,
-  eps = 0,
-  verbose = T
-)
 
-df.mm <- data.frame(cells = colnames(so.sub),
-                    mixing_metric = mm)
+mm.success <- F
+try({
+  max.k <- 300
+  mm <- MixingMetric(
+    object = so.sub,
+    grouping.var = "batch",
+    reduction = "pca",
+    dims = 1:30,
+    k = 5,
+    max.k = max.k,
+    eps = 0,
+    verbose = T
+  )
+  
+  df.mm <- data.frame(cells = colnames(so.sub),
+                      mixing_metric = mm)
+  mm.success <- T
+}, silent = T)
 
 miko_message("Calculating local structure presevation...") #####################
 
@@ -1385,19 +1396,23 @@ df.ls <- bind_rows(lapply(1:length(lstruct), function(x){
 }))
 }
 
-label.median.mm <- paste0("Median: ", round(median(df.mm$mixing_metric)), "/", max.k, " (dashed)")
-label.mean.mm <- paste0("Mean: ", round(mean(df.mm$mixing_metric)), "/", max.k, " (solid)")
 
-plt.mm <- df.mm %>%
-  ggplot(aes(x = mixing_metric)) + 
-  geom_histogram(bins = 30, fill = '#2C3E50') + 
-  theme_miko(legend = T) + 
-  geom_vline(xintercept = round(median(df.mm$mixing_metric)), linetype = "dashed", color = '#F39C12') + 
-  geom_vline(xintercept = round(mean(df.mm$mixing_metric)), color = '#F39C12') + 
-  labs(x = "Mixing Metric", y = "Count", fill = "Batch",
-       title = "Mixing Metric",
-       subtitle = paste0(label.mean.mm, ", ", label.median.mm))
-
+if (mm.success){
+  label.median.mm <- paste0("Median: ", round(median(df.mm$mixing_metric)), "/", max.k, " (dashed)")
+  label.mean.mm <- paste0("Mean: ", round(mean(df.mm$mixing_metric)), "/", max.k, " (solid)")
+  
+  plt.mm <- df.mm %>%
+    ggplot(aes(x = mixing_metric)) + 
+    geom_histogram(bins = 30, fill = '#2C3E50') + 
+    theme_miko(legend = T) + 
+    geom_vline(xintercept = round(median(df.mm$mixing_metric)), linetype = "dashed", color = '#F39C12') + 
+    geom_vline(xintercept = round(mean(df.mm$mixing_metric)), color = '#F39C12') + 
+    labs(x = "Mixing Metric", y = "Count", fill = "Batch",
+         title = "Mixing Metric",
+         subtitle = paste0(label.mean.mm, ", ", label.median.mm))
+} else {
+  plt.mm <- NULL
+}
 
 if (toupper(parameter.list$integration.method) != "BBKNN" ){
 label.median.ls <- paste0("Median: ", signif(median(df.ls$local_structure), 2), " (dashed)")
@@ -1432,11 +1447,7 @@ df.jac <- data.frame(
 df.jac <- df.jac %>% dplyr::filter(batch != "integrated")
 
 
-if (n.datasets  > 3) {
-  rotate.x = 45
-} else {
-  rotate.x = 0
-}
+
 plt.jac <- df.jac %>% 
   ggplot(aes(x= batch, y = jaccard_similarity)) + 
   geom_bar(stat =  "identity", fill = '#2C3E50') + 
@@ -1445,7 +1456,6 @@ plt.jac <- df.jac %>%
 } else {
   plt.jac <- NULL
 }
-
 
 miko_message("Calculating adjusted rand indices...") ###########################
 
@@ -1475,7 +1485,6 @@ plt.ari <- df.ari %>%
   labs(x = "Batch", y = "ARI", title = "Cluster Preservation", subtitle = "ARI, pre- vs. post-integration")
 
 miko_message("Calculating diversity index...") #################################
-
 
 df.tab <- data.frame(table(so@meta.data[["seurat_clusters"]]))
 df.tab$p <- df.tab$Freq/sum(df.tab$Freq)
