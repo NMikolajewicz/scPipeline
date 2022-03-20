@@ -58,7 +58,7 @@ parameter.list <- list(
   integration.limit.memory = T,                      # specify whether to limit max memory
   integration.max.memory = 150,                      # numeric, in terms of Gb
   integration.cluster.resolution = 0.35, 
-  integration.compute.diveristy = T,
+  integration.compute.diversity = T,
   pca.var.threshold = 0.9, 
   correct.artifact = F,                              # recommended only if similar integrated data have similar cellular composition
   n.workers = list(                                  # number of workers for parallel implementation
@@ -1108,6 +1108,7 @@ if (toupper(parameter.list$integration.method) == "SCANORAMA" ){
   }
 
   # Integration.
+  miko_message("Running Scanorama Integration...")  
   suppressMessages({
     suppressWarnings({
      integrated.data <- scanorama$integrate(datasets, genes_list, dimred= 50L) 
