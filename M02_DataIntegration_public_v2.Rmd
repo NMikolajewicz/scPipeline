@@ -269,7 +269,7 @@ import.list <- foreach(i = 1:length(input.files), .packages = c("scMiko", "Seura
   
   # get dataset name
   input.label <- input.labels[i]
-
+  
   if (grepl(".Rdata|.RData", input.files[i])){
     load(input.files[i])
     so <- prepSeurat(so)
@@ -527,13 +527,13 @@ if (parameter.list$print.inline){
 
 
 g2e.helper <- function(features){
-
-    
-      ens.sum <-  sum(grepl("ENS", features))
+  
+  
+  ens.sum <-  sum(grepl("ENS", features))
   ens.mus.sum <-  sum(grepl("ENSMUS", features))
   hi.cap.sum <-  sum(features == toupper(features))
   lo.cap.sum <-  sum(features == firstup(features))
-
+  
   df.rep <-as.data.frame(t(data.frame(
     ens.sum = ens.sum,
     ens.mus.sum = ens.mus.sum,
@@ -541,8 +541,8 @@ g2e.helper <- function(features){
     lo.cap.sum = lo.cap.sum
   )))
   
-      which.rep <- rownames(df.rep)[which.max(df.rep[, 1])]
-
+  which.rep <- rownames(df.rep)[which.max(df.rep[, 1])]
+  
   if ((which.rep %in% c("ens.sum", "ens.mus.sum")) & (ens.sum > ens.mus.sum)) {
     species <- "Hs"
     rep_gene <- "ENS"
@@ -556,10 +556,10 @@ g2e.helper <- function(features){
     species <- "Mm"
     rep_gene <- "SYMBOL"
   }
-
+  
   input_organisms <- species
   # }
-
+  
   if (rep_gene == "SYMBOL"){
     g2eNames <- sym2ens(my.symbols =  features, my.species = input_organisms)
     g2eNames <- g2eNames[complete.cases(g2eNames), ]
@@ -579,20 +579,20 @@ g2e.helper <- function(features){
 
 
 geneSpecies <-   function(features){
-    ens.sum <-  sum(grepl("ENS", features))
+  ens.sum <-  sum(grepl("ENS", features))
   ens.mus.sum <-  sum(grepl("ENSMUS", features))
   hi.cap.sum <-  sum(features == toupper(features))
   lo.cap.sum <-  sum(features == firstup(features))
-
+  
   df.rep <-as.data.frame(t(data.frame(
     ens.sum = ens.sum,
     ens.mus.sum = ens.mus.sum,
     hi.cap.sum = hi.cap.sum,
     lo.cap.sum = lo.cap.sum
   )))
-
+  
   which.rep <- rownames(df.rep)[which.max(df.rep[, 1])]
-
+  
   if ((which.rep %in% c("ens.sum", "ens.mus.sum")) & (ens.sum > ens.mus.sum)) {
     species <- "Hs"
   } else if ((which.rep %in% c("ens.sum", "ens.mus.sum")) & (ens.sum <= ens.mus.sum)) {
@@ -603,11 +603,11 @@ geneSpecies <-   function(features){
     species <- "Mm"
   }
 }
-  
-  
 
 
-  
+
+
+
 ```
 
 
@@ -638,7 +638,7 @@ for (i in 1:length(so.list)){
       gene.rep <- checkGeneRep(reference.genes = g2e, query.genes = rownames(count.matrix))      
     })
   })
-
+  
   
   if (gene.rep == "ensembl"){
     gene.symbol <- gene.rep[rownames(count.matrix)]
@@ -665,7 +665,7 @@ for (i in 1:length(so.list)){
   
   
   so.list[[batch.name]] <- CreateSeuratObject(counts = count.matrix, meta.data = meta.data, project = batch.name)
-
+  
 }
 
 
@@ -688,18 +688,18 @@ so.list <- pbapply::pblapply(X = so.list, FUN = function(x){
   object = x
   object <- tryCatch({
     SCTransform(object, method = "glmGamPoi", verbose =F, vst.flavor = "v2", 
-                  vars.to.regress = var2reg, variable.features.n = parameter.list$integration.n.genes)
+                vars.to.regress = var2reg, variable.features.n = parameter.list$integration.n.genes)
   }, error = function(e){
-     object <- SCTransform(object, method = "glmGamPoi", verbose =F, 
-                  vars.to.regress = var2reg, variable.features.n = parameter.list$integration.n.genes)  
-     return(object)
+    object <- SCTransform(object, method = "glmGamPoi", verbose =F, 
+                          vars.to.regress = var2reg, variable.features.n = parameter.list$integration.n.genes)  
+    return(object)
   }, silent = T)
 })
-  
-  miko_message("Running PCA...")
-  so.list <- pbapply::pblapply(X = so.list, FUN = RunPCA,verbose = F) 
 
-  invisible({gc()})
+miko_message("Running PCA...")
+so.list <- pbapply::pblapply(X = so.list, FUN = RunPCA,verbose = F) 
+
+invisible({gc()})
 
 ```
 
@@ -717,33 +717,33 @@ for (i in 1:length(so.list)){
   
   successfull.cluster <- F
   if (parameter.list$integration.compute.diversity){
-
-  try({
     
-    so.list[[batch.name]] <-  tryCatch({
-      FindClusters(object = so.list[[batch.name]], 
-                   verbose = F,
-                   resolution = parameter.list$integration.cluster.resolution)
-    }, error = function(e){
-      so.list[[batch.name]] <-  FindNeighbors(object = so.list[[batch.name]], verbose = F,
-                                                 dims = 1:30, assay = "SCT", reduction = "pca")
-
-      return(FindClusters(object = so.list[[batch.name]], 
-                                               resolution = parameter.list$integration.cluster.resolution, verbose = F))
-    })
-    successfull.cluster <- T
-  }, silent = T)
+    try({
+      
+      so.list[[batch.name]] <-  tryCatch({
+        FindClusters(object = so.list[[batch.name]], 
+                     verbose = F,
+                     resolution = parameter.list$integration.cluster.resolution)
+      }, error = function(e){
+        so.list[[batch.name]] <-  FindNeighbors(object = so.list[[batch.name]], verbose = F,
+                                                dims = 1:30, assay = "SCT", reduction = "pca")
         
+        return(FindClusters(object = so.list[[batch.name]], 
+                            resolution = parameter.list$integration.cluster.resolution, verbose = F))
+      })
+      successfull.cluster <- T
+    }, silent = T)
+    
   }
   if (!successfull.cluster) next
   
-    df.tab <- NULL
+  df.tab <- NULL
   cluster.mem[[batch.name]] <- data.frame(cell = colnames(so.list[[batch.name]]), 
-                                              cluster = so.list[[batch.name]]@meta.data[["seurat_clusters"]])
+                                          cluster = so.list[[batch.name]]@meta.data[["seurat_clusters"]])
   df.tab <- data.frame(table(so.list[[batch.name]]@meta.data[["seurat_clusters"]]))
   df.tab$p <- df.tab$Freq/sum(df.tab$Freq)
   
-    df.div <- bind_rows(
+  df.div <- bind_rows(
     df.div,
     data.frame(
       batch = batch.name,
@@ -751,9 +751,9 @@ for (i in 1:length(so.list)){
       k_clust = nrow(df.tab)
     )
   )
-    
-}
   
+}
+
 
 
 ```
@@ -776,9 +776,9 @@ for (i in 1:length(so.list)){
       g2e.current <- g2e.helper(gene.rep)
     })
   })
-      
-   gList[[set.name]] <-  as.character(g2e.current)
-    gNames[[set.name]] <-  names(g2e.current)
+  
+  gList[[set.name]] <-  as.character(g2e.current)
+  gNames[[set.name]] <-  names(g2e.current)
   gList.consolidate <- bind_rows(gList.consolidate, data.frame(ens = gNames[[set.name]], sym = gList[[set.name]]))
   gene.av.list[[set.name]] <-  rownames(so.list[[set.name]])
   
@@ -854,35 +854,35 @@ if (parameter.list$print.inline){
 do.dev <- F
 
 if (do.dev){
-
-deviance.list <- list()
-for (i in 1:length(so.list)){
   
-  
-  if (parameter.list$integration.feature.select.method == "deviance"){
+  deviance.list <- list()
+  for (i in 1:length(so.list)){
     
-    so <- so.list[[i]]
-    DefaultAssay(so) <- "SCT"
-    so.sub <- downsampleSeurat(object = so, subsample.n = 10000, verbose = F)
     
-    m <- GetAssayData(so.sub, slot = "data", assay = "SCT")
-    m <- m[rownames(m) %in% rownames(so.sub), ]
-    m <- as.matrix(m)
-    devs <- scry::devianceFeatureSelection(object = m, fam = "binomial")
-    
-    df.dev <- data.frame(
-      gene = rownames(m),
-      d = devs
-    ) %>% dplyr::arrange(-d)
-    df.dev <- df.dev %>% dplyr::filter(!grepl("MT", toupper(gene)))
-    
-    deviance.list[[names(so.list)[i]]] <- df.dev
-    
-    so.list[[i]]@assays[["SCT"]]@var.features <- df.dev$gene[1:round(1.5 * parameter.list$integration.n.genes)]   
+    if (parameter.list$integration.feature.select.method == "deviance"){
+      
+      so <- so.list[[i]]
+      DefaultAssay(so) <- "SCT"
+      so.sub <- downsampleSeurat(object = so, subsample.n = 10000, verbose = F)
+      
+      m <- GetAssayData(so.sub, slot = "data", assay = "SCT")
+      m <- m[rownames(m) %in% rownames(so.sub), ]
+      m <- as.matrix(m)
+      devs <- scry::devianceFeatureSelection(object = m, fam = "binomial")
+      
+      df.dev <- data.frame(
+        gene = rownames(m),
+        d = devs
+      ) %>% dplyr::arrange(-d)
+      df.dev <- df.dev %>% dplyr::filter(!grepl("MT", toupper(gene)))
+      
+      deviance.list[[names(so.list)[i]]] <- df.dev
+      
+      so.list[[i]]@assays[["SCT"]]@var.features <- df.dev$gene[1:round(1.5 * parameter.list$integration.n.genes)]   
+      
+    }
     
   }
-  
-}
 }
 
 
@@ -944,38 +944,38 @@ try({
 
 ```{r integrate data, include = FALSE}
 
-if (toupper(parameter.list$integration.method) != "BBKNN" ){
-if (length(so.list) > 1){ 
-  
-  # Select features for downstream integration 
-  assay.vector <- c()
-  for (i in 1:n.datasets) {
-    assay.vector[i] <- DefaultAssay(so.list[[i]])
-    Idents(so.list[[i]]) <- so.list[[i]]@meta.data[["seurat_clusters"]]
-    so.list[[i]]@meta.data[["orig.ident"]] <-Idents(so.list[[i]])
-  }
-  
-  # enable parallelization
-  if ((parameter.list$n.workers$integration) > (length(so.list) - 1)){
-    parameter.list$n.workers$integration <- length(so.list) - 1
-  } 
-  if (parameter.list$n.workers$integration > 1){
-    plan(strategy = "multisession", workers = parameter.list$n.workers$integration)
-  }
-  if (parameter.list$integration.limit.memory) {
-    options(future.globals.maxSize = (parameter.list$integration.max.memory*20480/20 * 1024^2))   
-  }
-
-  so.n <- unlist(lapply(so.list, ncol))
-  which.too.small <- names(so.n)[so.n <= parameter.list$integration.k.filter]
-  if (length(which.too.small) > 0){
-    miko_message(paste0(which.too.small, collapse = ", "), 
-                 " were removed due to insufficient number of cells (n < ", 
-                 parameter.list$integration.k.filter, ")")
-    n.datasets <- sum(so.n > parameter.list$integration.k.filter)
-  }
-
-  miko_message("Selecting integration features...")
+if ((toupper(parameter.list$integration.method) %in% c("CCA", "RPCA")  )){
+  if (length(so.list) > 1){ 
+    
+    # Select features for downstream integration 
+    assay.vector <- c()
+    for (i in 1:n.datasets) {
+      assay.vector[i] <- DefaultAssay(so.list[[i]])
+      Idents(so.list[[i]]) <- so.list[[i]]@meta.data[["seurat_clusters"]]
+      so.list[[i]]@meta.data[["orig.ident"]] <-Idents(so.list[[i]])
+    }
+    
+    # enable parallelization
+    if ((parameter.list$n.workers$integration) > (length(so.list) - 1)){
+      parameter.list$n.workers$integration <- length(so.list) - 1
+    } 
+    if (parameter.list$n.workers$integration > 1){
+      plan(strategy = "multisession", workers = parameter.list$n.workers$integration)
+    }
+    if (parameter.list$integration.limit.memory) {
+      options(future.globals.maxSize = (parameter.list$integration.max.memory*20480/20 * 1024^2))   
+    }
+    
+    so.n <- unlist(lapply(so.list, ncol))
+    which.too.small <- names(so.n)[so.n <= parameter.list$integration.k.filter]
+    if (length(which.too.small) > 0){
+      miko_message(paste0(which.too.small, collapse = ", "), 
+                   " were removed due to insufficient number of cells (n < ", 
+                   parameter.list$integration.k.filter, ")")
+      n.datasets <- sum(so.n > parameter.list$integration.k.filter)
+    }
+    
+    miko_message("Selecting integration features...")
     
     if (parameter.list$integration.feature.select.method == "deviance"){
       so.features <- SelectDevianceFeatures(deviance.list = deviance.list)
@@ -994,65 +994,164 @@ if (length(so.list) > 1){
         miko_message(paste0(length(ag.res$artifact.gene), " artifact genes identified and omitted: ", paste(ag.res$artifact.gene, collapse = ", ")))
       }      
     }, silent = T)
-
+    
     so.list2 <- PrepSCTIntegration(object.list = so.list, 
                                    anchor.features = so.features,
                                    verbose = T)
-
-  rm(so.list); invisible({gc()})
+    
+    rm(so.list); invisible({gc()})
+    
+    # # find integration anchors
+    miko_message("Finding integration anchors...")
+    
+    if (toupper(parameter.list$integration.method) == toupper("CCA")) {
+      so.anchors <- FindIntegrationAnchors(object.list = so.list2, 
+                                           normalization.method = "SCT",
+                                           anchor.features = so.features, 
+                                           verbose = T, 
+                                           k.filter = parameter.list$integration.k.filter,  
+                                           k.anchor = parameter.list$integration.k.anchor )
+    } else if (toupper(parameter.list$integration.method) == toupper("rPCA")) {
+      # run PCA
+      so.list2 <- pbapply::pblapply(X = so.list2, FUN = function(x) {
+        x <- RunPCA(x, features = so.features, verbose = FALSE)
+      })          
+      
+      # identify anchors and integrate datasets
+      so.anchors <- FindIntegrationAnchors(object.list = so.list2, normalization.method = "SCT", 
+                                           reduction = "rpca",
+                                           k.filter = parameter.list$integration.k.filter, 
+                                           k.anchor = parameter.list$integration.k.anchor , 
+                                           anchor.features = so.features, verbose = T)
+      
+      
+      
+    }
+    
+    rm(so.list2); invisible({gc()})
+    
+    # integrate data
+    miko_message("Integrating data...")
+    so <- IntegrateData( 
+      anchorset = so.anchors, 
+      normalization.method = "SCT",
+      k.weight = parameter.list$integration.k.weight, # added 24.08.21
+      verbose = T
+    )
+    
+    # Switch to integrated assay. Variable features are automatically set during IntegrateData()
+    DefaultAssay(so) <- "integrated"
+  } else {
+    so <- so.list[[1]]
+    rm(so.list)
+  }
   
-  # # find integration anchors
-  miko_message("Finding integration anchors...")
-
-      if (toupper(parameter.list$integration.method) == toupper("CCA")) {
-        so.anchors <- FindIntegrationAnchors(object.list = so.list2, 
-                                             normalization.method = "SCT",
-                                             anchor.features = so.features, 
-                                             verbose = T, 
-                                             k.filter = parameter.list$integration.k.filter,  
-                                             k.anchor = parameter.list$integration.k.anchor )
-      } else if (toupper(parameter.list$integration.method) == toupper("rPCA")) {
-        # run PCA
-        so.list2 <- pbapply::pblapply(X = so.list2, FUN = function(x) {
-          x <- RunPCA(x, features = so.features, verbose = FALSE)
-        })          
-        
-        # identify anchors and integrate datasets
-        so.anchors <- FindIntegrationAnchors(object.list = so.list2, normalization.method = "SCT", 
-                                             reduction = "rpca",
-                                             k.filter = parameter.list$integration.k.filter, 
-                                             k.anchor = parameter.list$integration.k.anchor , 
-                                             anchor.features = so.features, verbose = T)
-        
-        
-        
-      }
-
-  rm(so.list2); invisible({gc()})
+  n.anchors.effect <- length(so.anchors@command@params[["anchor.features"]])
   
-  # integrate data
-  miko_message("Integrating data...")
-  so <- IntegrateData( 
-    anchorset = so.anchors, 
-    normalization.method = "SCT",
-    k.weight = parameter.list$integration.k.weight, # added 24.08.21
-    verbose = T
-  )
+  # remove baggage
+  rm(so.anchors);invisible({gc()})
   
-  # Switch to integrated assay. Variable features are automatically set during IntegrateData()
+}
+
+
+```
+
+```{r Scanorama integration}
+
+
+if (toupper(parameter.list$integration.method) == "SCANORAMA" ){
+  
+  library(reticulate, quietly = T)
+  
+  if (!(py_module_available("scanorama"))){
+    miko_message("Installing 'Scanorama' python module...")
+    py_install("scanorama", pip = T)
+  }
+  scanorama <- import('scanorama')
+  
+  miko_message("Merging seurat objects...")
+  so <- tryCatch({
+    merge(so.list[[1]], y = so.list[-1]) # 2-3x faster than alternative method
+  }, error = function(e){
+    return(mergeSeuratList(so.list))     # slower but robust
+  }, silent = T)
+  
+  try({
+    if (parameter.list$correct.artifact){
+      ag.res <-  findArtifactGenes(object = so.list, assay = NULL, features = so.features, 
+                                   meta.feature = "batch", umi.count.threshold = 5, difference.threshold = 30, verbose = F) 
+      so.features <- so.features[!c(so.features %in% ag.res$artifact.gene)]
+      miko_message(paste0(length(ag.res$artifact.gene), " artifact genes identified and omitted: ", paste(ag.res$artifact.gene, collapse = ", ")))
+    }      
+  }, silent = T)
+  
+  miko_message("Selecting integration features...")
+  so.features <- SelectIntegrationFeatures(object.list = so.list,
+                                           assay = rep("SCT", length(so.list)),
+                                           nfeatures = parameter.list$integration.n.genes,
+                                           fvf.nfeatures = parameter.list$integration.n.genes)
+  
+  
+  miko_message("Computing residuals for integration features...")    
+  for (i in 1:length(so.list)){
+    so.list[[i]] <- GetResidual(object = so.list[[i]],features =  so.features, assay = "SCT", replace.value = F, verbose = F)
+  }
+
+  
+  datasets <- list()
+  genes_list <- list()
+  for (i in 1:length(so.list)) {
+    datasets[[i]] <- as.matrix( Matrix::t((
+      so.list[[i]]@assays$SCT@scale.data[so.features , ]
+    )))
+    genes_list[[i]] <- colnames(datasets[[i]])
+  }
+
+  # Integration.
+  suppressMessages({
+    suppressWarnings({
+     integrated.data <- scanorama$integrate(datasets, genes_list, dimred= 50L) 
+    })
+  })
+  
+  
+  
+  # df.embed <- rbind(integrated.data[[1]])
+  df.embed <- NULL
+  for (i in 1:length(integrated.data[[1]])){
+    
+    current_embed <- (integrated.data[[1]][[i]])
+    rownames(current_embed) <- colnames(so.list[[i]])
+    colnames(current_embed) <- paste0("PC_", seq(1, ncol(current_embed)))
+    
+    df.embed <- rbind(df.embed, current_embed)
+    
+  }
+  
+  so@assays[["integrated"]] <- CreateAssayObject(counts = so@assays[["SCT"]]@counts, min.cells = 0, min.features = 0)
+  so@assays[["integrated"]]@key <- "integrated_"
+
+  
+  # set default assay
   DefaultAssay(so) <- "integrated"
-} else {
-  so <- so.list[[1]]
-  rm(so.list)
+  
+  so[["pca"]]  <- CreateDimReducObject(embeddings = df.embed,
+                                     key = "PC_",
+                                     global  = F,
+                                     loading = new(Class = "matrix"),
+                                     assay = "integrated")
+  # cluster.UMAP(so)
+
+  so <- RunUMAP(object = so, dims = 1:50)
+  
+  
+  try({
+    rm(datasets)
+    rm(so.list); 
+    invisible({gc()})
+  })
+
 }
-
-n.anchors.effect <- length(so.anchors@command@params[["anchor.features"]])
-
-# remove baggage
-rm(so.anchors);invisible({gc()})
-
-}
-
 
 ```
 
@@ -1062,7 +1161,11 @@ rm(so.anchors);invisible({gc()})
 if (toupper(parameter.list$integration.method) == "BBKNN" ){
   
   miko_message("Merging seurat objects...")
-  so <-  mergeSeuratList(so.list)
+  so <- tryCatch({
+    merge(so.list[[1]], y = so.list[-1]) # 2-3x faster than alternative method
+  }, error = function(e){
+    return(mergeSeuratList(so.list))     # slower but robust
+  }, silent = T)
   
   try({
     if (parameter.list$correct.artifact){
@@ -1080,12 +1183,12 @@ if (toupper(parameter.list$integration.method) == "BBKNN" ){
                                            fvf.nfeatures = parameter.list$integration.n.genes)
   
   miko_message("Computing residuals in merged object...")    
-  so <- GetResidual(object = so,features =  so.features, assay = "SCT", replace.value = T)
+  so <- GetResidual(object = so,features =  so.features, assay = "SCT", replace.value = T, verbose = F)
   
   av.feat <- so.features[so.features %in% rownames(so@assays[["SCT"]]@scale.data)]
   
-  miko_message("Running PCA...")
-  so <- RunPCA(so, features = av.feat, assay = "SCT")
+  miko_message("Running PCA on merged object...")
+  so <- RunPCA(so, features = av.feat, assay = "SCT", verbose = F)
   
   so <- runBBKNN(
     object = so,
@@ -1095,14 +1198,27 @@ if (toupper(parameter.list$integration.method) == "BBKNN" ){
     do.umap = F,
     verbose = T
   )
-
+  
+  # create pseudo-counts to ensure integrated assay exists (required for Seurat functionality, but doesn't actually contain real data)
+  so@assays[["integrated"]] <- CreateAssayObject(counts = so@assays[["SCT"]]@counts, min.cells = 0, min.features = 0)
+  so@assays[["integrated"]]@key <- "integrated_"
   names(so@graphs)[which(names(so@graphs) %in% "bbknn")] <- "integrated_snn"
-  so@assays[["integrated"]] <- so@assays[["SCT"]]
-  so@assays[["integrated"]]@scale.data <- matrix()
-  so@assays[["integrated"]]@counts <- as.sparse( matrix())
-  so@assays[["integrated"]]@data <- as.sparse( matrix())
+  so@graphs[["integrated_snn"]]@assay.used <- "integrated"
+  
+  # set default assay
   DefaultAssay(so) <- "integrated"
-  so <- RunUMAP(so, graph = "integrated_snn")
+  so <- tryCatch({
+    RunUMAP(object = so, graph = "integrated_snn", densmap = T)
+  }, error = function(e){
+    return(RunUMAP(object = so, graph = "integrated_snn"))
+  })
+  
+  # cluster.UMAP(so)
+  suppressWarnings({
+    suppressMessages({
+      so <- UpdateSeuratObject(so)    
+    })
+  })
   
   rm(so.list); invisible({gc()})
   
@@ -1127,11 +1243,14 @@ try({
 
 ```{r PCA}
 
+
 # Run PCA
-if (toupper(parameter.list$integration.method) != "BBKNN" ){
+if (!(toupper(parameter.list$integration.method) %in%  c("BBKNN", "SCANORAMA") )){
   miko_message("Running PCA...")
   so <- RunPCA(so, verbose = FALSE)
 }
+
+if (!(toupper(parameter.list$integration.method) %in%  c("SCANORAMA") )){
 
 # proportion of variance explained by each PC 
 pc.std <- so@reductions[["pca"]]@stdev
@@ -1174,6 +1293,10 @@ plt.scree2 <- ggplot(scree.var, aes(x = pc.id, y = pc.cum_sum)) +
   xlab("Principal Components") + 
   ylab("Cumulative Variance Explained (proportion)") + theme_miko()
 
+} else {
+  plt.scree1 <- plt.scree2 <- NULL
+}
+
 
 if (parameter.list$print.inline){
   print(plt.scree1)
@@ -1184,9 +1307,12 @@ if (parameter.list$print.inline){
 
 ```{r cluster data}
 # Find clusters ---------------------------------------------------------------------------
-if (toupper(parameter.list$integration.method) != "BBKNN" ){
+if (toupper(parameter.list$integration.method) %in% c("CCA", "RPCA") ){
   miko_message("Finding nearest neighbors...")
   so <- FindNeighbors(object = so, reduction = "pca", dims = 1:pc.n_relevant_components)
+} else if (toupper(parameter.list$integration.method) %in% c("SCANORAMA") ){
+   miko_message("Finding nearest neighbors...")
+    so <- FindNeighbors(object = so, reduction = "pca", dims = 1:ncol(so@reductions[["pca"]]@cell.embeddings))
 }
 
 # integration.cluster.resolution <- 1
@@ -1199,8 +1325,9 @@ so <- FindClusters(object = so, resolution = parameter.list$integration.cluster.
 ```{r run_umap, fig.width=8, fig.height=8}
 
 # Run umap and generate plot --------------------------------------------------------------------
-nDim_umap <- pc.n_relevant_components
-if (toupper(parameter.list$integration.method) != "BBKNN" ){
+
+if (toupper(parameter.list$integration.method) %in% c("CCA", "RPCA") ){
+  nDim_umap <- pc.n_relevant_components
   so <- RunUMAP(so, dims = 1:nDim_umap)
 }
 plt.integration <- DimPlot(so, reduction = "umap",
@@ -1320,7 +1447,7 @@ for (i in 1:length(plt.original_overlay)){
     # theme_miko(color.luminescence = 40) +
     theme_void() + 
     theme(legend.position = "none")
-
+  
 }
 
 plt.ncol <- if (n.datasets > 3) 4 else  n.datasets
@@ -1372,29 +1499,36 @@ try({
   mm.success <- T
 }, silent = T)
 
+
+
+
+
 miko_message("Calculating local structure presevation...") #####################
-
-
-if (toupper(parameter.list$integration.method) != "BBKNN" ){
-lstruct <- LocalStruct(
-  object = so.sub,
-  grouping.var = "batch",
-  idents = NULL,
-  neighbors = 100,
-  reduction = "pca",
-  reduced.dims = 1:30,
-  orig.dims = 1:30,
-  verbose = F
-)
-
-df.ls <- bind_rows(lapply(1:length(lstruct), function(x){
-  ind <- x[[1]]
-  data.frame(
-    batch = names(lstruct)[ind],
-    local_structure = lstruct[[ind]]
+ls.success <- F
+try({
+  lstruct <- LocalStruct(
+    object = so.sub,
+    grouping.var = "batch",
+    idents = NULL,
+    neighbors = 100,
+    reduction = "pca",
+    reduced.dims = 1:30,
+    orig.dims = 1:30,
+    verbose = F
   )
-}))
-}
+  
+  df.ls <- bind_rows(lapply(1:length(lstruct), function(x){
+    ind <- x[[1]]
+    data.frame(
+      batch = names(lstruct)[ind],
+      local_structure = lstruct[[ind]]
+    )
+  }))
+  
+  ls.success <- T
+}, silent = T)
+
+
 
 
 if (mm.success){
@@ -1414,48 +1548,58 @@ if (mm.success){
   plt.mm <- NULL
 }
 
-if (toupper(parameter.list$integration.method) != "BBKNN" ){
-label.median.ls <- paste0("Median: ", signif(median(df.ls$local_structure), 2), " (dashed)")
-label.mean.ls <- paste0("Mean: ", signif(mean(df.ls$local_structure), 2), " (solid)")
-
-plt.ls <- df.ls %>%
-  ggplot(aes(x = local_structure, fill = batch)) + 
-  geom_density(alpha = 0.3, color = NA) + 
+if (ls.success){
+  label.median.ls <- paste0("Median: ", signif(median(df.ls$local_structure), 2), " (dashed)")
+  label.mean.ls <- paste0("Mean: ", signif(mean(df.ls$local_structure), 2), " (solid)")
+  
+  plt.ls <- df.ls %>%
+    ggplot(aes(x = local_structure, fill = batch)) + 
+    geom_density(alpha = 0.3, color = NA) + 
     geom_vline(xintercept = signif(median(df.ls$local_structure)), linetype = "dashed", color = '#F39C12') + 
-  geom_vline(xintercept = signif(mean(df.ls$local_structure)), color = '#F39C12') + 
-  theme_miko(legend = T) + 
-  labs(x = "Local Structure Preservation", y = "Density", fill = "Batch",
-       title = "Local Structure Preservation",
-       subtitle = paste0(label.mean.ls, ", ", label.median.ls))
+    geom_vline(xintercept = signif(mean(df.ls$local_structure)), color = '#F39C12') + 
+    theme_miko(legend = T) + 
+    labs(x = "Local Structure Preservation", y = "Density", fill = "Batch",
+         title = "Local Structure Preservation",
+         subtitle = paste0(label.mean.ls, ", ", label.median.ls))
 } else {
   plt.ls <- NULL
 }
 
 
-if (toupper(parameter.list$integration.method) != "BBKNN" ){
 miko_message("Calculating conservation of highly-variable genes...") ###########
+hvg.success <- F
 
-var.gene.list$integrated <- VariableFeatures(so)
+try({
+  if (length(VariableFeatures(so)) == 0){
+    so <- FindVariableFeatures(so)
+    var.gene.list$integrated <- VariableFeatures(so)
+  } else {
+    var.gene.list$integrated <- VariableFeatures(so)
+  }
+  
+  
+  jac.sim <- jaccardSimilarityMatrix(var.gene.list)
+  
+  df.jac <- data.frame(
+    batch = colnames(jac.sim),
+    jaccard_similarity = jac.sim["integrated", ]
+  )
+  
+  df.jac <- df.jac %>% dplyr::filter(batch != "integrated")
+  
+  
+  
+  plt.jac <- df.jac %>% 
+    ggplot(aes(x= batch, y = jaccard_similarity)) + 
+    geom_bar(stat =  "identity", fill = '#2C3E50') + 
+    theme_miko(x.axis.rotation =rotate.x ) + 
+    labs(x = "Batch", y = "Jaccard Similarity", title = "HVG Preservation", subtitle = "HVG overlap, pre- vs. post-integration")
+  hvg.success <- T
+}, silent = T)
 
-jac.sim <- jaccardSimilarityMatrix(var.gene.list)
 
-df.jac <- data.frame(
-  batch = colnames(jac.sim),
-  jaccard_similarity = jac.sim["integrated", ]
-)
+if (!hvg.success) plt.jac <- NULL
 
-df.jac <- df.jac %>% dplyr::filter(batch != "integrated")
-
-
-
-plt.jac <- df.jac %>% 
-  ggplot(aes(x= batch, y = jaccard_similarity)) + 
-  geom_bar(stat =  "identity", fill = '#2C3E50') + 
-  theme_miko(x.axis.rotation =rotate.x ) + 
-  labs(x = "Batch", y = "Jaccard Similarity", title = "HVG Preservation", subtitle = "HVG overlap, pre- vs. post-integration")
-} else {
-  plt.jac <- NULL
-}
 
 miko_message("Calculating adjusted rand indices...") ###########################
 
@@ -1489,11 +1633,12 @@ miko_message("Calculating diversity index...") #################################
 df.tab <- data.frame(table(so@meta.data[["seurat_clusters"]]))
 df.tab$p <- df.tab$Freq/sum(df.tab$Freq)
 df.div <- bind_rows(data.frame(
-                      batch = "integrated",
-                      shannon_index = -sum(df.tab$p * log(df.tab$p)),
-                      k_clust = nrow(df.tab)
-                    ),df.div
-                    )
+  batch = "integrated",
+  shannon_index = -sum(df.tab$p * log(df.tab$p)),
+  k_clust = nrow(df.tab)
+),df.div
+)
+df.div <- unique(df.div)
 
 if (nrow(df.div) > 1){
   
@@ -1521,29 +1666,30 @@ if (nrow(df.div) > 1){
   }, silent = T)
   
   if (!div.success) plt.diversity <- plt.nclust <- NULL
-
+  
 } else {
   plt.diversity <- plt.nclust <- NULL
 }
 
-  
 
-if (!is.null(plt.diversity)){
- plt.performance <- cowplot::plot_grid(plt.mm, plt.ls, plt.jac,plt.ari,plt.diversity, 
-                                       plt.nclust,  nrow = 1, rel_widths = c(1, 1.25, 1, 1, 1, 1), align = "h", labels = c("H", "I", "J", "K", "L", "M"))
-} else {
-   plt.performance <- cowplot::plot_grid(plt.mm, plt.ls, plt.jac,  nrow = 1, rel_widths = c(1, 1.25, 1), align = "h", labels = c("H", "I", "J"))
-}
+
+# if (!is.null(plt.diversity)){
+plt.performance <- cowplot::plot_grid(plt.mm, plt.ls, plt.jac,plt.ari,plt.diversity, 
+                                      plt.nclust,  nrow = 1, rel_widths = c(1, 1.25, 1, 1, 1, 1), align = "h", labels = c("H", "I", "J", "K", "L", "M"))
+# } else {
+#    plt.performance <- cowplot::plot_grid(plt.mm, plt.ls, plt.jac,  nrow = 1, rel_widths = c(1, 1.25, 1), align = "h", labels = c("H", "I", "J"))
+# }
 
 if (parameter.list$print.inline){
   plt.performance
+  
 }
 
 ```
 
 ```{r umap by cluster, warning=FALSE}
 
-
+# DefaultAssay(so) <- "SCT"
 plt.umap_by_cluster <- cluster.UMAP(so= so, group.by = "seurat_clusters",  pt.size = 0.02)
 
 plt.umap_by_cluster <- plt.umap_by_cluster + 
@@ -1601,7 +1747,10 @@ u.batches <- unique(batches)
 n.batches <- length(u.batches)
 
 color_count <- max(n.batches)
-my_cols = colorRampPalette(brewer.pal(color_count, "Set2"))(color_count)
+suppressWarnings({
+  my_cols = colorRampPalette(brewer.pal(color_count, "Set2"))(color_count)
+})
+
 
 # ensure that clusters are ordered numerically
 reordered_clusters <- order(as.numeric(as.vector(df.cluster_annotations$cluster)))
@@ -1626,7 +1775,6 @@ try({
     guides(fill = guide_legend(override.aes = list(size = guide.size))) + 
     theme(legend.text=element_text(size=rel(text.size))) 
 }, silent = T)
-# scale_fill_manual(values = my_cols) + 
 
 
 if (parameter.list$print.inline){
@@ -1641,7 +1789,7 @@ if (parameter.list$print.inline){
 ```{r central log}
 
 # update central log
- run.id <- NULL
+run.id <- NULL
 if (parameter.list$developer){
   if (!exists("user")) user <- "guest"
   clog.update.success <- F
@@ -1751,8 +1899,8 @@ try({
 ```{r n pie chart}
 
 plt.pie <- cowplot::plot_grid(plt.pie + theme(legend.position = "bottom") +guides(fill=guide_legend(ncol = 1)) +
-      theme(plot.title = element_text(hjust = 0.5)) +
-      theme(plot.subtitle = element_text(hjust = 0.5)), labels = "C")
+                                theme(plot.title = element_text(hjust = 0.5)) +
+                                theme(plot.subtitle = element_text(hjust = 0.5)), labels = "C")
 
 plt.pie
 ```
@@ -1828,10 +1976,10 @@ try({
 
 ```{r plt.PCA, fig.width=8, fig.height=4, dpi = 72}
 
-  
-  if (is.null(plt.diversity)){
-plt.scree.combo <- cowplot::plot_grid(plt.scree1, plt.scree2, ncol=2, labels = c("K", "L"))
-  } else {
+
+if (is.null(plt.diversity)){
+  plt.scree.combo <- cowplot::plot_grid(plt.scree1, plt.scree2, ncol=2, labels = c("K", "L"))
+} else {
   plt.scree.combo <- cowplot::plot_grid(plt.scree1, plt.scree2, ncol=2, labels = c("N", "O"))
 }
 print(plt.scree.combo)
@@ -1987,7 +2135,7 @@ df.log <- addLogEntry("PDFs Saved", parameter.list$save.pdf, df.log, "save.pdf")
 df.log <- addLogEntry("Run Identifier", run.id, df.log, "run.id")
 if (parameter.list$developer){
   df.log <- addLogEntry("User", user, df.log, "user")
-df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
+  df.log <- addLogEntry("Central Log Updated", clog.update.success, df.log, "clog.update.success")
 }
 parameter.list$save.filename <- paste0(run.id, "_", parameter.list$save.filename)
 df.log <- addLogEntry("Output File", (parameter.list$save.filename), df.log, "save.filename")
