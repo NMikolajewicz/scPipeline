@@ -36,7 +36,7 @@ invisible({gc()})
 start.time <- proc.time()
 
 # List of packages to load
-packages2load <- c("Seurat", "sctransform",
+packages2load <- c("Seurat", "sctransform", "Matrix", "reticulate",
                    "dplyr", "tidyr", "RColorBrewer", "ggplot2", "gridExtra", 
                    "DT", "flexdashboard", "future", "biomaRt", "foreach", "parallel", "doParallel", "scMiko", "reshape2", "glmGamPoi")
 # load packages
@@ -90,6 +90,7 @@ input.data <- list(
 
 
 ```
+
 
 
 ```{r parameter assignment and assertion statements}
@@ -152,15 +153,31 @@ df.log <- addLogEntry("Integrated Data (.Rdata)", ((as.vector(unlist(lapply(inpu
 df.log <- addLogEntry("Integrated by", ((as.vector(unlist(lapply(input.data, function(x) x$integrate.by))))), df.log, "input.data")
 df.log <- addLogEntry("Data Labels", (input.labels), df.log, "input.labels")
 df.log <- addLogEntry("Correct artifacts", (parameter.list$correct.artifact), df.log, "correct.artifact")
-df.log <- addLogEntry("K Filter", (parameter.list$integration.k.filter), df.log, "integration.k.filter")
-df.log <- addLogEntry("K Anchor", (parameter.list$integration.k.anchor), df.log, "integration.k.anchor")
-df.log <- addLogEntry("K Weight", (parameter.list$integration.k.weight), df.log, "integration.k.weight")
+
+if (toupper(parameter.list$integration.method) %in% c("RPCA", "CCA")){
+  if (!("integration.k.filter" %in% names(parameter.list)))  parameter.list$integration.k.filter <- 200
+  if (!("integration.k.anchor" %in% names(parameter.list)))  parameter.list$integration.k.anchor <- 10
+  if (!("integration.k.weight" %in% names(parameter.list)))  parameter.list$integration.k.weight <- 100
+  df.log <- addLogEntry("K Filter", (parameter.list$integration.k.filter), df.log, "integration.k.filter")
+  df.log <- addLogEntry("K Anchor", (parameter.list$integration.k.anchor), df.log, "integration.k.anchor")
+  df.log <- addLogEntry("K Weight", (parameter.list$integration.k.weight), df.log, "integration.k.weight")
+}
+
+if (!("integration.n.genes" %in% names(parameter.list)))  parameter.list$integration.n.genes <- 2000
 df.log <- addLogEntry("N Integration Genes", (parameter.list$integration.n.genes), df.log, "integration.n.genes")
 df.log <- addLogEntry("N workers", (paste(names(parameter.list$n.workers), "=", 
                                           (purrr::map_dbl(parameter.list$n.workers,  1)), "workers",  collapse = "; ")), df.log, "n.workers")
+
+if (!("pca.var.threshold" %in% names(parameter.list)))  parameter.list$pca.var.threshold <- 0.9
 df.log <- addLogEntry("Proportion of variance explained by PCA",parameter.list$pca.var.threshold, df.log, "pca.var.threshold")
+
+if (!("integration.cluster.resolution" %in% names(parameter.list)))  parameter.list$integration.cluster.resolution <- 0.35
 df.log <- addLogEntry("cluster resolution",parameter.list$integration.cluster.resolution, df.log, "integration.cluster.resolution")
+
+if (!("integration.limit.memory" %in% names(parameter.list)))  parameter.list$integration.limit.memory <- T
 df.log <- addLogEntry("memory limit",parameter.list$integration.limit.memory, df.log, "integration.limit.memory")
+
+if (!("integration.max.memory" %in% names(parameter.list)))  parameter.list$integration.max.memory <- 150
 df.log <- addLogEntry("max memory (Gb)",parameter.list$integration.max.memory, df.log, "integration.max.memory")
 
 
@@ -1002,9 +1019,10 @@ if ((toupper(parameter.list$integration.method) %in% c("CCA", "RPCA")  )){
     rm(so.list); invisible({gc()})
     
     # # find integration anchors
-    miko_message("Finding integration anchors...")
+    
     
     if (toupper(parameter.list$integration.method) == toupper("CCA")) {
+      miko_message("Finding integration anchors...")
       so.anchors <- FindIntegrationAnchors(object.list = so.list2, 
                                            normalization.method = "SCT",
                                            anchor.features = so.features, 
@@ -1013,11 +1031,13 @@ if ((toupper(parameter.list$integration.method) %in% c("CCA", "RPCA")  )){
                                            k.anchor = parameter.list$integration.k.anchor )
     } else if (toupper(parameter.list$integration.method) == toupper("rPCA")) {
       # run PCA
+      miko_message("Running PCA for each object...")
       so.list2 <- pbapply::pblapply(X = so.list2, FUN = function(x) {
         x <- RunPCA(x, features = so.features, verbose = FALSE)
       })          
       
       # identify anchors and integrate datasets
+      miko_message("Finding integration anchors...")
       so.anchors <- FindIntegrationAnchors(object.list = so.list2, normalization.method = "SCT", 
                                            reduction = "rpca",
                                            k.filter = parameter.list$integration.k.filter, 
@@ -1035,7 +1055,7 @@ if ((toupper(parameter.list$integration.method) %in% c("CCA", "RPCA")  )){
     so <- IntegrateData( 
       anchorset = so.anchors, 
       normalization.method = "SCT",
-      k.weight = parameter.list$integration.k.weight, # added 24.08.21
+      k.weight = parameter.list$integration.k.weight, 
       verbose = T
     )
     
