@@ -36,7 +36,7 @@ invisible({gc()})
 start.time <- proc.time()
 
 # load packages
-packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", "grid", "plotly","DT", "flexdashboard", "ggpmisc", "future", "foreach", "doParallel","AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "ggplot2", "reactome.db","schex", "RColorBrewer", "cowplot", "viridis", "viridisLite", "presto", "variancePartition", "lme4", "ggdendro")
+packages2load <- c("scMiko", "Seurat", "plyr",  "dplyr", "tidyr", "reshape2", "grid", "plotly","DT", "flexdashboard", "ggpmisc", "future", "foreach", "doParallel","AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "fgsea", "ggplot2", "reactome.db","schex", "RColorBrewer", "cowplot", "viridis", "viridisLite", "presto", "variancePartition", "lme4", "ggdendro", "heatmaply")
 
 # load packages
 invisible(lapply(packages2load, library, character.only = T, quietly = T))
@@ -423,7 +423,7 @@ if (parameter.list$feature.format == 2){
       dplyr::top_n(top.n.deg, rank.ncdi)
     markers_of_interest <- unique(as.character(deg.gene.top$feature.y))
   }
-  
+  miko_message(paste0(ulength(markers_of_interest), " genes identified using ", parameter.list$discovery.method, " method"))
 } 
 
 
