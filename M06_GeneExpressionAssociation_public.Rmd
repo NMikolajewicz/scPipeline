@@ -419,7 +419,8 @@ if (parameter.list$feature.format == 2){
                                n.workers = parameter.list$n.workers, verbose = T)   
     deg.gene.top <- deg.gene %>%
       dplyr::group_by(feature.x) %>%
-      dplyr::top_n(top.n.deg, ncdi)
+      dplyr::mutate(rank.ncdi = rank(ncdi, ties.method = "random")) %>%
+      dplyr::top_n(top.n.deg, rank.ncdi)
     markers_of_interest <- unique(as.character(deg.gene.top$feature.y))
   }
   
