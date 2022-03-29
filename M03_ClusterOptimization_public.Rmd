@@ -37,7 +37,7 @@ start.time <- proc.time()
 
 # List of packages to load
 packages2load <- c("scMiko", "Seurat",
-                   "plyr", "dplyr", "tidyr", "reshape2", "RColorBrewer", "ggplot2", "gridExtra", 
+                   "plyr", "dplyr", "tidyr", "reshape2", "RColorBrewer", "ggplot2", "gridExtra", "cluster", "factoextra",
                    "DT", "flexdashboard", "ggpmisc", "ggpmisc", "ggExtra", "grid", 
                     "zoo",    "future", "cluster", "doParallel", "parallel", "foreach",  "igraph", "presto")
 
