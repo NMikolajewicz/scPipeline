@@ -482,6 +482,7 @@ ms.list <- multiSpecificity(object = so.query,
                             deg_prefilter = T, 
                              cdi_bins = seq(0, 1, by = 0.01), 
                             min.pct = 0.1, 
+                            geosketch.subset = T,
                             n.workers = parameter.list$n.workers$deg, 
                             return_dotplot = T,  
                             verbose = T)
