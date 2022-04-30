@@ -385,10 +385,10 @@ for (i in 1:length(input_data)){
     } 
   }
   # unlist outputs
-  so.list[[i]] <- output.list[[1]]
+  so.list[[i]] <- output.list[["object"]]
   
-  if ("gnames" %in% names(output.list)){
-    gNames.list.list[[i]] <- output.list[[2]]
+  if ("genes" %in% names(output.list)){
+    gNames.list.list[[i]] <- output.list[["genes"]]
   } else {
     gNames.list.list[[i]] <- prepGeneList(so = so.list[[i]], NULL)
   }
@@ -748,7 +748,7 @@ plt.QC_violin <- tryCatch({
 })
 
 if (parameter.list$print.inline){
-  print(plt.QC_violin) 
+  print(plt.QC_violin)
 }
 
 
