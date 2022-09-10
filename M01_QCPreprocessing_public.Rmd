@@ -343,6 +343,7 @@ for (i in 1:length(input_data)){
                                             meta.data =  output.list[["so"]]@meta.data)
       if (!("Barcode" %in% colnames(output.list$so@meta.data))) output.list$so@meta.data$Barcode = "unspecified"
       if (!("Species" %in% colnames(output.list$so@meta.data))) output.list$so@meta.data$Species = "unspecified"
+      names(output.list) <- c("object","genes")
     } else if (grepl(".Rdata", input_data[i])){
       load(file = input_data[i])
       if (exists("so")){
@@ -351,8 +352,9 @@ for (i in 1:length(input_data)){
                                               meta.data =  so@meta.data)
         output.list$gnames = NULL
         if (!("Barcode" %in% colnames(output.list$so@meta.data))) output.list$so@meta.data$Barcode = "unspecified"
-        if (!("Species" %in% colnames(output.list$so@meta.data))) output.list$so@meta.data$Species = "unspecified"       
-        try({rm(so)}, silent = T); invisible({gc()})
+        if (!("Species" %in% colnames(output.list$so@meta.data))) output.list$so@meta.data$Species = "unspecified"
+        names(output.list) <- c("object","genes")
+        try({rm(so)}, silent = T); invisible({gc()})        
       } else {
         stop("If importing seurat object from .Rdata file, seurat object must be named 'so'.")
       }
