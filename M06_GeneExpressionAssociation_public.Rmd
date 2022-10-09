@@ -1284,7 +1284,7 @@ if (!is.null(dim(exp.mat.av))) exp.mat.av <- exp.mat.av[complete.cases(exp.mat.a
 
 # clust.success <- F
 if (exists("exp.mat.av")){
-  if (class(exp.mat.av) == "matrix") {
+  if (any(class(exp.mat.av) == "matrix")) {
   try({
     plt.heat.availableGenes <-  heatmaply::heatmaply(x = t(exp.mat.av),
                                                      main = "Feature Expression",
@@ -1296,6 +1296,7 @@ if (exists("exp.mat.av")){
 
 } 
 }
+
 
 if (exists("exp.mat.scale.processed")){
     gene.order.av <- rownames(exp.mat.scale.processed)[rownames(exp.mat.scale.processed) %in% available_markers]
@@ -1787,7 +1788,7 @@ Row {.tabset}
 ```{r correlation table - top}
 
 
-if (class(cor.mat.sub) == "matrix"){
+if (any(class(cor.mat.sub) == "matrix")){
   df.cor.list.sub <- df.cor.list[df.cor.list$genes %in% rownames(cor.mat.sub), ]
 } else if  (class(cor.mat.sub) == "numeric"){
   df.cor.list.sub <- df.cor.list[df.cor.list$genes %in% names(cor.mat.sub), ]
