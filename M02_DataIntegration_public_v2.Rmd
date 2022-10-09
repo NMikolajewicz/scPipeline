@@ -36,7 +36,7 @@ invisible({gc()})
 start.time <- proc.time()
 
 # List of packages to load
-packages2load <- c("Seurat", "sctransform", "Matrix", "reticulate",
+packages2load <- c("Seurat", "sctransform", "Matrix", "reticulate", "ggthemes",
                    "dplyr", "tidyr", "RColorBrewer", "ggplot2", "gridExtra", 
                    "DT", "flexdashboard", "future", "biomaRt", "foreach", "parallel", "doParallel", "scMiko", "reshape2", "glmGamPoi")
 # load packages
