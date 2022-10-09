@@ -954,7 +954,7 @@ if (exists("df.cor.list")) {
     }))))
     cor.mat.sub <- cor.mat[rownames(cor.mat) %in% top.cor, ]
     
-    if (class(cor.mat.sub) == "numeric"){
+    if (any(class(cor.mat.sub) == "numeric")){
       names(cor.mat.sub) <- rownames(cor.mat)[rownames(cor.mat) %in% top.cor]
     } else {
       rownames(cor.mat.sub) <- rownames(cor.mat)[rownames(cor.mat) %in% top.cor] 
@@ -1175,7 +1175,6 @@ if (which.enrichment == "hg"){
 
 }
 
-
 ```
 
 ```{r combine expression plots v2, fig.height=15, fig.width=30}
@@ -1284,7 +1283,8 @@ if (!is.null(dim(exp.mat.av))) exp.mat.av <- exp.mat.av[complete.cases(exp.mat.a
 ```{r create exp heatmap object , include= F}
 
 # clust.success <- F
-if (class(exp.mat.av) == "matrix") {
+if (exists("exp.mat.av")){
+  if (class(exp.mat.av) == "matrix") {
   try({
     plt.heat.availableGenes <-  heatmaply::heatmaply(x = t(exp.mat.av),
                                                      main = "Feature Expression",
@@ -1295,8 +1295,13 @@ if (class(exp.mat.av) == "matrix") {
   }, silent = T)
 
 } 
-  gene.order.av <- rownames(exp.mat.scale.processed)[rownames(exp.mat.scale.processed) %in% available_markers]
+}
+
+if (exists("exp.mat.scale.processed")){
+    gene.order.av <- rownames(exp.mat.scale.processed)[rownames(exp.mat.scale.processed) %in% available_markers]
   cluster.order.av <- colnames(exp.mat.scale.processed)
+}
+
   
   try({
     if (all(plt.heat.availableGenes[["x"]][["layout"]][["xaxis"]][["ticktext"]] %in% gene.order.av)){
@@ -1380,7 +1385,10 @@ df.annotation_clean <- NULL
 
 try({
 
-citation.result <- citationCheck(gene.query = available_markers)
+  suppressWarnings({
+    citation.result <- citationCheck(gene.query = available_markers)
+  })
+
 df.citation <- citation.result[["df.pubmed"]]
 colnames(df.citation) <- c("GENE", "N.CITATIONS")
 
