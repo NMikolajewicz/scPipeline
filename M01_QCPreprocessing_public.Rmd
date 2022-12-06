@@ -69,7 +69,7 @@ parameter.list <- list(
   correct.artifact = T,
   feature.select.method = "hvg",             # options: hvg (recommended), deviance
   scale.method = "sct",                      # option: "sct" (recommended), "null_residuals" or "nfs"
-  normalization_method_ps = "SCT"            # "NFS" or "SCT"
+  normalization_method_ps = "SCT",            # "NFS" or "SCT"
   pca.method = "pca",                        # option: pca (recommended), glmpca
   pca.component.select.method = "cum_var",   # options" cum_var, elbow
   pca.var.threshold = 0.9,
