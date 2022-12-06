@@ -68,7 +68,8 @@ parameter.list <- list(
   vars2regress = c("percent.mt"), 
   correct.artifact = T,
   feature.select.method = "hvg",             # options: hvg (recommended), deviance
-  scale.method = "sct",                      # option: sct (recommended), null_residuals
+  scale.method = "sct",                      # option: "sct" (recommended), "null_residuals" or "nfs"
+  normalization_method_ps = "SCT"            # "NFS" or "SCT"
   pca.method = "pca",                        # option: pca (recommended), glmpca
   pca.component.select.method = "cum_var",   # options" cum_var, elbow
   pca.var.threshold = 0.9,
@@ -818,7 +819,6 @@ if (parameter.list$print.inline){
 ```{r c16 - normalize_data, warning = FALSE, include = FALSE}
 
 # Run data normalization
-normalization_method_ps <- "SCT" # "NFS" or "SCT"
 
 if ("conserve.memory" %in% names(parameter.list) ){
   if (is.logical(parameter.list$conserve.memory)){
