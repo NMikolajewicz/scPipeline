@@ -68,7 +68,8 @@ parameter.list <- list(
   vars2regress = c("percent.mt"), 
   correct.artifact = T,
   feature.select.method = "hvg",             # options: hvg (recommended), deviance
-  scale.method = "sct",                      # option: sct (recommended), null_residuals
+  scale.method = "sct",                      # option: "sct" (recommended), "null_residuals" or "nfs"
+  normalization_method_ps = "SCT",            # "NFS" or "SCT"
   pca.method = "pca",                        # option: pca (recommended), glmpca
   pca.component.select.method = "cum_var",   # options" cum_var, elbow
   pca.var.threshold = 0.9,
@@ -818,7 +819,6 @@ if (parameter.list$print.inline){
 ```{r c16 - normalize_data, warning = FALSE, include = FALSE}
 
 # Run data normalization
-normalization_method_ps <- "SCT" # "NFS" or "SCT"
 
 if ("conserve.memory" %in% names(parameter.list) ){
   if (is.logical(parameter.list$conserve.memory)){
@@ -859,7 +859,7 @@ if (length(cov) > 0){
 
 so <- tryCatch({
  scNormScale(object = so, 
-              method = normalization_method_ps, 
+              method = parameter.list$normalization_method_ps, 
               vars2regress = parameter.list$vars2regress,
               n.workers = parameter.list$nworkers,  
               max.memory = (max.memory*20480/20 * 1024^2), 
@@ -874,7 +874,7 @@ so <- tryCatch({
     
     try({
       so <- scNormScale(object = so, 
-                        method = normalization_method_ps, 
+                        method = parameter.list$normalization_method_ps, 
                         vars2regress = parameter.list$vars2regress,
                         n.workers = parameter.list$nworkers,  
                         max.memory = (max.memory*20480/20 * 1024^2), 
@@ -885,9 +885,9 @@ so <- tryCatch({
     }, silent = T)
     
     if (!is.success){
-      normalization_method_ps <- "NFS"  # "NFS" 
+      parameter.list$normalization_method_ps <- "NFS"  # "NFS" 
       so <- scNormScale(object = so, 
-                        method = normalization_method_ps, 
+                        method = parameter.list$normalization_method_ps, 
                         vars2regress = parameter.list$vars2regress,
                         n.workers = parameter.list$nworkers,  
                         max.memory = (max.memory*20480/20 * 1024^2), 
@@ -910,10 +910,10 @@ nassay <- DefaultAssay(so)
 var.gene.orig <- so@assays[[nassay]]@var.features
 
 if (nassay == "RNA"){
- normalization_method_ps = "NFS"
+ parameter.list$normalization_method_ps = "NFS"
  parameter.list$scale.method <- "nfs"
 } else if (nassay == "SCT"){
-  normalization_method_ps = "SCT"
+  parameter.list$normalization_method_ps = "SCT"
   parameter.list$scale.method <- "sct"
 }
 
@@ -1467,7 +1467,7 @@ if (parameter.list$print.inline) {
 ```
 ```{r c21 - variable gene list}
 
-if (normalization_method_ps == "SCT"){
+if (parameter.list$normalization_method_ps == "SCT"){
   df.var.meta <- so@assays[["SCT"]]@meta.features
   df.var.model <- so@assays[["SCT"]]@SCTModel.list[["model1"]]@feature.attributes
   var.gene <- so@assays[["SCT"]]@var.features
@@ -1623,9 +1623,9 @@ if (do.dev){
 ```{r analysis log}
 
 # Normalization Method #
-if (normalization_method_ps == "NFS"){
+if (parameter.list$normalization_method_ps == "NFS"){
   norm_method <- "normalize, find features, scale"
-} else if (normalization_method_ps == "SCT"){
+} else if (parameter.list$normalization_method_ps == "SCT"){
   norm_method <- "SCT"
 }
 df.log <- addLogEntry("Normalization Method", norm_method, df.log, "norm_method")
