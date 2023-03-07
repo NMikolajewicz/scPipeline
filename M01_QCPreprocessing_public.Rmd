@@ -395,9 +395,9 @@ for (i in 1:length(input_data)){
     gNames.list.list[[i]] <- prepGeneList(so = so.list[[i]], NULL)
   }
   
-  if ((unique(so.list[[i]]@meta.data[["Barcode"]]) == "unspecified") ){
+  if (all((unique(so.list[[i]]@meta.data[["Barcode"]]) == "unspecified") )){
     so.list[[i]]@meta.data[["Barcode"]] <- paste("T", i, sep = "")
-  } else if (is.na(unique(so.list[[i]]@meta.data[["Barcode"]]))){
+  } else if (all(is.na(unique(so.list[[i]]@meta.data[["Barcode"]])))){
     stop("Barcodes incorrectly specified") 
   }
   
