@@ -332,7 +332,7 @@ import.list <- foreach(i = 1:length(input.files), .packages = c("scMiko", "Seura
   if (!exists("gNames.list")) gNames.list <- prepGeneList(so, objects())
   
   # subset data (if subgroup specified)
-  if ((!is.na(input.data[[input.label]]$meta.feature.name)) & (!is.na(input.data[[input.label]]$meta.feature.filter))){
+  if ((any(!is.na(input.data[[input.label]]$meta.feature.name))) & (any(!is.na(input.data[[input.label]]$meta.feature.filter)))){
     subsetting.df <- data.frame(field = input.data[[input.label]]$meta.feature.name,
                                 subgroups = input.data[[input.label]]$meta.feature.filter)
     so <- preIntegrationSubsetting(so, subsetting.df)
